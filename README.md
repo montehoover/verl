@@ -1,3 +1,18 @@
+# Verl for Guardian Models
+
+## Quickstart
+1. Setup environment
+   ```
+   module load cuda
+   pip install -r requirements.txt
+   pip install flash-attn --no-build-isolation
+   pip install -e .[vllm]
+   ```
+
+Original readme:
+
+------------------------
+
 <div align="center">
  👋 Hi, everyone! 
     <br>
