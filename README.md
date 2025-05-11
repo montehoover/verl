@@ -1,3 +1,17 @@
+# Verl for Guardian Models
+
+## Quickstart
+1. Setup environment
+   ```
+   pip install -r requirements.txt
+   pip install flash-attn --no-build-isolation
+   pip install -e .[vllm]
+   ```
+
+Original README:
+
+------------------------
+
 <div align="center">
  👋 Hi, everyone! 
     <br>
