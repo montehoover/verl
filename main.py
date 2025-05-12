@@ -4,7 +4,7 @@ from verl.compliance.helpers import configure_logging, prepare_dataset_for_verl,
 
 def main(args):
     os.environ["WANDB_ENTITY"] = args.wandb_entity
-    run_name = f"{args.model.split('/')[-1]}-{args.split}-lr{args.lr}-bs{args.batch_size}"
+    run_name = f"{args.model.split('/')[-1]}-{args.split}-lr{args.lr}-bs{args.batch_size}-epochs{args.epochs}"
     num_gpus = torch.cuda.device_count()
     train_files, val_files = prepare_dataset_for_verl(
         dataset=args.dataset,
