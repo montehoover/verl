@@ -10,6 +10,9 @@ import subprocess
 import sys
 import time
 import datasets
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import shutil
+
 
 def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns()}.log"):
     if log_file:
@@ -40,7 +43,7 @@ def prepare_dataset_for_verl(
     subset="compliance",
     split="train_cot",
     num_examples=-1,
-    val_examples=256,
+    num_val_examples=256,
     redownload=False,
     local_dir="data/compliance",
 ):
@@ -62,7 +65,7 @@ def prepare_dataset_for_verl(
     if num_examples > 0 and num_examples < len(dataset):
         dataset = dataset.shuffle(seed=42).select(range(num_examples))
     
-    train_test_split = dataset.train_test_split(test_size=val_examples, seed=42)
+    train_test_split = dataset.train_test_split(test_size=num_val_examples, seed=42)
     train_set = train_test_split['train']
     val_set = train_test_split['test']
 
@@ -95,3 +98,29 @@ def run_subprocess(cmd, logger, check=True):
         if returncode != 0:
             raise subprocess.CalledProcessError(returncode, cmd)
     return returncode
+
+def get_last_checkpoint_path(run_name):
+    checkpoint_folders = [
+        folder for folder in os.listdir(f"checkpoints/{run_name}")
+        if os.path.isdir(os.path.join(f"checkpoints/{run_name}", folder))
+    ]
+    checkpoint_numbers = [int(folder.split("_")[-1]) for folder in checkpoint_folders]
+    last_checkpoint = f"global_step_{max(checkpoint_numbers)}"
+    checkpoint_path = f"checkpoints/{run_name}/{last_checkpoint}"
+    return checkpoint_path
+
+def push_to_hub(model_path, run_name, model_name=None):
+    hf_hub_path = f"tomg-group-umd/compliance_{run_name}"
+    # temp_path = str(time.time_ns())
+    # model_merger_cmd = [
+    #     "python",
+    #     "scripts/model_merger.py",
+    #     "--backend", "fsdp",
+    #     "--hf_model_path", model_name,
+    #     "--local_dir", checkpoint_path,
+    #     "--target_dir", temp_path,
+    # ]
+    # subprocess.run(model_merger_cmd, check=True)
+    AutoModelForCausalLM.from_pretrained(model_path).push_to_hub(hf_hub_path, private=True)
+    # shutil.rmtree(temp_path, ignore_errors=True)
+    return hf_hub_path
