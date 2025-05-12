@@ -59,7 +59,7 @@ def parse_args():
     parser.add_argument("--batch_size", default=32, type=int, help="Total batch size (default: 32)")
     parser.add_argument("--batch_size_per_gpu",default=2, type=int, help="Batch size per GPU (default: 2)")
     parser.add_argument("--wandb_entity", default="guardian-models", help="Weights & Biases entity (default: guardian-models)")
-    parser.add_argument("--num_examples", type=int, default=1000, help="Number of examples to train on. -1 for all (default: 1000)")
+    parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all (default: 1000)")
     parser.add_argument("--download_local_dir", default="data/compliance", help="Local directory for data (default: data/compliance)")
     parser.add_argument("--redownload", default=True, action=argparse.BooleanOptionalAction, help="Force redownload of data (default: disabled)")
     parser.add_argument("--wandb_project_name", default="sft-compliance", help="Trainer project name for WandB (default: sft-compliance)")
