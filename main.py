@@ -6,7 +6,7 @@ from verl.compliance.helpers import configure_logging, get_last_checkpoint_path,
 def main(args):
     os.environ["WANDB_ENTITY"] = args.wandb_entity
     model_name = args.model
-    run_name = f"{model_name.split('/')[-1]}_{args.split}_lr{args.lr}_bs{args.batch_size}"
+    run_name = f"{model_name.split('/')[-1]}_{args.split}_lr{args.lr}_bs{args.batch_size}-epochs{args.epochs}"
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check the that this is being called where you expect it to be."
     train_files, val_files = prepare_dataset_for_verl(
