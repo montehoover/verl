@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument("--dataset", default="tomg-group-umd/compliance", help="Dataset name (default: tomg-group-umd/compliance)")
     # parser.add_argument("--dataset", default="montehoover/compliance", help="Dataset name (default: tomg-group-umd/compliance)")
     parser.add_argument("--subset", default="compliance", help="Dataset subset (default: compliance)")
-    parser.add_argument("--split", default="train_cot", help="Dataset split (default: train_cot)")
+    parser.add_argument("--split", default="train_32000_mix", help="Dataset split (default: train_cot)")
     parser.add_argument("--epochs", default=1, type=int, help="Number of epochs (default: 1)")
     parser.add_argument("--lr", default="1e-5", help="Learning rate (default: 1e-5)")
     parser.add_argument("--batch_size", default=32, type=int, help="Total batch size (default: 32)")
