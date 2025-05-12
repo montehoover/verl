@@ -1,11 +1,16 @@
 # Verl for Guardian Models
 
 ## Quickstart
-1. Setup environment
+1. Setup environment:
    ```
+   module load cuda
    pip install -r requirements.txt
    pip install flash-attn --no-build-isolation
    pip install -e .[vllm]
+   ```
+2. Confirm installation by running a few SFT training steps from our dataset Qwen3-0.6B
+   ```
+   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --epochs 1
    ```
 
 Original README:

@@ -25,6 +25,7 @@ import torch
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer
 
+from verl.compliance.constants import MULTIRULE_SYSTEM_PROMPT_V4
 from verl.utils import hf_tokenizer
 from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
@@ -45,6 +46,11 @@ class SFTDataset(Dataset):
         response_dict_keys = config.get("response_dict_keys", None)
         max_length = config.get("max_length", 1024)
         truncation = config.get("truncation", "error")
+        add_system_prompt = config.get("add_system_prompt", False)
+        if add_system_prompt:
+            self.system_prompt = MULTIRULE_SYSTEM_PROMPT_V4
+        else:
+            self.system_prompt = None
 
         assert truncation in ["error", "left", "right"]
         self.truncation = truncation
@@ -117,6 +123,8 @@ class SFTDataset(Dataset):
 
         # apply chat template
         prompt_chat = [{"role": "user", "content": prompt}]
+        if self.system_prompt is not None:
+            prompt_chat.insert(0, {"role": "system", "content": self.system_prompt})
 
         # string
         prompt_chat_str = tokenizer.apply_chat_template(prompt_chat, add_generation_prompt=True, tokenize=False)
