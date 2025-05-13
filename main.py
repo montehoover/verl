@@ -47,6 +47,7 @@ def main(args):
             f"trainer.project_name={args.sft_wandb_project}",
             f"trainer.experiment_name={sft_run_name}",
             f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}"
+            f"actor_rollout_ref.rollout.enable_chunked_prefill=False"
         ]
         subprocess.run(sft_cmd, check=True)
         last_checkpoint_path = get_last_checkpoint_path(sft_run_name)
