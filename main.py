@@ -114,7 +114,9 @@ def main(args):
             f"trainer.save_freq=20",
             f"trainer.test_freq=5",
             f"trainer.total_epochs={args.grpo_epochs}",
-            f"trainer.default_local_dir=checkpoints/{grpo_run_name}"
+            f"trainer.default_local_dir=checkpoints/{grpo_run_name}",
+            f"custom_reward_function.path=verl/compliance/helpers.py", 
+            f"custom_reward_function.name=compute_reward", 
         ]
         subprocess.run(grpo_cmd, check=True)
         print("Successfully completed GRPO.")
