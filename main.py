@@ -9,7 +9,7 @@ def main(args):
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check the that this is being called where you expect it to be."
     train_files, val_files = prepare_dataset_for_verl(
-        dataset=args.dataset,
+        dataset_path=args.dataset,
         subset=args.subset,
         split=args.split,
         num_examples=args.num_examples,
@@ -24,7 +24,7 @@ def main(args):
     if args.run_sft:
         print("Starting SFT...")
         model_name = get_model_name(model_path)
-        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.epochs}"
+        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.sft_epochs}"
         sft_cmd = [
             "torchrun",
             f"--nproc_per_node={num_gpus}",
@@ -33,8 +33,8 @@ def main(args):
             f"model.enable_gradient_checkpointing=True",
             f"data.train_files={train_files}",
             f"data.val_files={val_files}",
-            f"data.prompt_key=verl_stuff",
-            f"data.response_key=verl_stuff",
+            f"data.prompt_key=extra_info",
+            f"data.response_key=extra_info",
             f"data.prompt_dict_keys=['question']",
             f"data.response_dict_keys=['answer']",
             f"+data.add_system_prompt=True",
@@ -54,7 +54,7 @@ def main(args):
         
         # Push to Hugging Face Hub
         try:
-            hf_hub_path = push_to_hub(model_path=last_checkpoint_path, run_name=sft_run_name)
+            hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name)
             print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
             # For use if continuing to GRPO
             model_path = hf_hub_path
@@ -72,7 +72,7 @@ def main(args):
     if args.run_grpo:
         print("Starting GRPO...")
         model_name = get_model_name(model_path)
-        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.epochs}"
+        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.grpo_epochs}"
         grpo_cmd = [
             "python3",
             "-m", "verl.trainer.main_ppo",
@@ -100,7 +100,7 @@ def main(args):
             f"actor_rollout_ref.rollout.tensor_model_parallel_size=2", # Verl uses 2 when doing a 7B model on 8 GPUs. They use 4 when doing a 32B model on 32 GPUs. 
             f"actor_rollout_ref.rollout.name=vllm",
             f"actor_rollout_ref.rollout.gpu_memory_utilization=0.6",
-            f"actor_rollout_ref.rollout.n=5",
+            f"actor_rollout_ref.rollout.n={args.num_generations}",
             f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"actor_rollout_ref.ref.fsdp_config.param_offload=True",
             f"algorithm.use_kl_in_reward=False",
@@ -136,15 +136,15 @@ def parse_args():
     parser.add_argument("--batch_size_per_gpu",default=2, type=int, help="Batch size per GPU (default: 2)")
     
     # Run info
-    parser.add_argument("--run_sft", default=True, action=argparse.BooleanOptionalAction, help="Run SFT (default: enabled)")
-    parser.add_argument("--run_grpo", default=False, action=argparse.BooleanOptionalAction, help="Run GRPO (default: enabled)")
+    parser.add_argument("--run_sft", default=False, action=argparse.BooleanOptionalAction, help="Run SFT (default: enabled)")
+    parser.add_argument("--run_grpo", default=True, action=argparse.BooleanOptionalAction, help="Run GRPO (default: enabled)")
     parser.add_argument("--download_local_dir", default="data/compliance", help="Local directory for data (default: data/compliance)")
     parser.add_argument("--checkpoint_dir", default="checkpoints", help="Directory for checkpoints (default: checkpoints)")
     parser.add_argument("--exit_on_checkpoint_error", default=True, action=argparse.BooleanOptionalAction, help="Exit on checkpoint error (default: enabled)")
 
     # SFT
     parser.add_argument("--sft_wandb_project", default="sft-compliance", help="Trainer project name for WandB (default: sft-compliance)")
-    parser.add_argument("--sft_epochs", default=4, type=int, help="Number of epochs (default: 4)")
+    parser.add_argument("--sft_epochs", default=1, type=int, help="Number of epochs (default: 4)")
     parser.add_argument("--sft_lr", default="1e-5", help="Learning rate (default: 1e-5)")
     parser.add_argument("--sft_batch_size", default=32, type=int, help="Total batch size (default: 32)")
     parser.add_argument("--wandb_entity", default="guardian-models", help="Weights & Biases entity (default: guardian-models)")
@@ -153,8 +153,8 @@ def parse_args():
     parser.add_argument("--grpo_wandb_project", default="grpo-compliance", help="Trainer project name for WandB (default: grpo-compliance)")
     parser.add_argument("--grpo_epochs", default=1, type=int, help="Number of epochs (default: 1)")
     parser.add_argument("--grpo_lr", default="1e-6", help="Learning rate (default: 1e-6)")
-    parser.add_argument("--grpo_batch_size", default=48, type=int, help="Total batch size (default: 48)")
-    parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
+    parser.add_argument("--grpo_batch_size", default=32, type=int, help="Total batch size (default: 48)")
+    parser.add_argument("--num_generations", default=4, type=int, help="Number of generations (default: 12)")
     parser.add_argument("--max_response_length", default=512, type=int, help="Max response length (default: 512)")
     return parser.parse_args()
 

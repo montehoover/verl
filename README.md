@@ -7,11 +7,18 @@
    pip install -r requirements.txt
    pip install flash-attn --no-build-isolation
    pip install -e .[vllm]
+   pip install vllm=0.8.4
    ```
-2. Confirm installation by running a few SFT training steps from our dataset Qwen3-0.6B
+2. Confirm installation by running a few SFT training steps from our dataset on Qwen3-0.6B
    ```
-   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --epochs 1
+   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --run_sft
    ```
+3. Run GRPO with:
+   ```
+   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --run_grpo
+   ```
+
+Also `scripts/demo_gsm8k_grpo.sh` is confirmed to be working.
 
 Original README:
 
