@@ -46,8 +46,7 @@ def main(args):
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.sft_wandb_project}",
             f"trainer.experiment_name={sft_run_name}",
-            f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}"
-            f"actor_rollout_ref.rollout.enable_chunked_prefill=False"
+            f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
         ]
         subprocess.run(sft_cmd, check=True)
         last_checkpoint_path = get_last_checkpoint_path(sft_run_name)
@@ -115,6 +114,7 @@ def main(args):
             f"trainer.test_freq=5",
             f"trainer.total_epochs={args.grpo_epochs}",
             f"trainer.default_local_dir=checkpoints/{grpo_run_name}"
+            f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
         ]
         subprocess.run(grpo_cmd, check=True)
         print("Successfully completed GRPO.")
