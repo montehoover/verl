@@ -88,7 +88,6 @@ class RLHFDataset(Dataset):
         self.num_workers = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
         self.num_workers = min(self.num_workers, os.cpu_count())
         self.chat_template_func = config.get("chat_template_func", None)
-        print(f"chat_template_func: {self.chat_template_func}")
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)
         self.filter_prompts = config.get("filter_prompts", True)
         self.serialize_dataset = False
@@ -167,6 +166,7 @@ class RLHFDataset(Dataset):
             from verl.utils.dataset.vision_utils import process_image, process_video
 
             raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            print(f"raw_prompt: {raw_prompt}")
             multi_modal_data = {}
 
             images = None
