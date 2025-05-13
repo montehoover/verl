@@ -103,6 +103,7 @@ def main(args):
             f"actor_rollout_ref.rollout.n={args.num_generations}",
             f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"actor_rollout_ref.ref.fsdp_config.param_offload=True",
+            f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
             f"algorithm.use_kl_in_reward=False",
             f"trainer.critic_warmup=0",
             f"trainer.logger=['console','wandb']",
@@ -114,7 +115,6 @@ def main(args):
             f"trainer.test_freq=5",
             f"trainer.total_epochs={args.grpo_epochs}",
             f"trainer.default_local_dir=checkpoints/{grpo_run_name}"
-            f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
         ]
         subprocess.run(grpo_cmd, check=True)
         print("Successfully completed GRPO.")
