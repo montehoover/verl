@@ -124,3 +124,15 @@ def push_to_hub(model_path, run_name, model_name=None):
     AutoModelForCausalLM.from_pretrained(model_path).push_to_hub(hf_hub_path, private=True)
     # shutil.rmtree(temp_path, ignore_errors=True)
     return hf_hub_path
+
+def get_model_name(model_path):
+    qwen_pattern =   re.compile(r'.*(Qwen.*?B)')
+    llama_pattern1 = re.compile(r'.*(Llama.*?B)')
+    llama_pattern2 = re.compile(r'.*(llama.*?b)')
+    wildguard_pattern = re.compile(r'.*(wildguard)')
+    for pattern in [qwen_pattern, llama_pattern1, llama_pattern2, wildguard_pattern]:
+        match = pattern.match(model_path)
+        if match:
+            return match.group(0)
+    # Just send back the whole path as the model name if we can't find a match
+    return model_path
