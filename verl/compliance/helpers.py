@@ -10,8 +10,9 @@ import subprocess
 import sys
 import time
 import datasets
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import shutil
+from requests import HTTPError
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4
 
@@ -186,10 +187,23 @@ def get_last_checkpoint_path(run_name):
     checkpoint_numbers = [int(folder.split("_")[-1]) for folder in checkpoint_folders]
     last_checkpoint = f"global_step_{max(checkpoint_numbers)}"
     checkpoint_path = f"checkpoints/{run_name}/{last_checkpoint}"
+    
+    # See if the checkpoint is in hf format
+    for file in os.listdir(checkpoint_path):
+        if file.endswith(".safetensors"):
+            return checkpoint_path
+    
+    # If a hf model file isn't found, look for a folder called "actor"
+    for file in os.listdir(checkpoint_path):
+        if os.path.isdir(os.path.join(checkpoint_path, file)) and file == "actor":
+            checkpoint_path = os.path.join(checkpoint_path, file)
+            return checkpoint_path
+     
+    print(f"Checkpoint path {checkpoint_path} does not contain a valid checkpoint. Returning the path for investigation.")
     return checkpoint_path
 
 
-def push_to_hub(checkpoint_path, run_name, model_name=None):
+def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
     assert os.path.exists(checkpoint_path) and os.path.isdir(checkpoint_path), f"We need the path to a directory that contains model files, not a file. Got {checkpoint_path} instead."
     
     hf_format_found = False
@@ -199,13 +213,13 @@ def push_to_hub(checkpoint_path, run_name, model_name=None):
             break
     
     if not hf_format_found:
-        assert model_name is not None, f"Model name must be provided if no .safetensors file is found."
+        assert original_model is not None, f"Model name must be provided if no .safetensors file is found."
         temp_path = f"temp/{time.time_ns()}"
         model_merger_cmd = [
             "python",
             "scripts/model_merger.py",
             "--backend", "fsdp",
-            "--hf_model_path", model_name,
+            "--hf_model_path", original_model,
             "--local_dir", checkpoint_path,
             "--target_dir", temp_path,
         ]
@@ -214,6 +228,7 @@ def push_to_hub(checkpoint_path, run_name, model_name=None):
 
     hf_hub_path = f"tomg-group-umd/compliance_{run_name}"
     AutoModelForCausalLM.from_pretrained(checkpoint_path).push_to_hub(hf_hub_path, private=True)
+    AutoTokenizer.from_pretrained(original_model).push_to_hub(hf_hub_path, private=True)
     
     # Cleanup
     if not hf_format_found:
@@ -221,6 +236,18 @@ def push_to_hub(checkpoint_path, run_name, model_name=None):
     
     return hf_hub_path
 
+def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=False):
+    new_model_path = checkpoint_path
+    try:
+        new_model_path = convert_and_push_to_hub(checkpoint_path=checkpoint_path, run_name=run_name, original_model=original_model)
+        print(f"Model pushed to Hugging Face Hub at {new_model_path}")
+    except HTTPError as e:
+        print(f"There was an erro when pushing to hf hub: {e}")
+        if raise_on_error:
+            raise
+        else:
+            print("Continuing without pushing to Hugging Face Hub...")
+    return new_model_path
 
 def get_model_name(model_path):
     # The leading .* gobbles up as much as possible, so if there are multiple

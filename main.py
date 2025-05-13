@@ -1,7 +1,7 @@
 import argparse, os, subprocess, sys
 import torch
 from requests import HTTPError
-from verl.compliance.helpers import configure_logging, get_last_checkpoint_path, get_model_name, prepare_dataset_for_verl, push_to_hub, run_subprocess
+from verl.compliance.helpers import configure_logging, get_last_checkpoint_path, get_model_name, prepare_dataset_for_verl, push_to_hf_hub, run_subprocess
 
 def main(args):
     os.environ["WANDB_ENTITY"] = args.wandb_entity
@@ -52,19 +52,8 @@ def main(args):
         last_checkpoint_path = get_last_checkpoint_path(sft_run_name)
         print(f"Successfully completed SFT. Last checkpoint was saved to {last_checkpoint_path}")
         
-        # Push to Hugging Face Hub
-        try:
-            hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name)
-            print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
-            # For use if continuing to GRPO
-            model_path = hf_hub_path
-        except HTTPError as e:
-            print(f"There was an erro when pushing to hf hub: {e}")
-            if args.exit_on_checkpoint_error:
-                raise
-            else:
-                print("Continuing without pushing to Hugging Face Hub...")
-
+        # Push to Hugging Face Hub and use that model_path for GRPO
+        model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path)
 
     ################################
     # GRPO Training
@@ -101,9 +90,12 @@ def main(args):
             f"actor_rollout_ref.rollout.name=vllm",
             f"actor_rollout_ref.rollout.gpu_memory_utilization=0.6",
             f"actor_rollout_ref.rollout.n={args.num_generations}",
+            f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
             f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"actor_rollout_ref.ref.fsdp_config.param_offload=True",
             f"algorithm.use_kl_in_reward=False",
+            f"custom_reward_function.path=verl/compliance/helpers.py",
+            f"custom_reward_function.name=compute_reward",
             f"trainer.critic_warmup=0",
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.grpo_wandb_project}",
@@ -116,9 +108,13 @@ def main(args):
             f"trainer.default_local_dir=checkpoints/{grpo_run_name}"
         ]
         subprocess.run(grpo_cmd, check=True)
-        print("Successfully completed GRPO.")
+        last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
+        print(f"Successfully completed GRPO. Last checkpoint was saved to {last_checkpoint_path}")
+        
+        # Push to Hugging Face Hub
+        model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path)
 
-    print("Training process completed.")
+    print("Training process completed successfully.")
 
 
 def parse_args():
