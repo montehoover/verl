@@ -123,18 +123,18 @@ def main(args):
 
     print("Training process completed.")
 
-    try:
-        last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
-        hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=grpo_run_name)
-        print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
-        # For use if continuing to GRPO
-        model_path = hf_hub_path
-    except HTTPError as e:
-        print(f"There was an erro when pushing to hf hub: {e}")
-        if args.exit_on_checkpoint_error:
-            raise
-        else:
-            print("Continuing without pushing to Hugging Face Hub...")
+    # try:
+    #     last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
+    #     hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=grpo_run_name)
+    #     print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
+    #     # For use if continuing to GRPO
+    #     model_path = hf_hub_path
+    # except HTTPError as e:
+    #     print(f"There was an erro when pushing to hf hub: {e}")
+    #     if args.exit_on_checkpoint_error:
+    #         raise
+    #     else:
+    #         print("Continuing without pushing to Hugging Face Hub...")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="This script runs a PPO training process with configurable parameters.")
