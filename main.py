@@ -73,7 +73,7 @@ def main(args):
     if args.run_grpo:
         print("Starting GRPO...")
         model_name = get_model_name(model_path)
-        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.grpo_lr}_bs{args.grpo_batch_size}-epochs{args.grpo_epochs}-examples{args.num_examples}"
+        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.grpo_lr}_bs{args.grpo_batch_size}-epochs{args.grpo_epochs}-examples{args.num_examples}-maxlen{args.max_response_length}"
         grpo_cmd = [
             "python3",
             "-m", "verl.trainer.main_ppo",
@@ -172,7 +172,7 @@ def parse_args():
     parser.add_argument("--grpo_lr", default="1e-6", help="Learning rate (default: 1e-6)")
     parser.add_argument("--grpo_batch_size", default=48, type=int, help="Total batch size (default: 48)")
     parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
-    parser.add_argument("--max_response_length", default=512, type=int, help="Max response length (default: 512)")
+    parser.add_argument("--max_response_length", default=1024, type=int, help="Max response length (default: 512)")
     parser.add_argument("--grpo_lr_schedule", default="cosine", help="Learning rate schedule (default: cosine)", choices=["cosine", "constant"])
     return parser.parse_args()
 
