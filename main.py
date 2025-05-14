@@ -42,7 +42,6 @@ def main(args):
             f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"data.train_batch_size={args.sft_batch_size}",
             f"optim.lr={args.sft_lr}",
-            f"optim"
             f"trainer.total_epochs={args.sft_epochs}",
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.sft_wandb_project}",
