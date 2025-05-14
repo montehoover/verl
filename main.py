@@ -122,8 +122,10 @@ def main(args):
         print("Successfully completed GRPO.")
 
     print("Training process completed.")
+
     try:
-        hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name)
+        last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
+        hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=grpo_run_name)
         print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
         # For use if continuing to GRPO
         model_path = hf_hub_path
