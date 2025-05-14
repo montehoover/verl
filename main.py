@@ -24,7 +24,7 @@ def main(args):
     if args.run_sft:
         print("Starting SFT...")
         model_name = get_model_name(model_path)
-        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.sft_epochs}"
+        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.sft_epochs}-examples{args.num_examples}"
         sft_cmd = [
             "torchrun",
             f"--nproc_per_node={num_gpus}",
