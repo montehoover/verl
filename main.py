@@ -72,7 +72,7 @@ def main(args):
     if args.run_grpo:
         print("Starting GRPO...")
         model_name = get_model_name(model_path)
-        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.grpo_epochs}-examples{args.num_examples}"
+        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.grpo_lr}_bs{args.grpo_batch_size}-epochs{args.grpo_epochs}-examples{args.num_examples}"
         grpo_cmd = [
             "python3",
             "-m", "verl.trainer.main_ppo",
