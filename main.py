@@ -42,6 +42,7 @@ def main(args):
             f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"data.train_batch_size={args.sft_batch_size}",
             f"optim.lr={args.sft_lr}",
+            f"optim"
             f"trainer.total_epochs={args.sft_epochs}",
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.sft_wandb_project}",
@@ -86,6 +87,7 @@ def main(args):
             f"data.truncation='error'",
             f"actor_rollout_ref.model.path={model_path}",
             f"actor_rollout_ref.actor.optim.lr={args.grpo_lr}",
+            f"actor_rollout_ref.actor.optim.warmup_style={args.grpo_lr_schedule}",
             f"actor_rollout_ref.model.use_remove_padding=True",
             f"actor_rollout_ref.actor.ppo_mini_batch_size={args.num_generations}",
             f"actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
@@ -171,6 +173,7 @@ def parse_args():
     parser.add_argument("--grpo_batch_size", default=48, type=int, help="Total batch size (default: 48)")
     parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
     parser.add_argument("--max_response_length", default=512, type=int, help="Max response length (default: 512)")
+    parser.add_argument("--grpo_lr_schedule", default="cosine", help="Learning rate schedule (default: cosine)", choices=["cosine", "constant"])
     return parser.parse_args()
 
 if __name__ == "__main__":
