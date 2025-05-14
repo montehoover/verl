@@ -122,7 +122,17 @@ def main(args):
         print("Successfully completed GRPO.")
 
     print("Training process completed.")
-
+    try:
+        hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name)
+        print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
+        # For use if continuing to GRPO
+        model_path = hf_hub_path
+    except HTTPError as e:
+        print(f"There was an erro when pushing to hf hub: {e}")
+        if args.exit_on_checkpoint_error:
+            raise
+        else:
+            print("Continuing without pushing to Hugging Face Hub...")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="This script runs a PPO training process with configurable parameters.")
@@ -156,8 +166,8 @@ def parse_args():
     parser.add_argument("--grpo_wandb_project", default="grpo-compliance", help="Trainer project name for WandB (default: grpo-compliance)")
     parser.add_argument("--grpo_epochs", default=1, type=int, help="Number of epochs (default: 1)")
     parser.add_argument("--grpo_lr", default="1e-6", help="Learning rate (default: 1e-6)")
-    parser.add_argument("--grpo_batch_size", default=32, type=int, help="Total batch size (default: 48)")
-    parser.add_argument("--num_generations", default=4, type=int, help="Number of generations (default: 12)")
+    parser.add_argument("--grpo_batch_size", default=48, type=int, help="Total batch size (default: 48)")
+    parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
     parser.add_argument("--max_response_length", default=512, type=int, help="Max response length (default: 512)")
     return parser.parse_args()
 
