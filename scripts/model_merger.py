@@ -323,6 +323,8 @@ def convert_megatron_checkpoints_to_hfmodels():
 
     state_dict = {}
     config = AutoConfig.from_pretrained(args.hf_model_path)
+    print("Loading config from", args.hf_model_path)
+    print("Config:", config)
     if args.test:
         ref_state_dict = load_file(os.path.join(args.test_hf_dir, "model.safetensors"))
 
