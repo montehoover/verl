@@ -460,7 +460,7 @@ def convert_megatron_checkpoints_to_hfmodels():
     else:
         raise NotImplementedError(f"Unknown architecture {config['architectures']}")
 
-    with torch.device("cuda"):
+    with torch.device("cpu"):
         model = auto_model.from_config(config, torch_dtype=torch.bfloat16)
     model.to_empty(device="cpu")
     model = patch_model_generation_config(model, args.hf_model_path)
