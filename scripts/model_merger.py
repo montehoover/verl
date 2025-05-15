@@ -250,7 +250,7 @@ def convert_fsdp_checkpoints_to_hfmodels():
         print("Running compatibility test")
         test_fsdp_state_dict(auto_model, args.test_hf_dir, state_dict)
 
-    with torch.device("meta"):
+    with torch.device("cuda"):
         model = auto_model.from_config(config, torch_dtype=torch.bfloat16)
     model.to_empty(device="cpu")
     model = patch_model_generation_config(model, args.hf_model_path)
@@ -323,8 +323,6 @@ def convert_megatron_checkpoints_to_hfmodels():
 
     state_dict = {}
     config = AutoConfig.from_pretrained(args.hf_model_path)
-    print("Loading config from", args.hf_model_path)
-    print("Config:", config)
     if args.test:
         ref_state_dict = load_file(os.path.join(args.test_hf_dir, "model.safetensors"))
 
