@@ -166,6 +166,7 @@ class RLHFDataset(Dataset):
             from verl.utils.dataset.vision_utils import process_image, process_video
 
             raw_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            
             multi_modal_data = {}
 
             images = None

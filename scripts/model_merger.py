@@ -250,7 +250,7 @@ def convert_fsdp_checkpoints_to_hfmodels():
         print("Running compatibility test")
         test_fsdp_state_dict(auto_model, args.test_hf_dir, state_dict)
 
-    with torch.device("meta"):
+    with torch.device("cuda"):
         model = auto_model.from_config(config, torch_dtype=torch.bfloat16)
     model.to_empty(device="cpu")
     model = patch_model_generation_config(model, args.hf_model_path)
@@ -460,7 +460,7 @@ def convert_megatron_checkpoints_to_hfmodels():
     else:
         raise NotImplementedError(f"Unknown architecture {config['architectures']}")
 
-    with torch.device("meta"):
+    with torch.device("cpu"):
         model = auto_model.from_config(config, torch_dtype=torch.bfloat16)
     model.to_empty(device="cpu")
     model = patch_model_generation_config(model, args.hf_model_path)
