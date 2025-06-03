@@ -24,7 +24,7 @@ def main(args):
     if args.run_sft:
         print("Starting SFT...")
         model_name = get_model_name(model_path)
-        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.sft_epochs}"
+        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.sft_epochs}-examples{args.num_examples}"
         sft_cmd = [
             "torchrun",
             f"--nproc_per_node={num_gpus}",
@@ -42,11 +42,12 @@ def main(args):
             f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"data.train_batch_size={args.sft_batch_size}",
             f"optim.lr={args.sft_lr}",
+            f"optim"
             f"trainer.total_epochs={args.sft_epochs}",
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.sft_wandb_project}",
             f"trainer.experiment_name={sft_run_name}",
-            f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}"
+            f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
         ]
         subprocess.run(sft_cmd, check=True)
         last_checkpoint_path = get_last_checkpoint_path(sft_run_name)
@@ -61,7 +62,7 @@ def main(args):
     if args.run_grpo:
         print("Starting GRPO...")
         model_name = get_model_name(model_path)
-        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.sft_lr}_bs{args.sft_batch_size}-epochs{args.grpo_epochs}"
+        grpo_run_name = f"{model_name}_{args.split}_grpo_lr{args.grpo_lr}_bs{args.grpo_batch_size}-epochs{args.grpo_epochs}-examples{args.num_examples}-maxlen{args.max_response_length}"
         grpo_cmd = [
             "python3",
             "-m", "verl.trainer.main_ppo",
@@ -75,6 +76,7 @@ def main(args):
             f"data.truncation='error'",
             f"actor_rollout_ref.model.path={model_path}",
             f"actor_rollout_ref.actor.optim.lr={args.grpo_lr}",
+            f"actor_rollout_ref.actor.optim.warmup_style={args.grpo_lr_schedule}",
             f"actor_rollout_ref.model.use_remove_padding=True",
             f"actor_rollout_ref.actor.ppo_mini_batch_size={args.num_generations}",
             f"actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
@@ -93,6 +95,7 @@ def main(args):
             f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
             f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"actor_rollout_ref.ref.fsdp_config.param_offload=True",
+            f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
             f"algorithm.use_kl_in_reward=False",
             f"custom_reward_function.path=verl/compliance/helpers.py",
             f"custom_reward_function.name=compute_reward",
@@ -105,7 +108,9 @@ def main(args):
             f"trainer.save_freq=20",
             f"trainer.test_freq=5",
             f"trainer.total_epochs={args.grpo_epochs}",
-            f"trainer.default_local_dir=checkpoints/{grpo_run_name}"
+            f"trainer.default_local_dir=checkpoints/{grpo_run_name}",
+            f"custom_reward_function.path=verl/compliance/helpers.py", 
+            f"custom_reward_function.name=compute_reward", 
         ]
         subprocess.run(grpo_cmd, check=True)
         last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
@@ -116,6 +121,18 @@ def main(args):
 
     print("Training process completed successfully.")
 
+    # try:
+    #     last_checkpoint_path = get_last_checkpoint_path(grpo_run_name)
+    #     hf_hub_path = push_to_hub(checkpoint_path=last_checkpoint_path, run_name=grpo_run_name)
+    #     print(f"Model pushed to Hugging Face Hub at {hf_hub_path}")
+    #     # For use if continuing to GRPO
+    #     model_path = hf_hub_path
+    # except HTTPError as e:
+    #     print(f"There was an erro when pushing to hf hub: {e}")
+    #     if args.exit_on_checkpoint_error:
+    #         raise
+    #     else:
+    #         print("Continuing without pushing to Hugging Face Hub...")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="This script runs a PPO training process with configurable parameters.")
@@ -149,9 +166,10 @@ def parse_args():
     parser.add_argument("--grpo_wandb_project", default="grpo-compliance", help="Trainer project name for WandB (default: grpo-compliance)")
     parser.add_argument("--grpo_epochs", default=1, type=int, help="Number of epochs (default: 1)")
     parser.add_argument("--grpo_lr", default="1e-6", help="Learning rate (default: 1e-6)")
-    parser.add_argument("--grpo_batch_size", default=32, type=int, help="Total batch size (default: 48)")
-    parser.add_argument("--num_generations", default=4, type=int, help="Number of generations (default: 12)")
-    parser.add_argument("--max_response_length", default=512, type=int, help="Max response length (default: 512)")
+    parser.add_argument("--grpo_batch_size", default=48, type=int, help="Total batch size (default: 48)")
+    parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
+    parser.add_argument("--max_response_length", default=1024, type=int, help="Max response length (default: 512)")
+    parser.add_argument("--grpo_lr_schedule", default="cosine", help="Learning rate schedule (default: cosine)", choices=["cosine", "constant"])
     return parser.parse_args()
 
 if __name__ == "__main__":

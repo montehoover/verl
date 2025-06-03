@@ -133,7 +133,8 @@ def prepare_dataset_for_verl(
                 "prompt": [
                     {
                         "role": "system",
-                        "content": MULTIRULE_SYSTEM_PROMPT_V4,
+                        "content": MULTIRULE_SYSTEM_PROMPT_V4},
+                    {
                         "role": "user",
                         "content": question_raw,
                     }
