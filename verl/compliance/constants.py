@@ -6,6 +6,8 @@ TORCHTUNE_OUTPUT_FIELD = "output"
 
 COT_OPENING = "<reasoning>"
 COT_CLOSING = "</reasoning>"
+COT_OPENING_QWEN = "<think>"
+COT_CLOSING_QWEN = "</think>"
 LABEL_OPENING = "<answer>"
 LABEL_CLOSING = "</answer>"
 POS_LABEL = "FAIL" # We call this the "positive" label because it is the thing we want to detect. We want to find rule violations, and a false positive is declaring a violation that is not there.

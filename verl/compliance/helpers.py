@@ -14,7 +14,7 @@ import shutil
 from requests import HTTPError
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4
+from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN
 
 
 def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns()}.log"):
@@ -90,6 +90,12 @@ def extract_xml_answer(text, opening_tag=LABEL_OPENING, closing_tag=LABEL_CLOSIN
     return answer.strip()
 
 
+def do_preprocessing(text):
+    text = text.replace(COT_OPENING, COT_OPENING_QWEN)
+    text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
+    return text
+
+
 def prepare_dataset_for_verl(
     dataset_path="tomg-group-umd/complinace",
     subset="compliance",
@@ -98,6 +104,7 @@ def prepare_dataset_for_verl(
     num_val_examples=256,
     redownload=False,
     local_dir="data/compliance",
+    model_path="",
 ):
     train_path = os.path.join(local_dir, "train.parquet")
     val_path = os.path.join(local_dir, "val.parquet")
@@ -122,10 +129,12 @@ def prepare_dataset_for_verl(
     val_dataset = train_test_split["test"]
 
     # Taken from examples/data_preprocess/gsm8k.py
-    def make_map_fn(split):
+    def make_map_fn(split, model_path):
         def process_fn(example, idx):
             question_raw = example.pop("question")
             answer_raw = example.pop("answer")
+
+            question_modified = do_preprocessing(question_raw, model_path)
 
             solution = extract_xml_answer(answer_raw)
             data = {
@@ -300,26 +309,36 @@ def label_reward_func(model_output):
 
 def strict_format_reward_func(model_output):
     """Reward function that checks if the completion is in XML_COT_FORMAT, strictly adhering to newlines before and after every tag."""
-    pattern = r"^\n<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    # pattern = r"^\n<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    pattern = fr"^\n{COT_OPENING_QWEN}\n.*?\n{COT_CLOSING_QWEN}\n{LABEL_OPENING}\n.*?\n{LABEL_CLOSING}\n$"
     match = re.search(pattern, model_output)
     return 0.08 if match else 0.0
 
 def soft_format_reward_func(model_output):
     """Reward function that checks if the completion is in XML_COT_FORMAT, with flexibility in newlines and whitespace."""
-    pattern = r"^\s*<reasoning>\s*.*?\s*</reasoning>\s*<answer>\s*.*?\s*</answer>\s*$"
+    # pattern = r"^\s*<reasoning>\s*.*?\s*</reasoning>\s*<answer>\s*.*?\s*</answer>\s*$"
+    pattern = fr"^\s*{COT_OPENING_QWEN}\s*.*?\s*{COT_CLOSING_QWEN}\s*{LABEL_OPENING}\s*.*?\s*{LABEL_CLOSING}\s*$"
     match = re.search(pattern, model_output)
     return 0.08 if match else 0.0
 
 def xmlcount_reward_func(model_output) -> float:
     """We want to encourage xml tags to be present, so just give rewards if they are present at all. Let other functions handle extraneous stuff."""
     count = 0.0
-    if model_output.count("<reasoning>\n") == 1:
+    # if model_output.count("<reasoning>\n") == 1:
+    #     count += 0.02
+    # if model_output.count("\n</reasoning>\n") == 1:
+    #     count += 0.02
+    # if model_output.count("\n<answer>\n") == 1:
+    #     count += 0.02
+    # if model_output.count("\n</answer>") == 1:
+    #     count += 0.02
+    if model_output.count(f"{COT_OPENING_QWEN}\n") == 1:
         count += 0.02
-    if model_output.count("\n</reasoning>\n") == 1:
+    if model_output.count(f"\n{COT_CLOSING_QWEN}\n") == 1:
         count += 0.02
-    if model_output.count("\n<answer>\n") == 1:
+    if model_output.count(f"\n{LABEL_OPENING}\n") == 1:
         count += 0.02
-    if model_output.count("\n</answer>") == 1:
+    if model_output.count(f"\n{LABEL_CLOSING}") == 1:
         count += 0.02
     return count
 #######################

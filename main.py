@@ -16,6 +16,7 @@ def main(args):
         num_val_examples=args.num_val_examples,
         redownload=args.redownload,
         local_dir="data/compliance",
+        model_path=model_path,
     )
 
     ################################
