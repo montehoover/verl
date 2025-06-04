@@ -19,7 +19,7 @@ import dataclasses
 from enum import Enum
 from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Iterable, List, Mapping, Union
 import os
 
 class Tracking:
@@ -47,13 +47,16 @@ class Tracking:
                 assert backend in self.supported_backend, f"{backend} is not supported"
 
         self.logger = {}
-
+        if config is None:
+            config = {}  # make sure config is not None, otherwise config.get() and **config will raise error
+        
         if "tracking" in default_backend or "wandb" in default_backend:
             import wandb
 
             settings = None
-            if config["trainer"].get("wandb_proxy", None):
+            if config.get("trainer", {}).get("wandb_proxy", None):
                 settings = wandb.Settings(https_proxy=config["trainer"]["wandb_proxy"])
+            config = _to_wandb_json(config)  # convert config to valid json format for wandb
             wandb.init(project=project_name, name=experiment_name, config=config, settings=settings)
             self.logger["wandb"] = wandb
 
@@ -256,6 +259,20 @@ def _flatten_dict(raw: Dict[str, Any], *, sep: str) -> Dict[str, Any]:
     assert isinstance(ans, dict)
     return ans
 
+def _to_wandb_json(obj):
+    """
+    Recursively apply wandb.util.json_friendly_val to every element of a dict.
+    """
+    import wandb
+
+    # Recursive cases
+    if isinstance(obj, Mapping):
+        return {str(k): _to_wandb_json(v) for k, v in obj.items()}
+    if isinstance(obj, Iterable) and not isinstance(obj, (str, bytes)):
+        return [_to_wandb_json(item) for item in obj]
+
+    # base case
+    return wandb.util.json_friendly_val(obj)
 
 @dataclasses.dataclass
 class ValidationGenerationsLogger:

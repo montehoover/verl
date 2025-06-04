@@ -50,7 +50,7 @@ def main(args):
             f"trainer.experiment_name={sft_run_name}",
             f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
         ]
-        # subprocess.run(sft_cmd, check=True)
+        subprocess.run(sft_cmd, check=True)
         last_checkpoint_path = get_last_checkpoint_path(sft_run_name, checkpoint_dir=args.checkpoint_dir)
         print(f"Successfully completed SFT. Last checkpoint was saved to {last_checkpoint_path}")
         

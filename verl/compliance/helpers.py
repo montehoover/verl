@@ -247,6 +247,7 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
         model_merger_cmd = [
             "python",
             "scripts/model_merger.py",
+            "merge",
             "--backend", "fsdp",
             "--hf_model_path", original_model,
             "--local_dir", checkpoint_path,

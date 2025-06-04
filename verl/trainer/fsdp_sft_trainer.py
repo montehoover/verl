@@ -182,6 +182,7 @@ class FSDPSFTTrainer:
         trust_remote_code = self.config.model.trust_remote_code
         torch_dtype = self.config.model.fsdp_config.get("model_dtype", "fp32")
         torch_dtype = PrecisionType.to_dtype(torch_dtype)
+        
         # load config first
         config = AutoConfig.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
         self.model_config = config
@@ -199,6 +200,10 @@ class FSDPSFTTrainer:
                 attn_implementation="flash_attention_2",
                 trust_remote_code=trust_remote_code,
             )
+            # Monte add: For some reason it is getting here as float32. I tried fixing it explicitly above, but it didn't take effect the way I expected.
+            # Below there is an autocast call, so maybe we don't need this here, but leaving it for now.
+            if "qwen" in self.config.model.partial_pretrain and self.model.dtype != torch.bloat16:
+                self.model = self.model.to(torch.bfloat16)
 
             if self.use_remove_padding or self.config.ulysses_sequence_parallel_size > 1:
                 from verl.models.transformers.monkey_patch import apply_monkey_patch
@@ -500,6 +505,7 @@ class FSDPSFTTrainer:
                 project_name=self.config.trainer.project_name,
                 experiment_name=self.config.trainer.experiment_name,
                 default_backend=self.config.trainer.logger,
+                config=self.config
             )
 
         global_step = 0

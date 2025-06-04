@@ -29,6 +29,9 @@ def main(config):
 
 
 def run_ppo(config) -> None:
+    from verl.utils.distributed import deconflict_cuda_rocm
+    deconflict_cuda_rocm()
+
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(
