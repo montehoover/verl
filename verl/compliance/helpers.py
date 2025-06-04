@@ -14,7 +14,7 @@ import shutil
 from requests import HTTPError
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN
+from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN, NEG_LABEL, POS_LABEL
 
 
 def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns()}.log"):
@@ -90,9 +90,10 @@ def extract_xml_answer(text, opening_tag=LABEL_OPENING, closing_tag=LABEL_CLOSIN
     return answer.strip()
 
 
-def do_preprocessing(text):
-    text = text.replace(COT_OPENING, COT_OPENING_QWEN)
-    text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
+def do_preprocessing(text, model_path=None):
+    if isinstance(model_path, str) and "qwen" in model_path.lower():
+        text = text.replace(COT_OPENING, COT_OPENING_QWEN)
+        text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
     return text
 
 
@@ -129,12 +130,12 @@ def prepare_dataset_for_verl(
     val_dataset = train_test_split["test"]
 
     # Taken from examples/data_preprocess/gsm8k.py
-    def make_map_fn(split, model_path):
+    def make_map_fn(split, model_path=None):
         def process_fn(example, idx):
             question_raw = example.pop("question")
             answer_raw = example.pop("answer")
 
-            question_modified = do_preprocessing(question_raw, model_path)
+            question_modified = do_preprocessing(question_raw, model_path=model_path)
 
             solution = extract_xml_answer(answer_raw)
             data = {
@@ -151,22 +152,34 @@ def prepare_dataset_for_verl(
                 "ability": "compliance",
                 "reward_model": {"style": "rule", "ground_truth": solution},
                 "extra_info": {
+                    "model": model_path,
                     "split": split,
                     "index": idx,
                     "answer": answer_raw,
-                    "question": question_raw,
+                    "question": question_modified,
                 },
             }
             return data
         return process_fn
 
-    train_dataset = train_dataset.map(function=make_map_fn(split), with_indices=True)
+    train_dataset = train_dataset.map(function=make_map_fn(split, model_path), with_indices=True)
     val_dataset = val_dataset.map(function=make_map_fn(split.replace("train", "val")), with_indices=True)
 
     train_dataset.to_parquet(train_path)
     val_dataset.to_parquet(val_path)
     print(f"Dataset downloaded and saved to {train_path} and {val_path}")
     return train_path, val_path
+
+
+def get_subset(train_path, num_examples, filetype="parquet"):
+    train_dataset = datasets.load_dataset(filetype, data_files=train_path, split="train")
+    if num_examples <= 0 or num_examples > len(train_dataset):
+        print(f"num_examples is {num_examples} but the original dataset has {len(train_dataset)}. Returning the full dataset.")
+        return train_path
+    subset_dataset = train_dataset.select(range(num_examples))
+    subset_path = train_path.replace(f".{filetype}", f"_{num_examples}.{filetype}")
+    subset_dataset.to_parquet(subset_path)
+    return subset_path
 
 
 def run_subprocess(cmd, logger, check=True):
@@ -212,6 +225,12 @@ def get_last_checkpoint_path(run_name):
     print(f"Checkpoint path {checkpoint_path} does not contain a valid checkpoint. Returning the path for investigation.")
     return checkpoint_path
 
+def upload_model_to_huggingface(checkpoint_path, hf_hub_path, private=True):
+    from huggingface_hub import HfApi
+    api = HfApi()
+    hf_hub_path = hf_hub_path[:96] # Ensure the path is not too long, as HF has a limit of 96 characters.
+    api.create_repo(repo_id=hf_hub_path, private=private, exist_ok=True)
+    api.upload_folder(folder_path=checkpoint_path, repo_id=hf_hub_path, repo_type="model")
 
 def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
     assert os.path.exists(checkpoint_path) and os.path.isdir(checkpoint_path), f"We need the path to a directory that contains model files, not a file. Got {checkpoint_path} instead."
@@ -232,13 +251,16 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
             "--hf_model_path", original_model,
             "--local_dir", checkpoint_path,
             "--target_dir", temp_path,
+            # "--hf_upload_path", hf_hub_path,
+            # "--private", "True",
         ]
         subprocess.run(model_merger_cmd, check=True)
         checkpoint_path = temp_path
 
-    hf_hub_path = f"tomg-group-umd/compliance_{run_name}"
-    AutoModelForCausalLM.from_pretrained(checkpoint_path).push_to_hub(hf_hub_path, private=True)
-    AutoTokenizer.from_pretrained(original_model).push_to_hub(hf_hub_path, private=True)
+    hf_hub_path = f"tomg-group-umd/c_{run_name}"
+    upload_model_to_huggingface(checkpoint_path, hf_hub_path)
+    # AutoModelForCausalLM.from_pretrained(checkpoint_path).push_to_hub(hf_hub_path, private=True)
+    # AutoTokenizer.from_pretrained(original_model).push_to_hub(hf_hub_path, private=True)
     
     # Cleanup
     if not hf_format_found:
@@ -291,38 +313,49 @@ def get_model_name(model_path):
 #     All 4 xml tags in the right order: 0.08
 #     Xml tags present at all: 0.02 per tag for total of 0.08
 def compute_reward(data_source, solution_str, ground_truth, extra_info=None):
+    pos_label = POS_LABEL
+    neg_label = NEG_LABEL
+    label_opening = LABEL_OPENING
+    label_closing = LABEL_CLOSING
+    cot_opening = COT_OPENING
+    cot_closing = COT_CLOSING
+    model = extra_info.get("model", None) if extra_info else None
+    if model and "qwen" in model.lower():
+        cot_opening = COT_OPENING_QWEN
+        cot_closing = COT_CLOSING_QWEN
+
     assert "compliance" in data_source, f"Data source {data_source} is not a compliance dataset. Expected tomg-group-umd/compliance or montehoover/compliance."
-    correctness_reward = correctness_reward_func(solution_str, ground_truth)
-    label_format_reward = label_reward_func(solution_str)
-    strict_format_reward = strict_format_reward_func(solution_str)
-    soft_format_reward = soft_format_reward_func(solution_str)
-    xml_count_reward = xmlcount_reward_func(solution_str)
+    correctness_reward = correctness_reward_func(solution_str, ground_truth, label_opening, label_closing)
+    label_format_reward = label_reward_func(solution_str, label_opening, label_closing, pos_label, neg_label)
+    strict_format_reward = strict_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
+    soft_format_reward = soft_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
+    xml_count_reward = xmlcount_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
     return correctness_reward + label_format_reward + strict_format_reward + soft_format_reward + xml_count_reward
 
-def correctness_reward_func(model_output, ground_truth):
-    prediction = extract_xml_answer(model_output)
+def correctness_reward_func(model_output, ground_truth, label_opening, label_closing):
+    prediction = extract_xml_answer(model_output, label_opening, label_closing)
     return 0.68 if prediction == ground_truth else 0.0 
 
-def label_reward_func(model_output):
+def label_reward_func(model_output, label_opening, label_closing, pos_label, neg_label):
     """Reward function that checks if the label is exactly PASS or FAIL."""
-    prediction = extract_xml_answer(model_output)
-    return 0.08 if prediction in ["PASS", "FAIL"] else 0.0
+    prediction = extract_xml_answer(model_output, label_opening, label_closing)
+    return 0.08 if prediction in [pos_label, neg_label] else 0.0
 
-def strict_format_reward_func(model_output):
+def strict_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
     """Reward function that checks if the completion is in XML_COT_FORMAT, strictly adhering to newlines before and after every tag."""
     # pattern = r"^\n<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
-    pattern = fr"^\n{COT_OPENING_QWEN}\n.*?\n{COT_CLOSING_QWEN}\n{LABEL_OPENING}\n.*?\n{LABEL_CLOSING}\n$"
+    pattern = fr"^\n{cot_opening}\n.*?\n{cot_closing}\n{label_opening}\n.*?\n{label_closing}\n$"
     match = re.search(pattern, model_output)
     return 0.08 if match else 0.0
 
-def soft_format_reward_func(model_output):
+def soft_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
     """Reward function that checks if the completion is in XML_COT_FORMAT, with flexibility in newlines and whitespace."""
     # pattern = r"^\s*<reasoning>\s*.*?\s*</reasoning>\s*<answer>\s*.*?\s*</answer>\s*$"
-    pattern = fr"^\s*{COT_OPENING_QWEN}\s*.*?\s*{COT_CLOSING_QWEN}\s*{LABEL_OPENING}\s*.*?\s*{LABEL_CLOSING}\s*$"
+    pattern = fr"^\s*{cot_opening}\s*.*?\s*{cot_closing}\s*{label_opening}\s*.*?\s*{label_closing}\s*$"
     match = re.search(pattern, model_output)
     return 0.08 if match else 0.0
 
-def xmlcount_reward_func(model_output) -> float:
+def xmlcount_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
     """We want to encourage xml tags to be present, so just give rewards if they are present at all. Let other functions handle extraneous stuff."""
     count = 0.0
     # if model_output.count("<reasoning>\n") == 1:
@@ -333,13 +366,13 @@ def xmlcount_reward_func(model_output) -> float:
     #     count += 0.02
     # if model_output.count("\n</answer>") == 1:
     #     count += 0.02
-    if model_output.count(f"{COT_OPENING_QWEN}\n") == 1:
+    if model_output.count(f"{cot_opening}\n") == 1:
         count += 0.02
-    if model_output.count(f"\n{COT_CLOSING_QWEN}\n") == 1:
+    if model_output.count(f"\n{cot_closing}\n") == 1:
         count += 0.02
-    if model_output.count(f"\n{LABEL_OPENING}\n") == 1:
+    if model_output.count(f"\n{label_opening}\n") == 1:
         count += 0.02
-    if model_output.count(f"\n{LABEL_CLOSING}") == 1:
+    if model_output.count(f"\n{label_closing}") == 1:
         count += 0.02
     return count
 #######################
