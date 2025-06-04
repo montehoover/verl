@@ -174,7 +174,7 @@ def prepare_dataset_for_verl(
 def get_subset(train_path, num_examples, filetype="parquet"):
     train_dataset = datasets.load_dataset(filetype, data_files=train_path, split="train")
     if num_examples <= 0 or num_examples > len(train_dataset):
-        print(f"num_examples is {num_examples} but the original dataset has {len(train_dataset)}. Returning the full dataset.")
+        print(f"Requested subset size of {num_examples} but the original dataset only has {len(train_dataset)} examples. Returning the full dataset.")
         return train_path
     subset_dataset = train_dataset.select(range(num_examples))
     subset_path = train_path.replace(f".{filetype}", f"_{num_examples}.{filetype}")
@@ -202,14 +202,14 @@ def run_subprocess(cmd, logger, check=True):
     return returncode
 
 
-def get_last_checkpoint_path(run_name):
+def get_last_checkpoint_path(run_name, checkpoint_dir="checkpoints"):
     checkpoint_folders = [
-        folder for folder in os.listdir(f"checkpoints/{run_name}")
-        if os.path.isdir(os.path.join(f"checkpoints/{run_name}", folder))
+        folder for folder in os.listdir(f"{checkpoint_dir}/{run_name}")
+        if os.path.isdir(os.path.join(f"{checkpoint_dir}/{run_name}", folder))
     ]
     checkpoint_numbers = [int(folder.split("_")[-1]) for folder in checkpoint_folders]
     last_checkpoint = f"global_step_{max(checkpoint_numbers)}"
-    checkpoint_path = f"checkpoints/{run_name}/{last_checkpoint}"
+    checkpoint_path = f"{checkpoint_dir}/{run_name}/{last_checkpoint}"
     
     # See if the checkpoint is in hf format
     for file in os.listdir(checkpoint_path):
