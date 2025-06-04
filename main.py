@@ -44,6 +44,7 @@ def main(args):
             f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
             f"data.train_batch_size={args.sft_batch_size}",
             f"optim.lr={args.sft_lr}",
+            f"optim.lr_scheduler={args.sft_lr_schedule}",
             f"trainer.total_epochs={args.sft_epochs}",
             f"trainer.logger=['console','wandb']",
             f"trainer.project_name={args.sft_wandb_project}",
@@ -157,6 +158,7 @@ def parse_args():
     parser.add_argument("--sft_epochs", default=1, type=int, help="Number of epochs (default: 4)")
     parser.add_argument("--sft_lr", default="1e-5", help="Learning rate (default: 1e-5)")
     parser.add_argument("--sft_batch_size", default=128, type=int, help="Total batch size (default: 128)")
+    parser.add_argument("--sft_lr_schedule", default="cosine", help="Learning rate schedule (default: cosine)", choices=["cosine", "constant"])
 
     # GRPO
     parser.add_argument("--grpo_wandb_project", default="grpo-compliance", help="Trainer project name for WandB (default: grpo-compliance)")

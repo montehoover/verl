@@ -14,7 +14,7 @@ import shutil
 from requests import HTTPError
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from verl.compliance.constants import LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN, NEG_LABEL, POS_LABEL
+from verl.compliance.constants import EXPLANATION_CLOSING, EXPLANATION_OPENING, LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN, MULTIRULE_SYSTEM_PROMPT_V5, NEG_LABEL, POS_LABEL
 
 
 def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns()}.log"):
@@ -92,8 +92,12 @@ def extract_xml_answer(text, opening_tag=LABEL_OPENING, closing_tag=LABEL_CLOSIN
 
 def do_preprocessing(text, model_path=None):
     if isinstance(model_path, str) and "qwen" in model_path.lower():
-        text = text.replace(COT_OPENING, COT_OPENING_QWEN)
-        text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
+        if text.split()[0] == COT_OPENING:
+            text = text.replace(COT_OPENING, COT_OPENING_QWEN)
+            text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
+        elif text.split()[0] == LABEL_OPENING:
+            text = text.replace(COT_OPENING, EXPLANATION_OPENING)
+            text = text.replace(COT_CLOSING, EXPLANATION_CLOSING)
     return text
 
 
@@ -135,7 +139,8 @@ def prepare_dataset_for_verl(
             question_raw = example.pop("question")
             answer_raw = example.pop("answer")
 
-            question_modified = do_preprocessing(question_raw, model_path=model_path)
+            question = do_preprocessing(question_raw, model_path=model_path)
+            answer = do_preprocessing(answer_raw, model_path=model_path)
 
             solution = extract_xml_answer(answer_raw)
             data = {
@@ -143,10 +148,10 @@ def prepare_dataset_for_verl(
                 "prompt": [
                     {
                         "role": "system",
-                        "content": MULTIRULE_SYSTEM_PROMPT_V4},
+                        "content": MULTIRULE_SYSTEM_PROMPT_V5},
                     {
                         "role": "user",
-                        "content": question_raw,
+                        "content": question,
                     }
                 ],
                 "ability": "compliance",
@@ -155,8 +160,8 @@ def prepare_dataset_for_verl(
                     "model": model_path,
                     "split": split,
                     "index": idx,
-                    "answer": answer_raw,
-                    "question": question_modified,
+                    "answer": answer,
+                    "question": question,
                 },
             }
             return data
