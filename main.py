@@ -26,37 +26,43 @@ def main(args):
     if args.run_sft:
         print("Starting SFT...")
         model_name = get_model_name(model_path)
-        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}_ep{args.sft_epochs}"
-        sft_cmd = [
-            "torchrun",
-            f"--nproc_per_node={num_gpus}",
-            f"-m", "verl.trainer.fsdp_sft_trainer",
-            f"model.partial_pretrain={model_path}",
-            f"model.enable_gradient_checkpointing=True",
-            f"data.train_files={train_files}",
-            f"data.val_files={val_files}",
-            f"data.prompt_key=extra_info",
-            f"data.response_key=extra_info",
-            f"data.prompt_dict_keys=['question']",
-            f"data.response_dict_keys=['answer']",
-            f"+data.add_system_prompt=True",
-            f"data.max_length={args.max_prompt_length}",
-            f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
-            f"data.train_batch_size={args.sft_batch_size}",
-            f"optim.lr={args.sft_lr}",
-            f"optim.lr_scheduler={args.sft_lr_schedule}",
-            f"trainer.total_epochs={args.sft_epochs}",
-            f"trainer.logger=['console','wandb']",
-            f"trainer.project_name={args.sft_wandb_project}",
-            f"trainer.experiment_name={sft_run_name}",
-            f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
-        ]
-        subprocess.run(sft_cmd, check=True)
-        last_checkpoint_path = get_last_checkpoint_path(sft_run_name, checkpoint_dir=args.checkpoint_dir)
-        print(f"Successfully completed SFT. Last checkpoint was saved to {last_checkpoint_path}")
-        
-        # Push to Hugging Face Hub and use that model_path for GRPO
-        model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path)
+        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}_ep{args.sft_epochs}_{args.sft_lr_schedule}"
+        if args.resume_grpo:
+            # No need to rerun SFT. But we want to be inside the sft section if --run_sft was given so we pick up the correct sft_run_name for the GRPO checkpoint.
+            pass
+        else:
+            sft_cmd = [
+                "torchrun",
+                f"--nproc_per_node={num_gpus}",
+                f"-m", "verl.trainer.fsdp_sft_trainer",
+                f"model.partial_pretrain={model_path}",
+                f"model.enable_gradient_checkpointing=True",
+                f"data.train_files={train_files}",
+                f"data.val_files={val_files}",
+                f"data.prompt_key=extra_info",
+                f"data.response_key=extra_info",
+                f"data.prompt_dict_keys=['question']",
+                f"data.response_dict_keys=['answer']",
+                f"+data.add_system_prompt=True",
+                f"data.max_length={args.max_prompt_length}",
+                f"data.filter_overlong_prompts=True",
+                f"data.truncation=left",
+                f"data.micro_batch_size_per_gpu={args.batch_size_per_gpu}",
+                f"data.train_batch_size={args.sft_batch_size}",
+                f"optim.lr={args.sft_lr}",
+                f"optim.lr_scheduler={args.sft_lr_schedule}",
+                f"trainer.total_epochs={args.sft_epochs}",
+                f"trainer.logger=['console','wandb']",
+                f"trainer.project_name={args.sft_wandb_project}",
+                f"trainer.experiment_name={sft_run_name}",
+                f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
+            ]
+            subprocess.run(sft_cmd, check=True)
+            last_checkpoint_path = get_last_checkpoint_path(sft_run_name, checkpoint_dir=args.checkpoint_dir)
+            print(f"Successfully completed SFT. Last checkpoint was saved to {last_checkpoint_path}")
+            
+            # Push to Hugging Face Hub and use that model_path for GRPO
+            model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path)
 
     ################################
     # GRPO Training
@@ -69,8 +75,14 @@ def main(args):
         
         model_name = get_model_name(model_path)
         grpo_run_name = f"{model_name}_{args.split}_grpo_ex{num_examples}_lr{args.grpo_lr}_bs{args.grpo_batch_size}_len{args.max_response_length}"
+        
         if args.run_sft:
             grpo_run_name = grpo_run_name.replace(f"{model_name}_{args.split}", sft_run_name)
+
+        if args.resume_grpo:
+            resume_mode = "auto"
+        else:
+            resume_mode = "disable"
   
         grpo_cmd = [
             "python3",   
@@ -82,7 +94,7 @@ def main(args):
             f"data.max_prompt_length={args.max_prompt_length}",
             f"data.max_response_length={args.max_response_length}",
             f"data.filter_overlong_prompts=True",
-            f"data.truncation='error'",
+            f"data.truncation=error",
             f"actor_rollout_ref.model.path={model_path}",
             f"actor_rollout_ref.actor.optim.lr={args.grpo_lr}",
             f"actor_rollout_ref.actor.optim.warmup_style={args.grpo_lr_schedule}",
@@ -114,8 +126,10 @@ def main(args):
             f"trainer.experiment_name={grpo_run_name}",
             f"trainer.n_gpus_per_node={num_gpus}",
             f"trainer.nnodes=1",
-            f"trainer.save_freq=20",
+            f"trainer.save_freq=10",
             f"trainer.test_freq=5",
+            f"trainer.max_actor_ckpt_to_keep=1",
+            f"trainer.resume_mode={resume_mode}",
             f"trainer.total_epochs={args.grpo_epochs}",
             f"trainer.default_local_dir={args.checkpoint_dir}/{grpo_run_name}",
             f"custom_reward_function.path=verl/compliance/helpers.py", 
@@ -169,6 +183,7 @@ def parse_args():
     parser.add_argument("--num_generations", default=12, type=int, help="Number of generations (default: 12)")
     parser.add_argument("--max_response_length", default=1024, type=int, help="Max response length (default: 1024)")
     parser.add_argument("--grpo_lr_schedule", default="cosine", help="Learning rate schedule (default: cosine)", choices=["cosine", "constant"])
+    parser.add_argument("--resume_grpo", default=False, action=argparse.BooleanOptionalAction, help="Resume GRPO training from last checkpoint (default: disabled)")
     return parser.parse_args()
 
 if __name__ == "__main__":

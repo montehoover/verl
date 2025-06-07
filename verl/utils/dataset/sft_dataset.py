@@ -18,10 +18,12 @@ SFT dataset
 Each parquet file contains
 """
 
+import os
 from typing import List, Union
 
 import pandas as pd
 import torch
+import datasets
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer
 
@@ -69,6 +71,11 @@ class SFTDataset(Dataset):
         self.response_key = response_key if isinstance(response_key, (tuple, list)) else [response_key]
         self.prompt_dict_keys = prompt_dict_keys if prompt_dict_keys else []
         self.response_dict_keys = response_dict_keys if response_dict_keys else []
+        
+        self.filter_overlong_prompts = config.get("filter_overlong_prompts", True)
+        self.num_workers = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
+        self.num_workers = min(self.num_workers, os.cpu_count())
+
 
         self.max_length = max_length
 
@@ -94,6 +101,22 @@ class SFTDataset(Dataset):
             dataframe = pd.read_parquet(parquet_file)
             dataframes.append(dataframe)
         self.dataframe = pd.concat(dataframes)
+
+        # TODO: Update to support the prompt/response pair that is used by SFT instead of
+        # this code that was reused from the rl_dataset.py file
+        # filter out too long prompts
+        if self.filter_overlong_prompts:
+            tokenizer = self.tokenizer
+            prompt_key = self.prompt_key[0] if isinstance(self.prompt_key, (tuple, list)) else self.prompt_key
+            ds = datasets.Dataset.from_pandas(self.dataframe, preserve_index=False)
+            ds= ds.filter(
+                lambda doc: len(tokenizer.apply_chat_template(doc["prompt"], add_generation_prompt=True)) <= self.max_length,
+                num_proc=self.num_workers,
+                desc=f"Filtering prompts longer than {self.max_length} tokens",
+            )
+            self.dataframe = ds.to_pandas()
+            print(f"filter dataset len: {len(self.dataframe)}")
+
         self.prompts = self.dataframe[self.prompt_key]
         for key in self.prompt_dict_keys:
             # type(x): pandas.core.series.Series

@@ -96,8 +96,11 @@ def do_preprocessing(text, model_path=None):
             text = text.replace(COT_OPENING, COT_OPENING_QWEN)
             text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
         elif text.split()[0] == LABEL_OPENING:
+            # The non-cot case
             text = text.replace(COT_OPENING, EXPLANATION_OPENING)
             text = text.replace(COT_CLOSING, EXPLANATION_CLOSING)
+            # This is the format for the qwen chat template when enable_thinking=False.
+            text = f"{COT_OPENING_QWEN}\n\n{COT_CLOSING_QWEN}\n\n{text}"
     return text
 
 
@@ -263,7 +266,7 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
         subprocess.run(model_merger_cmd, check=True)
         checkpoint_path = temp_path
 
-    hf_hub_path = f"tomg-group-umd/c_{run_name}"
+    hf_hub_path = f"tomg-group-umd/{run_name}"
     upload_model_to_huggingface(checkpoint_path, hf_hub_path)
     # AutoModelForCausalLM.from_pretrained(checkpoint_path).push_to_hub(hf_hub_path, private=True)
     # AutoTokenizer.from_pretrained(original_model).push_to_hub(hf_hub_path, private=True)

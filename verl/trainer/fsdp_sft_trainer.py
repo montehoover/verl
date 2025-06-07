@@ -145,7 +145,7 @@ class FSDPSFTTrainer:
         if self.device_mesh.get_rank() == 0:
             print(f"Using FSDP rank {rank} and size {world_size} for data distribution")
 
-        self.train_sampler = DistributedSampler(self.train_dataset, shuffle=True, num_replicas=world_size, rank=rank, drop_last=True)
+        self.train_sampler = DistributedSampler(self.train_dataset, shuffle=config.data.shuffle, num_replicas=world_size, rank=rank, drop_last=True)
         self.train_dataloader = DataLoader(
             dataset=self.train_dataset,
             batch_size=config.data.train_batch_size,
