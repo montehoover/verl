@@ -15,6 +15,7 @@ NEG_LABEL = "PASS"
 
 RULES_OPENING = "<rules_violated>"
 RULES_CLOSING = "</rules_violated>"
+RULES_SEPARATOR = ","
 RULE_NUMBER_OPENING = "<rule_number>"
 RULE_NUMBER_CLOSING = "</rule_number>"
 LINE_OPENING = "<line_in_transcript>"

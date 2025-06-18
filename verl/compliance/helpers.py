@@ -11,10 +11,14 @@ import sys
 import time
 import datasets
 import shutil
+import torch
 from requests import HTTPError
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from nltk.metrics import jaccard_distance
+from sklearn.metrics import roc_auc_score
 
-from verl.compliance.constants import EXPLANATION_CLOSING, EXPLANATION_OPENING, LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN, MULTIRULE_SYSTEM_PROMPT_V5, NEG_LABEL, POS_LABEL
+from verl.compliance.constants import EXPLANATION_CLOSING, EXPLANATION_OPENING, LABEL_CLOSING, LABEL_OPENING, MULTIRULE_SYSTEM_PROMPT_V4, COT_OPENING, COT_CLOSING, COT_OPENING_QWEN, COT_CLOSING_QWEN, MULTIRULE_SYSTEM_PROMPT_V5, NEG_LABEL, POS_LABEL, RULES_CLOSING, RULES_OPENING, RULES_SEPARATOR
+from verl.compliance.model_wrappers import VllmModelWrapper
 
 
 def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns()}.log"):
@@ -41,47 +45,47 @@ def configure_logging(log_level=None, ext_level_bump=1, log_file=f"{time.time_ns
         ]
     )
 
-def prepare_dataset_for_verl_old(
-    dataset="tomg-group-umd/complinace",
-    subset="compliance",
-    split="train_cot",
-    num_examples=-1,
-    num_val_examples=256,
-    redownload=False,
-    local_dir="data/compliance",
-):
-    train_path = os.path.join(local_dir, "train.parquet")
-    val_path = os.path.join(local_dir, "val.parquet")
-    if (
-        os.path.exists(train_path) and
-        os.path.exists(val_path) and 
-        not redownload
-    ):
-        print(f"Dataset already exists at {local_dir}. Use --redownload to force a new download.")
-        return train_path, val_path
+# def prepare_dataset_for_verl_old(
+#     dataset="tomg-group-umd/complinace",
+#     subset="compliance",
+#     split="train_cot",
+#     num_examples=-1,
+#     num_val_examples=256,
+#     redownload=False,
+#     local_dir="data/compliance",
+# ):
+#     train_path = os.path.join(local_dir, "train.parquet")
+#     val_path = os.path.join(local_dir, "val.parquet")
+#     if (
+#         os.path.exists(train_path) and
+#         os.path.exists(val_path) and 
+#         not redownload
+#     ):
+#         print(f"Dataset already exists at {local_dir}. Use --redownload to force a new download.")
+#         return train_path, val_path
 
-    if os.path.exists(dataset):
-        dataset = datasets.load_dataset("json", datafiles=dataset, split="train")
-    else:
-        dataset = datasets.load_dataset(dataset, subset, split=split)
+#     if os.path.exists(dataset):
+#         dataset = datasets.load_dataset("json", datafiles=dataset, split="train")
+#     else:
+#         dataset = datasets.load_dataset(dataset, subset, split=split)
     
-    if num_examples > 0 and num_examples < len(dataset):
-        dataset = dataset.shuffle(seed=42).select(range(num_examples))
+#     if num_examples > 0 and num_examples < len(dataset):
+#         dataset = dataset.shuffle(seed=42).select(range(num_examples))
     
-    train_test_split = dataset.train_test_split(test_size=num_val_examples, seed=42)
-    train_set = train_test_split['train']
-    val_set = train_test_split['test']
+#     train_test_split = dataset.train_test_split(test_size=num_val_examples, seed=42)
+#     train_set = train_test_split['train']
+#     val_set = train_test_split['test']
 
-    def format_to_verl(example):
-        return {"verl_stuff": {"question": example["question"], "answer": example["answer"]}}
+#     def format_to_verl(example):
+#         return {"verl_stuff": {"question": example["question"], "answer": example["answer"]}}
 
-    train_set = train_set.map(format_to_verl)
-    val_set = val_set.map(format_to_verl)
+#     train_set = train_set.map(format_to_verl)
+#     val_set = val_set.map(format_to_verl)
 
-    train_set.to_parquet(train_path)
-    val_set.to_parquet(val_path)
-    print(f"Dataset downloaded and saved to {train_path} and {val_path}")
-    return train_path, val_path
+#     train_set.to_parquet(train_path)
+#     val_set.to_parquet(val_path)
+#     print(f"Dataset downloaded and saved to {train_path} and {val_path}")
+#     return train_path, val_path
 
 
 def extract_xml_answer(text, opening_tag=LABEL_OPENING, closing_tag=LABEL_CLOSING):
@@ -113,6 +117,9 @@ def prepare_dataset_for_verl(
     redownload=False,
     local_dir="data/compliance",
     model_path="",
+    do_rules_rewards=False,
+    val_dataset_split=None,
+    test_cuda_memory=False,
 ):
     train_path = os.path.join(local_dir, "train.parquet")
     val_path = os.path.join(local_dir, "val.parquet")
@@ -132,9 +139,13 @@ def prepare_dataset_for_verl(
     if num_examples > 0 and num_examples < len(dataset):
         dataset = dataset.shuffle(seed=42).select(range(num_examples))
     
-    train_test_split = dataset.train_test_split(test_size=num_val_examples, seed=42)
-    train_dataset = train_test_split["train"]
-    val_dataset = train_test_split["test"]
+    if val_dataset_split is None:
+        train_test_split = dataset.train_test_split(test_size=num_val_examples, seed=42)
+        train_dataset = train_test_split["train"]
+        val_dataset = train_test_split["test"]
+    else:
+        train_dataset = dataset
+        val_dataset = datasets.load_dataset(dataset_path, subset, split=val_dataset_split)
 
     # Taken from examples/data_preprocess/gsm8k.py
     def make_map_fn(split, model_path=None):
@@ -151,7 +162,8 @@ def prepare_dataset_for_verl(
                 "prompt": [
                     {
                         "role": "system",
-                        "content": MULTIRULE_SYSTEM_PROMPT_V5},
+                        "content": MULTIRULE_SYSTEM_PROMPT_V5,
+                    },
                     {
                         "role": "user",
                         "content": question,
@@ -165,8 +177,12 @@ def prepare_dataset_for_verl(
                     "index": idx,
                     "answer": answer,
                     "question": question,
+                    "do_rules_rewards": do_rules_rewards,
                 },
             }
+            if test_cuda_memory:
+                data["prompt"][0]["content"] = ""
+                data["prompt"][1]["content"] = " ".join(["and" for _ in range(8160)])
             return data
         return process_fn
 
@@ -240,6 +256,22 @@ def upload_model_to_huggingface(checkpoint_path, hf_hub_path, private=True):
     api.create_repo(repo_id=hf_hub_path, private=private, exist_ok=True)
     api.upload_folder(folder_path=checkpoint_path, repo_id=hf_hub_path, repo_type="model")
 
+def convert_to_hf(checkpoint_path, original_model):
+    target_dir = f"{checkpoint_path}/hf"
+    model_merger_cmd = [
+        "python",
+        "scripts/model_merger.py",
+        "merge",
+        "--backend", "fsdp",
+        "--hf_model_path", original_model,
+        "--local_dir", checkpoint_path,
+        "--target_dir", target_dir,
+        # "--hf_upload_path", hf_hub_path,
+        # "--private", "True",
+    ]
+    subprocess.run(model_merger_cmd, check=True)
+    return target_dir
+
 def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
     assert os.path.exists(checkpoint_path) and os.path.isdir(checkpoint_path), f"We need the path to a directory that contains model files, not a file. Got {checkpoint_path} instead."
     
@@ -277,7 +309,7 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
     
     return hf_hub_path
 
-def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=False):
+def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=False, delete_checkpoint=False):
     new_model_path = checkpoint_path
     try:
         new_model_path = convert_and_push_to_hub(checkpoint_path=checkpoint_path, run_name=run_name, original_model=original_model)
@@ -288,14 +320,20 @@ def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=Fal
             raise
         else:
             print("Continuing without pushing to Hugging Face Hub...")
+
+    if delete_checkpoint:
+        print(f"Deleting checkpoint at {checkpoint_path}...")
+        shutil.rmtree(checkpoint_path, ignore_errors=True)
+        print("Checkpoint deleted.")
     return new_model_path
 
 def get_model_name(model_path):
     # The leading .* gobbles up as much as possible, so if there are multiple
     # instances of Qwen, it only returns the last one instead of both.
     # The .*? is a non-greedy match, so it will stop at the first instance of B.
+    
     patterns = [
-        r'.*(Qwen.*?B)',
+        r'.*(Qwen.*?B(?:-Base)?)', # :? makes the parenthesis non-capturing, so it allows a match without create a separate group. The contents are still captured by the outer group.
         r'.*(Llama.*?B)',
         r'.*(llama.*?b)',
         r'.*(wildguard)',
@@ -309,23 +347,101 @@ def get_model_name(model_path):
     # Replace slashes with underscores to make it a valid model name.
     return model_path.replace("/", "_")
 
+def get_auc(model_path, dataset_path):
+    # Clean up CUDA state so it doesn't create a conflit with a new VLLM instance
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+    # Values recommended in hf model card for non-thinking mode.
+    temperature = 0.7
+    top_p = 0.8
+    top_k = 20
+    model = VllmModelWrapper(model_path, temperature=temperature, top_k=top_k, top_p=top_p)
+    dataset = datasets.load_dataset("parquet", data_files=dataset_path, split="train")
+
+    # From data preprocessing above:
+    # "prompt": [
+    #     {
+    #         "role": "system",
+    #         "content": MULTIRULE_SYSTEM_PROMPT_V5},
+    #     {
+    #         "role": "user",
+    #         "content": question,
+    #     }
+    # ],
+    # "ability": "compliance",
+    # "reward_model": {"style": "rule", "ground_truth": solution},
+    sys_content = lambda x: x["prompt"][0]["content"]
+    user_content = lambda x: x["prompt"][1]["content"]
+    label = lambda x: x["reward_model"]["ground_truth"]
+
+    messages = [model.apply_chat_template(sys_content(x), user_content(x), enable_thinking=False) for x in dataset]
+    ground_truth_labels = [label(x) for x in dataset]
+    y_true = [1 if label == POS_LABEL else 0 for label in ground_truth_labels]
+
+    pos_label_probs, logit_pairs = model.get_prediction_probs(messages)
+    
+    auc = roc_auc_score(y_true, pos_label_probs)
+    return auc
+
+
+def check_pytorch_cuda_error():
+    if not torch.cuda.is_available():
+        return "CUDA not available"
+    
+    try:
+        # Try to access CUDA - will fail if memory is corrupted
+        device_count = torch.cuda.device_count()
+        
+        for i in range(device_count):
+            try:
+                # Try basic CUDA operations
+                torch.cuda.set_device(i)
+                torch.cuda.empty_cache()
+                
+                # Check memory usage
+                allocated = torch.cuda.memory_allocated(i)
+                reserved = torch.cuda.memory_reserved(i)
+                max_allocated = torch.cuda.max_memory_allocated(i)
+                
+                # If we're at 100% memory usage, that's likely the issue
+                total_memory = torch.cuda.get_device_properties(i).total_memory
+                if reserved / total_memory > 0.95:
+                    return f"GPU {i} memory exhausted: {reserved/1e9:.1f}GB / {total_memory/1e9:.1f}GB"
+                    
+            except RuntimeError as cuda_err:
+                if "out of memory" in str(cuda_err).lower():
+                    return f"CUDA OOM on GPU {i}: {cuda_err}"
+                elif "cuda" in str(cuda_err).lower():
+                    return f"CUDA error on GPU {i}: {cuda_err}"
+                    
+    except Exception as e:
+        return f"PyTorch CUDA check failed: {e}"
+    
+    return None
 
 ####################
 # Reward functions
 ####################
 # Reward between 0.0 and 1.0.
 # Breakdown:
-#   Correctness: 0.68
-#   Format: 0.32
-#     Labels printed correctly: 0.08 (PASS/FAIL)
-#     All 4 xml tag plus newlines exactly: 0.08
-#     All 4 xml tags in the right order: 0.08
-#     Xml tags present at all: 0.02 per tag for total of 0.08
+#   Label Correctness: 0.40
+#   Rule Correctness: 0.30
+#   Format: 0.30
+#     Labels printed correctly: 0.06 (PASS/FAIL)
+#     All 4 xml tag plus newlines exactly: 0.06
+#     All 4 xml tags in the right order: 0.06
+#     Xml tags present at all: 0.02 per tag for total of 0.12
 def compute_reward(data_source, solution_str, ground_truth, extra_info=None):
+    assert "compliance" in data_source, f"Data source {data_source} is not a compliance dataset. Expected tomg-group-umd/compliance or montehoover/compliance."
+    assert extra_info is not None, "Extra info must be provided to compute the reward for rules_violated. Check the data preprocessing step to make sure there is a column in the dataset named extra_info."
+
     pos_label = POS_LABEL
     neg_label = NEG_LABEL
     label_opening = LABEL_OPENING
     label_closing = LABEL_CLOSING
+    rules_opening = RULES_OPENING
+    rules_closing = RULES_CLOSING
     cot_opening = COT_OPENING
     cot_closing = COT_CLOSING
     model = extra_info.get("model", None) if extra_info else None
@@ -333,57 +449,74 @@ def compute_reward(data_source, solution_str, ground_truth, extra_info=None):
         cot_opening = COT_OPENING_QWEN
         cot_closing = COT_CLOSING_QWEN
 
-    assert "compliance" in data_source, f"Data source {data_source} is not a compliance dataset. Expected tomg-group-umd/compliance or montehoover/compliance."
-    correctness_reward = correctness_reward_func(solution_str, ground_truth, label_opening, label_closing)
-    label_format_reward = label_reward_func(solution_str, label_opening, label_closing, pos_label, neg_label)
-    strict_format_reward = strict_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
-    soft_format_reward = soft_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
-    xml_count_reward = xmlcount_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing)
-    return correctness_reward + label_format_reward + strict_format_reward + soft_format_reward + xml_count_reward
+    ground_truth_label = ground_truth
+    full_ground_truth = extra_info.get("answer", None)
+    do_rules_rewards = extra_info.get("do_rules_rewards", False)
 
-def correctness_reward_func(model_output, ground_truth, label_opening, label_closing):
+    if do_rules_rewards:
+        rules_reward = rules_reward_func(solution_str, full_ground_truth, rules_opening, rules_closing, points=0.30)
+        correctness_reward = correctness_reward_func(solution_str, ground_truth_label, label_opening, label_closing, points=0.40)
+        label_format_reward = label_reward_func(solution_str, label_opening, label_closing, pos_label, neg_label, points=0.06)
+        strict_format_reward = strict_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, points=0.06)
+        soft_format_reward = soft_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, points=0.06)
+        xml_count_reward = xmlcount_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, rules_opening, rules_closing, points=0.02)
+        return rules_reward + correctness_reward + label_format_reward + strict_format_reward + soft_format_reward + xml_count_reward
+    else:
+        correctness_reward = correctness_reward_func(solution_str, ground_truth_label, label_opening, label_closing, points=0.68)
+        label_format_reward = label_reward_func(solution_str, label_opening, label_closing, pos_label, neg_label, points=0.08)
+        strict_format_reward = strict_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, points=0.08)
+        soft_format_reward = soft_format_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, points=0.08)
+        xml_count_reward = xmlcount_reward_func(solution_str, cot_opening, cot_closing, label_opening, label_closing, rules_opening, rules_closing, points=0.02)
+        return correctness_reward + label_format_reward + strict_format_reward + soft_format_reward + xml_count_reward
+
+def correctness_reward_func(model_output, ground_truth, label_opening, label_closing, points=0.40):
     prediction = extract_xml_answer(model_output, label_opening, label_closing)
-    return 0.68 if prediction == ground_truth else 0.0 
+    return points if prediction == ground_truth else 0.0 
 
-def label_reward_func(model_output, label_opening, label_closing, pos_label, neg_label):
+def rules_reward_func(model_output, full_ground_truth, rules_opening, rules_closing, points=0.30):
+    ground_truth_rules_string = extract_xml_answer(full_ground_truth, rules_opening, rules_closing)
+    predicted_rules_string = extract_xml_answer(model_output, rules_opening, rules_closing)
+    ground_truth_rules = set([s.strip() for s in ground_truth_rules_string.split(RULES_SEPARATOR)])
+    predicted_rules = set([s.strip() for s in predicted_rules_string.split(RULES_SEPARATOR)])
+    score = 1 - jaccard_distance(ground_truth_rules, predicted_rules) # jaccard dist is between 0 and 1, so for the score 1.0 means perfect match, 0.0 means no overlap
+    return score * points
+
+def label_reward_func(model_output, label_opening, label_closing, pos_label, neg_label, points=0.06):
     """Reward function that checks if the label is exactly PASS or FAIL."""
     prediction = extract_xml_answer(model_output, label_opening, label_closing)
-    return 0.08 if prediction in [pos_label, neg_label] else 0.0
+    return points if prediction in [pos_label, neg_label] else 0.0
 
-def strict_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
+def strict_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing, points=0.06):
     """Reward function that checks if the completion is in XML_COT_FORMAT, strictly adhering to newlines before and after every tag."""
     # pattern = r"^\n<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
     pattern = fr"^\n{cot_opening}\n.*?\n{cot_closing}\n{label_opening}\n.*?\n{label_closing}\n$"
     match = re.search(pattern, model_output)
-    return 0.08 if match else 0.0
+    return points if match else 0.0
 
-def soft_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
+def soft_format_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing, points=0.06):
     """Reward function that checks if the completion is in XML_COT_FORMAT, with flexibility in newlines and whitespace."""
     # pattern = r"^\s*<reasoning>\s*.*?\s*</reasoning>\s*<answer>\s*.*?\s*</answer>\s*$"
     pattern = fr"^\s*{cot_opening}\s*.*?\s*{cot_closing}\s*{label_opening}\s*.*?\s*{label_closing}\s*$"
     match = re.search(pattern, model_output)
-    return 0.08 if match else 0.0
+    return points if match else 0.0
 
-def xmlcount_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing):
+def xmlcount_reward_func(model_output, cot_opening, cot_closing, label_opening, label_closing, rules_opening=None, rules_closing=None, points=0.02):
     """We want to encourage xml tags to be present, so just give rewards if they are present at all. Let other functions handle extraneous stuff."""
-    count = 0.0
-    # if model_output.count("<reasoning>\n") == 1:
-    #     count += 0.02
-    # if model_output.count("\n</reasoning>\n") == 1:
-    #     count += 0.02
-    # if model_output.count("\n<answer>\n") == 1:
-    #     count += 0.02
-    # if model_output.count("\n</answer>") == 1:
-    #     count += 0.02
-    if model_output.count(f"{cot_opening}\n") == 1:
-        count += 0.02
-    if model_output.count(f"\n{cot_closing}\n") == 1:
-        count += 0.02
-    if model_output.count(f"\n{label_opening}\n") == 1:
-        count += 0.02
-    if model_output.count(f"\n{label_closing}") == 1:
-        count += 0.02
-    return count
+    reward = 0.0
+    if model_output.count(cot_opening) == 1:
+        reward += points
+    if model_output.count(cot_closing) == 1:
+        reward += points
+    if model_output.count(label_opening) == 1:
+        reward += points
+    if model_output.count(label_closing) == 1:
+        reward += points
+    if rules_opening is not None and rules_closing is not None:
+        if model_output.count(rules_opening) == 1:
+            reward += points
+        if model_output.count(rules_closing) == 1:
+            reward += points
+    return reward
 #######################
 # End reward functions
 #######################
