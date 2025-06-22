@@ -12,7 +12,7 @@ def main(args):
     num_examples = args.num_examples
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check the that this is being called where you expect it to be."
-    train_files, val_files = prepare_dataset_for_verl(
+    train_files, val_files, num_train_examples = prepare_dataset_for_verl(
         dataset_path=args.dataset,
         subset=args.subset,
         split=args.split,
@@ -23,6 +23,7 @@ def main(args):
         model_path=model_path,
         do_rules_rewards=args.do_rules_rewards,
         val_dataset_split=args.val_split,
+        cuda_mem_test_len=args.cuda_mem_test_len,
     )
 
     ################################
@@ -32,6 +33,16 @@ def main(args):
         print("\nStarting SFT...\n")
         model_name = get_model_name(model_path)
         sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}_ep{args.sft_epochs}_{args.sft_lr_schedule[:3]}"
+
+        # Alway test the same numbe of times per epoch, regardless of batch size, so that each run has validation results after the same number of examples
+        # batch 256, 16k examples: test at  6, 12...
+        # batch 128, 16k examples: test at 12, 24...
+        # batch 64, 16k examples: test at  24, 48...
+        if args.val_steps_per_epoch == 0:
+            val_freq = -1
+        else:
+            val_freq = int(num_train_examples / (args.sft_batch_size * args.val_steps_per_epoch))
+
         if args.resume_grpo:
             # No need to rerun SFT. But we want to be inside the sft section if --run_sft was given so we pick up the correct sft_run_name for the GRPO checkpoint.
             pass
@@ -61,6 +72,7 @@ def main(args):
                 f"trainer.project_name={args.sft_wandb_project}",
                 f"trainer.experiment_name={sft_run_name}",
                 f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
+                f"trainer.test_freq={val_freq}",
             ]
             subprocess.run(sft_cmd, check=True)
             last_checkpoint_path = get_last_checkpoint_path(sft_run_name, checkpoint_dir=args.checkpoint_dir)
@@ -115,7 +127,7 @@ def main(args):
             f"actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={args.grpo_batch_size_per_gpu}",
             f"actor_rollout_ref.rollout.tensor_model_parallel_size=1", # Verl uses 2 when doing a 7B model on 8 GPUs. They use 4 when doing a 32B model on 32 GPUs. 
             f"actor_rollout_ref.rollout.name=vllm",
-            f"actor_rollout_ref.rollout.gpu_memory_utilization=0.7", # Use 0.7 for 14B models, 0.6 for all smaller models
+            f"actor_rollout_ref.rollout.gpu_memory_utilization={args.vllm_cache_utilization}", # Use 0.7 for 14B models, 0.6 for all smaller models
             f"actor_rollout_ref.rollout.n={args.num_generations}",
             f"actor_rollout_ref.rollout.enable_chunked_prefill=False",
             f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.grpo_batch_size_per_gpu}",
@@ -144,23 +156,6 @@ def main(args):
             wandb.init(project=args.grpo_wandb_project, name=grpo_run_name)
         
         subprocess.run(grpo_cmd, check=True)
-        # batch_per_gpu = args.grpo_batch_size_per_gpu
-        # run_finished = False
-        # while batch_per_gpu > 0 and not run_finished:
-        #     grpo_cmd.append(f"actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={batch_per_gpu}")
-        #     grpo_cmd.append(f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={batch_per_gpu}")
-        #     grpo_cmd.append(f"actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={batch_per_gpu}")
-        #     try:
-        #         subprocess.run(grpo_cmd, check=True)
-        #         run_finished = True
-        #     except subprocess.CalledProcessError as e:
-        #         cuda_error = check_pytorch_cuda_error()
-        #         if cuda_error:
-        #         # if "CUDA out of memory" in e.stderr or "CUDA Error: out of memory" in e.stderr:
-        #             print(f"\nOut of memory error with batch size per GPU {batch_per_gpu}. Reducing batch size and retrying...\n")
-        #             batch_per_gpu //= 2
-        #         else:
-        #             raise
 
         last_checkpoint_path = get_last_checkpoint_path(grpo_run_name, checkpoint_dir=args.checkpoint_dir)
         print(f"\nSuccessfully completed GRPO. Last checkpoint was saved to {last_checkpoint_path}\n")
@@ -192,6 +187,7 @@ def parse_args():
     parser.add_argument("--num_val_examples", type=int, default=256, help="Number of examples for validation (default: 256)")
     parser.add_argument("--redownload", default=True, action=argparse.BooleanOptionalAction, help="Force redownload of data (default: disabled)")
     parser.add_argument("--max_prompt_length", default=8192, type=int, help="Max prompt length (default: 8192)")
+    parser.add_argument("--vllm_cache_utilization", default=0.6, type=float, help="VLLM cache utilization (default: 0.6). Set to 0.7 for 14B models, 0.6 for all smaller models.")
     
     # Run info
     parser.add_argument("--run_sft", default=False, action=argparse.BooleanOptionalAction, help="Run SFT (default: enabled)")
@@ -202,6 +198,8 @@ def parse_args():
     parser.add_argument("--wandb_entity", default="guardian-models", help="Weights & Biases entity (default: guardian-models)")
     parser.add_argument("--is_hp_sweep", default=False, action=argparse.BooleanOptionalAction, help="Is this a hyperparameter sweep? (default: disabled)")
     parser.add_argument("--delete_checkpoint_on_push", default=True, action=argparse.BooleanOptionalAction, help="Delete checkpoint after pushing to Hugging Face Hub (default: enabled)")
+    parser.add_argument("--cuda_mem_test_len", default=None, type=int, help="Test CUDA memory with this many tokens (default: disabled)")
+    parser.add_argument("--val_steps_per_epoch", default=10, type=int, help="Frequency of testing during training (0 for never)")
 
     # SFT
     parser.add_argument("--sft_wandb_project", default="sft-compliance", help="Trainer project name for WandB (default: sft-compliance)")

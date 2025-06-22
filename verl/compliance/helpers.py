@@ -119,7 +119,7 @@ def prepare_dataset_for_verl(
     model_path="",
     do_rules_rewards=False,
     val_dataset_split=None,
-    test_cuda_memory=False,
+    cuda_mem_test_len=None,
 ):
     train_path = os.path.join(local_dir, "train.parquet")
     val_path = os.path.join(local_dir, "val.parquet")
@@ -180,9 +180,9 @@ def prepare_dataset_for_verl(
                     "do_rules_rewards": do_rules_rewards,
                 },
             }
-            if test_cuda_memory:
+            if cuda_mem_test_len is not None:
                 data["prompt"][0]["content"] = ""
-                data["prompt"][1]["content"] = " ".join(["and" for _ in range(8160)])
+                data["prompt"][1]["content"] = " ".join(["and" for _ in range(cuda_mem_test_len)])
             return data
         return process_fn
 
@@ -192,7 +192,8 @@ def prepare_dataset_for_verl(
     train_dataset.to_parquet(train_path)
     val_dataset.to_parquet(val_path)
     print(f"Dataset downloaded and saved to {train_path} and {val_path}")
-    return train_path, val_path
+    num_examples = len(train_dataset)
+    return train_path, val_path, num_examples
 
 
 def get_subset(train_path, num_examples, filetype="parquet"):
