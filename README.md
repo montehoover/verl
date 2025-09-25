@@ -4,6 +4,7 @@
 1. Setup environment:
    ```
    module load cuda
+   conda create -n verl python=3.10
    pip install -r requirements.txt
    pip install flash-attn --no-build-isolation
    pip install -e .[vllm]
