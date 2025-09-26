@@ -41,7 +41,7 @@ def main(args):
         if args.val_steps_per_epoch == 0:
             val_freq = -1
         else:
-            val_freq = int(num_train_examples / (args.sft_batch_size * args.val_steps_per_epoch))
+            val_freq = int(num_train_examples / (args.sft_batch_size * args.val_steps_per_epoch)) or -1 # If val_steps_per_epoch is 0, set val_freq to -1 to denote no validation and avoid division by zero
 
         if args.resume_grpo:
             # No need to rerun SFT. But we want to be inside the sft section if --run_sft was given so we pick up the correct sft_run_name for the GRPO checkpoint.
