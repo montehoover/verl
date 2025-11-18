@@ -9,14 +9,14 @@ def main(args):
 
     os.environ["WANDB_ENTITY"] = args.wandb_entity
     model_path = args.model
-    num_examples = args.num_examples
+    num_train_examples = args.num_examples
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check the that this is being called where you expect it to be."
     train_files, val_files, num_train_examples = prepare_dataset_for_verl(
         dataset_path=args.dataset,
         subset=args.subset,
         split=args.split,
-        num_examples=num_examples,
+        num_examples=num_train_examples,
         num_val_examples=args.num_val_examples,
         redownload=args.redownload,
         local_dir="data/compliance",
@@ -32,7 +32,7 @@ def main(args):
     if args.run_sft:
         print("\nStarting SFT...\n")
         model_name = get_model_name(model_path)
-        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}_ep{args.sft_epochs}_{args.sft_lr_schedule[:3]}"
+        sft_run_name = f"{model_name}_{args.split}_sft_lr{args.sft_lr}_bs{args.sft_batch_size}_ep{args.sft_epochs}_{args.sft_lr_schedule[:3]}_{args.seed}"
 
         # Alway test the same numbe of times per epoch, regardless of batch size, so that each run has validation results after the same number of examples
         # batch 256, 16k examples: test at  6, 12...
@@ -41,7 +41,7 @@ def main(args):
         if args.val_steps_per_epoch == 0:
             val_freq = -1
         else:
-            val_freq = int(num_train_examples / (args.sft_batch_size * args.val_steps_per_epoch))
+            val_freq = int(num_train_examples / (args.sft_batch_size * args.val_steps_per_epoch)) or -1 # If val_steps_per_epoch is 0, set val_freq to -1 to denote no validation and avoid division by zero
 
         if args.resume_grpo:
             # No need to rerun SFT. But we want to be inside the sft section if --run_sft was given so we pick up the correct sft_run_name for the GRPO checkpoint.
@@ -53,6 +53,8 @@ def main(args):
                 f"-m", "verl.trainer.fsdp_sft_trainer",
                 f"model.partial_pretrain={model_path}",
                 f"model.enable_gradient_checkpointing=True",
+                f"model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
+                f"model.lora_alpha={0 if args.lora_rank is None else args.lora_alpha}",
                 f"data.train_files={train_files}",
                 f"data.val_files={val_files}",
                 f"data.prompt_key=extra_info",
@@ -73,13 +75,22 @@ def main(args):
                 f"trainer.experiment_name={sft_run_name}",
                 f"trainer.default_local_dir={args.checkpoint_dir}/{sft_run_name}",
                 f"trainer.test_freq={val_freq}",
+                f"trainer.seed={args.seed}",
             ]
+            # Override Verl's initization of wandb so wandb captures our argparse args a little better.
+            # wandb.init()
+            # if args.is_hp_sweep:
+            #     wandb.init()
+            # else:
+            #     wandb.init(project=args.grpo_wandb_project, name=grpo_run_name)
             subprocess.run(sft_cmd, check=True)
+            # wandb.finish()
+
             last_checkpoint_path = get_last_checkpoint_path(sft_run_name, checkpoint_dir=args.checkpoint_dir)
             print(f"\nSuccessfully completed SFT. Last checkpoint was saved to {last_checkpoint_path}\n")
             
             # Push to Hugging Face Hub and use that model_path for GRPO
-            model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path)
+            model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=sft_run_name, original_model=model_path, delete_checkpoint=args.delete_checkpoint_on_push)
 
     ################################
     # GRPO Training
@@ -87,14 +98,20 @@ def main(args):
     if args.run_grpo:
         print("\nStarting GRPO...\n")
         if args.grpo_examples != -1:
-            num_examples = args.grpo_examples
-            train_files = get_subset(train_files, num_examples)
+            num_train_examples = args.grpo_examples
+            train_files = get_subset(train_files, num_train_examples)
         
         model_name = get_model_name(model_path)
-        grpo_run_name = f"{model_name}_{args.split}_grpo_ex{num_examples}_lr{args.grpo_lr}_bs{args.grpo_batch_size}_len{args.max_response_length}"
+        grpo_run_name = f"{model_name}_{args.split}_grpo_ex{num_train_examples}_lr{args.grpo_lr}_bs{args.grpo_batch_size}_len{args.max_response_length}_{args.seed}"
         
         if args.run_sft:
             grpo_run_name = grpo_run_name.replace(f"{model_name}_{args.split}", sft_run_name)
+
+        if args.val_steps_per_epoch == 0:
+            val_freq = -1
+        else:
+            val_freq = int(num_train_examples / (args.grpo_batch_size * args.val_steps_per_epoch))
+        
         if args.resume_grpo:
             resume_mode = "auto"
         else:
@@ -111,10 +128,13 @@ def main(args):
             f"data.max_response_length={args.max_response_length}",
             f"data.filter_overlong_prompts=True",
             f"data.truncation=error",
+            f"data.seed={args.seed}",
             f"actor_rollout_ref.model.path={model_path}",
             f"actor_rollout_ref.actor.optim.lr={args.grpo_lr}",
             f"actor_rollout_ref.actor.optim.warmup_style={args.grpo_lr_schedule}",
             f"actor_rollout_ref.model.use_remove_padding=True",
+            f"actor_rollout_ref.model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
+            f"actor_rollout_ref.model.lora_alpha={0 if args.lora_rank is None else args.lora_alpha}",
             f"actor_rollout_ref.actor.ppo_mini_batch_size={args.num_generations}",
             f"actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={args.grpo_batch_size_per_gpu}",
             f"actor_rollout_ref.actor.use_kl_loss=True",
@@ -142,28 +162,27 @@ def main(args):
             f"trainer.experiment_name={grpo_run_name}",
             f"trainer.n_gpus_per_node={num_gpus}",
             f"trainer.nnodes=1",
-            f"trainer.save_freq=20",
-            f"trainer.test_freq=-1",
-            f"trainer.max_actor_ckpt_to_keep=1",
+            f"trainer.save_freq={args.save_freq}",
+            f"trainer.test_freq={val_freq}",
+            f"trainer.max_actor_ckpt_to_keep={args.num_checkpoints_to_keep}",
             f"trainer.resume_mode={resume_mode}",
             f"trainer.total_epochs={args.grpo_epochs}",
             f"trainer.default_local_dir={args.checkpoint_dir}/{grpo_run_name}",
+
         ]
         # Override Verl's initization of wandb so we can log AUC after training
         if args.is_hp_sweep:
             wandb.init()
-        else:
-            wandb.init(project=args.grpo_wandb_project, name=grpo_run_name)
-        
         subprocess.run(grpo_cmd, check=True)
 
         last_checkpoint_path = get_last_checkpoint_path(grpo_run_name, checkpoint_dir=args.checkpoint_dir)
         print(f"\nSuccessfully completed GRPO. Last checkpoint was saved to {last_checkpoint_path}\n")
         
-        hf_format_model_path = convert_to_hf(last_checkpoint_path, model_path)
-        auc = get_auc(hf_format_model_path, val_files)
-        wandb.log({"val-core/auc": auc})
-        wandb.summary["val-core/auc"] = auc # show in sweep summary table
+        if args.is_hp_sweep:
+            hf_format_model_path = convert_to_hf(last_checkpoint_path, model_path)
+            auc = get_auc(hf_format_model_path, val_files)
+            wandb.log({"val-core/auc": auc})
+            wandb.summary["val-core/auc"] = auc # show in sweep summary table
 
         # Push to Hugging Face Hub
         model_path = push_to_hf_hub(checkpoint_path=last_checkpoint_path, run_name=grpo_run_name, original_model=model_path, delete_checkpoint=args.delete_checkpoint_on_push)
@@ -171,9 +190,7 @@ def main(args):
 
     print("Training process completed successfully.")
 
-
     
-
 def parse_args():
     parser = argparse.ArgumentParser(description="This script runs a PPO training process with configurable parameters.")
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name (default: Qwen/Qwen3-0.6B)")
@@ -197,9 +214,14 @@ def parse_args():
     parser.add_argument("--exit_on_checkpoint_error", default=True, action=argparse.BooleanOptionalAction, help="Exit on checkpoint error (default: enabled)")
     parser.add_argument("--wandb_entity", default="guardian-models", help="Weights & Biases entity (default: guardian-models)")
     parser.add_argument("--is_hp_sweep", default=False, action=argparse.BooleanOptionalAction, help="Is this a hyperparameter sweep? (default: disabled)")
-    parser.add_argument("--delete_checkpoint_on_push", default=True, action=argparse.BooleanOptionalAction, help="Delete checkpoint after pushing to Hugging Face Hub (default: enabled)")
+    parser.add_argument("--delete_checkpoint_on_push", default=False, action=argparse.BooleanOptionalAction, help="Delete checkpoint after pushing to Hugging Face Hub (default: enabled)")
     parser.add_argument("--cuda_mem_test_len", default=None, type=int, help="Test CUDA memory with this many tokens (default: disabled)")
     parser.add_argument("--val_steps_per_epoch", default=10, type=int, help="Frequency of testing during training (0 for never)")
+    parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled (default: None)")
+    parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled (default: None)")
+    parser.add_argument("--num_checkpoints_to_keep", default=1, type=int, help="Number of checkpoints to keep. If None, I think they all are saved.")
+    parser.add_argument("--save_freq", default=20, type=int, help="At how many steps to save a checkpoint (default: 20)")
+    parser.add_argument("--seed", default=1, type=int, help="Random seed (default: 1)")
 
     # SFT
     parser.add_argument("--sft_wandb_project", default="sft-compliance", help="Trainer project name for WandB (default: sft-compliance)")

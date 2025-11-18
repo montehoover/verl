@@ -95,14 +95,19 @@ def extract_xml_answer(text, opening_tag=LABEL_OPENING, closing_tag=LABEL_CLOSIN
 
 
 def do_preprocessing(text, model_path=None):
-    if isinstance(model_path, str) and "qwen" in model_path.lower():
-        if text.split()[0] == COT_OPENING:
-            text = text.replace(COT_OPENING, COT_OPENING_QWEN)
-            text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
-        elif text.split()[0] == LABEL_OPENING:
-            # The non-cot case
-            text = text.replace(COT_OPENING, EXPLANATION_OPENING)
-            text = text.replace(COT_CLOSING, EXPLANATION_CLOSING)
+    """Replace <reasoning> with <thinking>"""
+    # Before we were doing this just for Qwen, but now we should do it for all models.
+    # if isinstance(model_path, str) and "qwen" in model_path.lower():
+
+    if text.split()[0] == COT_OPENING:
+        text = text.replace(COT_OPENING, COT_OPENING_QWEN)
+        text = text.replace(COT_CLOSING, COT_CLOSING_QWEN)
+    elif text.split()[0] == LABEL_OPENING:
+        # The non-cot case with explanation after the answer. Replace <reasoning> with <explanation>
+        text = text.replace(COT_OPENING, EXPLANATION_OPENING)
+        text = text.replace(COT_CLOSING, EXPLANATION_CLOSING)
+
+        if isinstance(model_path, str) and "qwen" in model_path.lower():
             # This is the format for the qwen chat template when enable_thinking=False.
             text = f"{COT_OPENING_QWEN}\n\n{COT_CLOSING_QWEN}\n\n{text}"
     return text
@@ -253,7 +258,6 @@ def get_last_checkpoint_path(run_name, checkpoint_dir="checkpoints"):
 def upload_model_to_huggingface(checkpoint_path, hf_hub_path, private=True):
     from huggingface_hub import HfApi
     api = HfApi()
-    hf_hub_path = hf_hub_path[:96] # Ensure the path is not too long, as HF has a limit of 96 characters.
     api.create_repo(repo_id=hf_hub_path, private=private, exist_ok=True)
     api.upload_folder(folder_path=checkpoint_path, repo_id=hf_hub_path, repo_type="model")
 
@@ -273,7 +277,7 @@ def convert_to_hf(checkpoint_path, original_model):
     subprocess.run(model_merger_cmd, check=True)
     return target_dir
 
-def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
+def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None, custom_name=None):
     assert os.path.exists(checkpoint_path) and os.path.isdir(checkpoint_path), f"We need the path to a directory that contains model files, not a file. Got {checkpoint_path} instead."
     
     hf_format_found = False
@@ -299,7 +303,11 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
         subprocess.run(model_merger_cmd, check=True)
         checkpoint_path = temp_path
 
-    hf_hub_path = f"tomg-group-umd/{run_name}"
+    if custom_name is not None:
+        run_name = custom_name
+    MAX_CHAR_LIMIT = 96  # Hugging Face Hub path limit
+    compliant_run_name = run_name[:MAX_CHAR_LIMIT]  # Ensure run_name is within the limit
+    hf_hub_path = f"tomg-group-umd/{compliant_run_name}"
     upload_model_to_huggingface(checkpoint_path, hf_hub_path)
     # AutoModelForCausalLM.from_pretrained(checkpoint_path).push_to_hub(hf_hub_path, private=True)
     # AutoTokenizer.from_pretrained(original_model).push_to_hub(hf_hub_path, private=True)
@@ -310,11 +318,11 @@ def convert_and_push_to_hub(checkpoint_path, run_name, original_model=None):
     
     return hf_hub_path
 
-def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=False, delete_checkpoint=False):
+def push_to_hf_hub(checkpoint_path, run_name, original_model, raise_on_error=False, delete_checkpoint=False, custom_name=None):
     new_model_path = checkpoint_path
     try:
-        new_model_path = convert_and_push_to_hub(checkpoint_path=checkpoint_path, run_name=run_name, original_model=original_model)
-        print(f"Model pushed to Hugging Face Hub at {new_model_path}")
+        new_model_path = convert_and_push_to_hub(checkpoint_path=checkpoint_path, run_name=run_name, original_model=original_model, custom_name=custom_name)
+        print(f"Model pushed to Hugging Face Hub at https://huggingface.co/{new_model_path}")
     except HTTPError as e:
         print(f"There was an erro when pushing to hf hub: {e}")
         if raise_on_error:
@@ -443,12 +451,17 @@ def compute_reward(data_source, solution_str, ground_truth, extra_info=None):
     label_closing = LABEL_CLOSING
     rules_opening = RULES_OPENING
     rules_closing = RULES_CLOSING
-    cot_opening = COT_OPENING
-    cot_closing = COT_CLOSING
-    model = extra_info.get("model", None) if extra_info else None
-    if model and "qwen" in model.lower():
-        cot_opening = COT_OPENING_QWEN
-        cot_closing = COT_CLOSING_QWEN
+
+    # We used to have a check for Qwen models here, but we should use the same tags for all models now.
+    # model = extra_info.get("model", None) if extra_info else None
+    # if model and "qwen" in model.lower():
+
+    cot_opening = COT_OPENING_QWEN
+    cot_closing = COT_CLOSING_QWEN
+    
+    # else:
+    #     cot_opening = COT_OPENING
+    #     cot_closing = COT_CLOSING
 
     ground_truth_label = ground_truth
     full_ground_truth = extra_info.get("answer", None)
