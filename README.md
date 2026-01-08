@@ -1,3 +1,31 @@
+# Verl for Guardian Models
+
+## Quickstart
+(Do this in branch `dynaguard1`. `main` is synced to upstream Verl as of Jan 8, 2026.)
+1. Setup environment:
+   ```
+   module load cuda/12.6.3
+   conda create -n verl python=3.10
+   uv pip install torch==2.6 --index-url https://download.pytorch.org/whl/cu126
+   uv pip install -r requirements_compliance.txt
+   uv pip install flash-attn==2.7.3 --no-build-isolation
+   uv pip install -e .
+   uv pip install vllm==0.8.4
+   ```
+2. Confirm installation by running a few SFT training steps from our dataset on Qwen3-0.6B
+   ```
+   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --run_sft
+   ```
+3. Run GRPO with:
+   ```
+   python main.py --model Qwen/Qwen3-0.6B --dataset tomg-group-umd/compliance --num_examples 500 --run_grpo
+   ```
+
+Also `scripts/demo_gsm8k_grpo.sh` is confirmed to be working.
+
+Original README:
+
+------------------------
 <div align="center">
  👋 Hi, everyone!
     verl is a RL training library initiated by <b>ByteDance Seed team</b> and maintained by the verl community.
