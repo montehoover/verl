@@ -5,7 +5,7 @@
    ```
    module load cuda/12.6.3
    conda create -n verl python=3.10
-   uv pip install torch==2.6 --index-url https://download.pytorch.org/whl/cu126
+   uv pip install torch==2.6
    uv pip install -r requirements_compliance.txt
    uv pip install flash-attn==2.7.3 --no-build-isolation
    uv pip install -e .
