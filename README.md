@@ -1,3 +1,82 @@
+# Verl for Tomlab
+
+This fork of verl is tested and documented for easy use on Nexus. [main](https://github.com/montehoover/verl/tree/main) is intended to be kept up to date with the [official Verl](https://github.com/volcengine/verl/), and work on specific projects can be in branches or just forks of this repo.
+
+Project branches:
+- [dynaguard1](https://github.com/montehoover/verl/tree/dynaguard1)
+
+## Quickstart
+
+1. Setup environment. This sets up Verl to use FSDP instead of Megatron and Vllm instead of SGLang. This installs from a pre-built wheel of FlashAttention (the normal way), but it has a conflict with the version of `glibc` on Nexus so there is a second step below here to fix this.
+   ```
+   module load cuda/12.8.1
+   module load cudnn/v9.10.2
+   conda create -n verl python=3.12
+   conda activate verl
+   USE_MEGATRON=0
+   USE_SGLANG=0
+   bash scripts/install_vllm_sglang_mcore.sh
+   pip install --no-deps -e .
+   ```
+   
+2. Fix the `glibc` Nexus conflict in FlashAttention. If you run it currently you will get something like "ImportError: /lib64/libc.so.6: version GLIBC_2.32 not found". We use a tool called `polyfill-glibc` to update the FlashAttention .so binary file so it is compatible with Nexus's version of `glibc`, even though it was built for a different version of `glibc`. These instructions are from [here](https://github.com/Dao-AILab/flash-attention/issues/1708#issuecomment-3283420504).
+   ```
+   # Confirm the problem. This should give you an error message. If no error, you can skip this whole part.
+   python -c "import flash_attn"
+   # Show the mismatched versions:
+   FLASH_PATH=$(find $CONDA_PREFIX/lib/python*/site-packages/flash_attn* -name "flash_attn_2_cuda*.so" 2>/dev/null | head -1)
+   FLASH_GLIBC_VERSION=$(objdump -T "$FLASHATTN_PATH" 2>/dev/null | grep -oP 'GLIBC_\K\d+\.\d+' | sort -V | uniq | tail -1)
+   NEXUS_GLIBC_VERSION=$(ldd --version | head -n1 | awk '{print $NF}')
+   echo "$FLASH_GLIBC_VERSION must be equal to or less than $NEXUS_GLIBC_VERSION"
+   # Now fix with polyfill
+   cd ..
+   git clone --single-branch --branch feat/single-threaded https://github.com/tuxxi/polyfill-glibc.git
+   cd polyfill-glibc
+   ninja polyfill-glibc
+   ./polyfill-glibc --target-glibc $NEXUS_GLIBC_VERSION $FLASH_PATH
+   # Confirm it works now. Should import silently.
+   python -c "import flash_attn"
+   ```
+
+2. Update GSM8K dataset into format expected by Verl:
+   ```
+   PROJECT_ROOT=[your project root]
+   python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
+   ```
+   
+3. Confirm installation by running a few GRPO training steps:
+   ```
+   PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
+    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
+    data.train_batch_size=256 \
+    data.max_prompt_length=512 \
+    data.max_response_length=512 \
+    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    critic.optim.lr=1e-5 \
+    critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+    critic.ppo_micro_batch_size_per_gpu=4 \
+    algorithm.kl_ctrl.kl_coef=0.001 \
+    trainer.logger=console \
+    trainer.val_before_train=False \
+    trainer.n_gpus_per_node=1 \
+    trainer.nnodes=1 \
+    trainer.save_freq=10 \
+    trainer.test_freq=10 \
+    trainer.total_epochs=1 2>&1 | tee verl_demo.log
+   ```
+
+Original README:
+
+------------------------
 <div align="center">
  👋 Hi, everyone!
     verl is a RL training library initiated by <b>ByteDance Seed team</b> and maintained by the verl community.
