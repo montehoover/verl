@@ -52,7 +52,7 @@ Project branches:
     data.train_batch_size=256 \
     data.max_prompt_length=512 \
     data.max_response_length=512 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+    actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
@@ -62,7 +62,7 @@ Project branches:
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     critic.optim.lr=1e-5 \
-    critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
+    critic.model.path=Qwen/Qwen3-0.6B \
     critic.ppo_micro_batch_size_per_gpu=4 \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.logger=console \
@@ -73,6 +73,69 @@ Project branches:
     trainer.test_freq=10 \
     trainer.total_epochs=1 2>&1 | tee verl_demo.log
    ```
+
+## Training
+
+Here, we provide commands to run SFT and GRPO on the GSM8k dataset and Qwen3-0.6B model. Notice that the command provided for GRPO is the same as the one provided in Quickstart, except we run on more epochs. We believe the hyperparameters are fairly straightforward, and users can edit the commands as they see fit. 
+
+### SFT
+
+```
+torchrun --standalone --nnodes=1 --nproc_per_node=1 \
+    -m verl.trainer.fsdp_sft_trainer \
+    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
+    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
+    data.prompt_key=extra_info \
+    data.response_key=extra_info \
+    optim.lr=1e-4 \
+    data.prompt_dict_keys=['question'] \
+    +data.response_dict_keys=['answer'] \
+    data.micro_batch_size_per_gpu=4 \
+    model.partial_pretrain=Qwen/Qwen3-0.6B \
+    trainer.default_local_dir=$save_path \
+    trainer.project_name=gsm8k-sft \
+    trainer.experiment_name=gsm8k-sft-qwen3-0.6 \
+    trainer.logger=console \
+    trainer.total_epochs=50 $@ \
+    model.lora_rank=32\
+    model.lora_alpha=16 \
+    model.target_modules=all-linear
+```
+
+### GRPO
+
+```
+PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
+    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
+    data.train_batch_size=256 \
+    data.max_prompt_length=512 \
+    data.max_response_length=512 \
+    actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
+    critic.optim.lr=1e-5 \
+    critic.model.path=Qwen/Qwen3-0.6B \
+    critic.ppo_micro_batch_size_per_gpu=4 \
+    algorithm.kl_ctrl.kl_coef=0.001 \
+    trainer.logger=console \
+    trainer.val_before_train=False \
+    trainer.n_gpus_per_node=1 \
+    trainer.nnodes=1 \
+    trainer.save_freq=10 \
+    trainer.test_freq=10 \
+    trainer.total_epochs=50 2>&1 | tee verl_grpo.log
+```
+
+### DrGRPO
+
+Coming soon!
 
 Original README:
 
