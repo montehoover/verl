@@ -7,6 +7,8 @@ Project branches:
 
 ## Quickstart
 
+(This is a Nexus-confirmed version of the [official quickstart](https://verl.readthedocs.io/en/latest/start/install.html#install-dependencies).)
+
 1. Setup environment. This sets up Verl to use FSDP instead of Megatron and Vllm instead of SGLang. This installs from a pre-built wheel of FlashAttention (the normal way), but it has a conflict with the version of `glibc` on Nexus so there is a second step below here to fix this.
    ```
    module load cuda/12.8.1
