@@ -42,7 +42,8 @@ fi
 
 
 echo "5. May need to fix opencv"
-pip install opencv-python
+# Monte note: opencv-python 4.11 and greater requires numpy>=2.0.0, which conflicts with line 16 of this script.
+pip install "opencv-python<4.11.0"
 pip install opencv-fixer && \
     python -c "from opencv_fixer import AutoFix; AutoFix()"
 
