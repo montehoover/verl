@@ -27,7 +27,7 @@ Project branches:
    python -c "import flash_attn"
    # Show the mismatched versions:
    FLASH_PATH=$(find $CONDA_PREFIX/lib/python*/site-packages/flash_attn* -name "flash_attn_2_cuda*.so" 2>/dev/null | head -1)
-   FLASH_GLIBC_VERSION=$(objdump -T "$FLASHATTN_PATH" 2>/dev/null | grep -oP 'GLIBC_\K\d+\.\d+' | sort -V | uniq | tail -1)
+   FLASH_GLIBC_VERSION=$(objdump -T "$FLASH_PATH" 2>/dev/null | grep -oP 'GLIBC_\K\d+\.\d+' | sort -V | uniq | tail -1)
    NEXUS_GLIBC_VERSION=$(ldd --version | head -n1 | awk '{print $NF}')
    echo "$FLASH_GLIBC_VERSION must be equal to or less than $NEXUS_GLIBC_VERSION"
    # Now fix with polyfill
