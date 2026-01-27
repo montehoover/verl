@@ -13,8 +13,8 @@ Project branches:
    module load cudnn/v9.10.2
    conda create -n verl python=3.12
    conda activate verl
-   USE_MEGATRON=0
-   USE_SGLANG=0
+   export USE_MEGATRON=0
+   export USE_SGLANG=0
    bash scripts/install_vllm_sglang_mcore.sh
    pip install --no-deps -e .
    ```
