@@ -42,7 +42,7 @@ Project branches:
 
 2. Update GSM8K dataset into format expected by Verl:
    ```
-   PROJECT_ROOT=[your project root]
+   PROJECT_ROOT=$PWD
    python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
    ```
    
