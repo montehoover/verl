@@ -48,7 +48,7 @@ Project branches:
    
 3. Confirm installation by running a few GRPO training steps:
    ```
-   PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+   ROCR_VISIBLE_DEVICES= PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
     data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
     data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
     data.train_batch_size=256 \
@@ -57,11 +57,12 @@ Project branches:
     actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.rollout.max_model_len=2048 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     critic.optim.lr=1e-5 \
     critic.model.path=Qwen/Qwen3-0.6B \
