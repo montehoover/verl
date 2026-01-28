@@ -7,6 +7,8 @@ Project branches:
 
 ## Quickstart
 
+(This is a Nexus-confirmed version of the [official quickstart](https://verl.readthedocs.io/en/latest/start/install.html#install-dependencies).)
+
 1. Setup environment. This sets up Verl to use FSDP instead of Megatron and Vllm instead of SGLang. This installs from a pre-built wheel of FlashAttention (the normal way), but it has a conflict with the version of `glibc` on Nexus so there is a second step below here to fix this.
    ```
    module load cuda/12.8.1
@@ -25,7 +27,7 @@ Project branches:
    python -c "import flash_attn"
    # Show the mismatched versions:
    FLASH_PATH=$(find $CONDA_PREFIX/lib/python*/site-packages/flash_attn* -name "flash_attn_2_cuda*.so" 2>/dev/null | head -1)
-   FLASH_GLIBC_VERSION=$(objdump -T "$FLASHATTN_PATH" 2>/dev/null | grep -oP 'GLIBC_\K\d+\.\d+' | sort -V | uniq | tail -1)
+   FLASH_GLIBC_VERSION=$(objdump -T "$FLASH_PATH" 2>/dev/null | grep -oP 'GLIBC_\K\d+\.\d+' | sort -V | uniq | tail -1)
    NEXUS_GLIBC_VERSION=$(ldd --version | head -n1 | awk '{print $NF}')
    echo "$FLASH_GLIBC_VERSION must be equal to or less than $NEXUS_GLIBC_VERSION"
    # Now fix with polyfill
@@ -40,13 +42,13 @@ Project branches:
 
 2. Update GSM8K dataset into format expected by Verl:
    ```
-   PROJECT_ROOT=[your project root]
+   PROJECT_ROOT=$PWD
    python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
    ```
    
-3. Confirm installation by running a few GRPO training steps:
+3. Confirm installation by running a few GRPO training steps. One RTXA5000 has enough memory for this:
    ```
-   PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
+   ROCR_VISIBLE_DEVICES= PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
     data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
     data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
     data.train_batch_size=256 \
@@ -55,11 +57,12 @@ Project branches:
     actor_rollout_ref.model.path=Qwen/Qwen3-0.6B \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.2 \
+    actor_rollout_ref.rollout.max_model_len=2048 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
     critic.optim.lr=1e-5 \
     critic.model.path=Qwen/Qwen3-0.6B \

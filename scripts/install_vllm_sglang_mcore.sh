@@ -12,7 +12,8 @@ fi
 pip install --no-cache-dir "vllm==0.11.0"
 
 echo "2. install basic packages"
-pip install "transformers[hf_xet]>=4.51.0" accelerate datasets peft hf-transfer \
+# Monte note: pin transformers to <5.0.0 to avoid breaking API changes
+pip install "transformers[hf_xet]>=4.51.0,<5.0.0" accelerate datasets peft hf-transfer \
     "numpy<2.0.0" "pyarrow>=15.0.0" pandas "tensordict>=0.8.0,<=0.10.0,!=0.9.0" torchdata \
     ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb dill pybind11 liger-kernel mathruler \
     pytest py-spy pre-commit ruff tensorboard 
@@ -42,7 +43,8 @@ fi
 
 
 echo "5. May need to fix opencv"
-pip install opencv-python
+# Monte note: opencv-python 4.12 and greater requires numpy>=2.0.0, which conflicts with line 16 of this script.
+pip install "opencv-python<4.12.0" "opencv-python-headless<4.12.0"
 pip install opencv-fixer && \
     python -c "from opencv_fixer import AutoFix; AutoFix()"
 
