@@ -103,14 +103,24 @@ checkpoints_volume: modal.Volume = modal.Volume.from_name("verl-grpo-checkpoints
         MODELS_PATH: checkpoints_volume,
         DATA_PATH: data_volume,
     },
-    secrets=[modal.Secret.from_name("wandb-secret")],
     timeout=24 * 60 * MINUTES,
 )
 def train(*arglist) -> None:
     """Run GRPO training on GSM8K dataset"""
     data_volume.reload()
 
-    cmd: list[str] = [
+    cmd: list[str] = _build_train_cmd(use_wandb=False)
+
+    if arglist:
+        cmd.extend(arglist)
+
+    subprocess.run(cmd, check=True)
+    checkpoints_volume.commit()
+
+
+def _build_train_cmd(*, use_wandb: bool) -> list[str]:
+    logger = "trainer.logger=['console','wandb']" if use_wandb else "trainer.logger=console"
+    return [
         "python",
         "-m",
         "verl.trainer.main_ppo",
@@ -143,7 +153,7 @@ def train(*arglist) -> None:
         "actor_rollout_ref.ref.fsdp_config.param_offload=True",
         "algorithm.use_kl_in_reward=False",
         "trainer.critic_warmup=0",
-        "trainer.logger=['console','wandb']",
+        logger,
         "trainer.project_name=verl-grpo-gsm8k",
         "trainer.experiment_name=qwen2.5-0.5b-grpo",
         "trainer.n_gpus_per_node=2",
@@ -157,6 +167,26 @@ def train(*arglist) -> None:
         f"custom_reward_function.name={REWARD_FUNCTION_NAME}",
     ]
 
+# Run with: modal run --detach deployment/modal_grpo.py::train
+# Or with custom args: modal run --detach deployment/modal_grpo.py::train -- trainer.total_epochs=100
+
+
+@app.function(
+    image=image,
+    gpu="H100:2",
+    volumes={
+        MODELS_PATH: checkpoints_volume,
+        DATA_PATH: data_volume,
+    },
+    secrets=[modal.Secret.from_name("wandb-secret")],
+    timeout=24 * 60 * MINUTES,
+)
+def train_wandb(*arglist) -> None:
+    """Run GRPO training with wandb logging (requires wandb-secret)"""
+    data_volume.reload()
+
+    cmd: list[str] = _build_train_cmd(use_wandb=True)
+
     if arglist:
         cmd.extend(arglist)
 
@@ -164,8 +194,7 @@ def train(*arglist) -> None:
     checkpoints_volume.commit()
 
 
-# Run with: modal run --detach deployment/modal_grpo.py::train
-# Or with custom args: modal run --detach deployment/modal_grpo.py::train -- trainer.total_epochs=100
+# Run with: modal run --detach deployment/modal_grpo.py::train_wandb
 
 # ## Inference
 
