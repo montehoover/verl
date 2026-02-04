@@ -82,8 +82,11 @@ class SFTDataset(Dataset):
             import numpy
             import pandas
 
+            # print(f"ls: {ls.reset_index(drop=True).index}")
+            # print(f"isinstance: {isinstance(ls, pandas.core.series.Series)}")
             while isinstance(ls, pandas.core.series.Series | numpy.ndarray) and len(ls) == 1:
-                ls = ls[0]
+                # ls = ls[0]
+                ls = ls.reset_index(drop=True)[0]
             return ls
 
         dataframes = []
@@ -94,7 +97,8 @@ class SFTDataset(Dataset):
         self.dataframe = pd.concat(dataframes)
 
         total = len(self.dataframe)
-        print(f"dataset len: {len(self.dataframe)}")
+        # print(f"dataset len: {len(self.dataframe)}")
+        # print(f"dataset columns: {self.dataframe.columns}")
 
         if self.max_samples > 0 and self.max_samples < total:
             if self.shuffle:
@@ -107,6 +111,8 @@ class SFTDataset(Dataset):
             print(f"selected {self.max_samples} random samples out of {total}")
 
         self.prompts = self.dataframe[self.prompt_key]
+        # print(f"self.prompts: {self.prompts}")
+        # print(f"self.prompt")
         for key in self.prompt_dict_keys:
             # type(x): pandas.core.series.Series
             # type(x[0]): numpy.ndarray
