@@ -168,7 +168,6 @@ PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
     trainer.total_epochs=50 \
-    
     2>&1 | tee verl_drgrpo.log
     
 ```
