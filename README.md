@@ -39,51 +39,20 @@ Project branches:
    # Confirm it works now. Should import silently.
    python -c "import flash_attn"
    ```
-
-2. Update GSM8K dataset into format expected by Verl:
-   ```
-   PROJECT_ROOT=$PWD
-   python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
-   ```
    
 3. Confirm installation by running a few GRPO training steps. One RTXA5000 has enough memory for this:
    ```
-   ROCR_VISIBLE_DEVICES= PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
-    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
-    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
-    data.train_batch_size=256 \
-    data.max_prompt_length=512 \
-    data.max_response_length=512 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.2 \
-    actor_rollout_ref.rollout.max_model_len=2048 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
-    critic.optim.lr=1e-5 \
-    critic.model.path=Qwen/Qwen/Qwen2.5-0.5B-Instruct \
-    critic.ppo_micro_batch_size_per_gpu=4 \
-    algorithm.kl_ctrl.kl_coef=0.001 \
-    trainer.logger=console \
-    trainer.val_before_train=False \
-    trainer.n_gpus_per_node=1 \
-    trainer.nnodes=1 \
-    trainer.save_freq=10 \
-    trainer.test_freq=10 \
-    trainer.total_epochs=1 2>&1 | tee verl_demo.log
+   python run_grpo.py --model Qwen/Qwen3-0.6B --dataset openai/gsm8k --num_examples 10 --no-offload_weights_and_states
    ```
 
-## Training
 
-Here, we provide commands to run SFT and GRPO on the GSM8k dataset and Qwen3-0.6B model. Notice that the command provided for GRPO is the same as the one provided in Quickstart, except we run on more epochs. We believe the hyperparameters are fairly straightforward, and users can edit the commands as they see fit. 
+## Training
 
 ### SFT
 
 ```
+PROJECT_ROOT=$PWD
+python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
 torchrun --standalone --nnodes=1 --nproc_per_node=1 \
     -m verl.trainer.fsdp_sft_trainer \
     data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
@@ -107,70 +76,39 @@ torchrun --standalone --nnodes=1 --nproc_per_node=1 \
 
 ### GRPO
 
+This reproduces the results from https://github.com/volcengine/verl/blob/main/examples/grpo_trainer/run_qwen3-8b.sh.
+It runs successfully on two A6000s with 120GB of CPU memory. These details are captured in [launch.sh](launch.sh).
 ```
-PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
-    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
-    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
-    data.train_batch_size=256 \
-    data.max_prompt_length=512 \
-    data.max_response_length=512 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
-    critic.optim.lr=1e-5 \
-    critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-    critic.ppo_micro_batch_size_per_gpu=4 \
-    algorithm.kl_ctrl.kl_coef=0.001 \
-    trainer.logger=console \
-    trainer.val_before_train=False \
-    trainer.n_gpus_per_node=1 \
-    trainer.nnodes=1 \
-    trainer.save_freq=10 \
-    trainer.test_freq=10 \
-    trainer.total_epochs=50 2>&1 | tee verl_grpo.log
+python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.6 --batch_size_per_gpu 1 --max_prompt_length 512
 ```
 
 ### DrGRPO
 
+This reproduces DrGRPO as described in https://verl.readthedocs.io/en/latest/algo/grpo.html#drgrpo
+
 ```
-PYTHONUNBUFFERED=1 python3 -m verl.trainer.main_ppo \
-    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
-    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
-    data.train_batch_size=256 \
-    data.max_prompt_length=512 \
-    data.max_response_length=512 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-    actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.actor.ppo_mini_batch_size=64 \
-    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 \
-    actor_rollout_ref.actor.loss_agg_mode=seq-mean-token-sum-norm \
-    actor_rollout_ref.actor.use_kl_loss=0 \
-    critic.optim.lr=1e-5 \
-    critic.model.path=Qwen/Qwen2.5-0.5B-Instruct \
-    critic.ppo_micro_batch_size_per_gpu=4 \
-    algorithm.kl_ctrl.kl_coef=0.001 \
-    algorithm.norm_adv_by_std_in_grpo=0 \
-    trainer.logger=console \
-    trainer.val_before_train=False \
-    trainer.n_gpus_per_node=1 \
-    trainer.nnodes=1 \
-    trainer.save_freq=10 \
-    trainer.test_freq=10 \
-    trainer.total_epochs=50 \
-    2>&1 | tee verl_drgrpo.log
-    
+python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.6 --batch_size_per_gpu 1 --max_prompt_length 512 --algorithm drgrpo
 ```
+
+
+### Memory Management
+The CPU memory overhead for running Verl is about 28GB, so if you run tests on Nexus with `gpu 1 1` and get 30GB of CPU memory, you don't have any room to run --offload_weights_and_states.
+
+
+
+### Notes:
+You will notice in the run log a warning about bf16 vs fp32, but you can ignore this:
+`Flash Attention 2 only supports torch.float16 and torch.bfloat16 dtypes, but the current dype in Qwen3Model is torch.float32.`
+What is happening is that Verl intentionally loads the model in fp32 because it uses this to initialize the optimizer in fp32, and then immediately converts the model to bf16 by default:
+https://github.com/montehoover/verl/blob/f93129d9fb9815a16b397c75ff12934f966d0fd1/verl/workers/fsdp_workers.py#L313
+https://github.com/montehoover/verl/blob/f93129d9fb9815a16b397c75ff12934f966d0fd1/verl/workers/fsdp_workers.py#L495
+
+If we want to override the default, we can do so with this:
+```
+actor_rollout_ref.actor.fsdp_config.dtype=float32
+actor_rollout_ref.ref.fsdp_config.dtype=float32
+```
+
 
 Original README:
 
