@@ -191,11 +191,8 @@ def parse_args():
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
     parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
-    parser.add_argument("--lora_target_modules", default="all-linear",
-                        choices=LORA_TARGET_MODULE_CHOICES,
-                        help="Target modules for LoRA adaptation. all-linear: all linear layers. "
-                             "all-linear-and-embedding: all linear layers + input embedding (Qwen-specific module names). "
-                             "attention: q/k/v/o projections. qv: q/v projections only.")
+    parser.add_argument("--lora_target_modules", default="all-linear", choices=["all-linear", "all-linear-and-embedding", "all-attention", "qv-only"], help="Target modules for LoRA matrices")
+
 
     # Training Parameters
     parser.add_argument("--epochs", default=1, type=int, help="Number of epochs")

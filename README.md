@@ -55,17 +55,21 @@ Quick test. The script automatically detects the number of available GPUs and us
 python run_sft.py --model Qwen/Qwen3-0.6B --dataset openai/gsm8k --num_examples 10
 ```
 
-Full run with Qwen3-8B:
+Full-parameter SFT with Qwen3-8B. The bottleneck is fp32 AdamW optimizer states (~66 GB for 8B params), which must be sharded across GPUs or offloaded to CPU.
+- **4x RTX A6000 (49 GB) + ~50 GB CPU RAM**: Recommended. ~30 GB/GPU with optimizer states sharded across 4 GPUs. No CPU offload needed.
+- **2-3x RTX A6000 (49 GB) + ~150 GB CPU RAM**: Not enough GPU memory without CPU offload. Requires CPU offload (`model.fsdp_config.cpu_offload=True`) to move ~66 GB optimizer states + ~32 GB fp32 param copy to CPU. Not tested — the SFT trainer's FSDP2 CPU offload path may have compatibility issues.
+
+Reduce `--micro_batch_size_per_gpu` if hitting GPU OOM on activations.
 ```
-python run_sft.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 4 --lr 1e-5 --lr_schedule cosine --batch_size 256 --micro_batch_size_per_gpu 4 --max_length 1024 --gradient_checkpointing --save_freq 50 --val_freq 20
+python run_sft.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 4 --lr 1e-5 --lr_schedule cosine --batch_size 256 --micro_batch_size_per_gpu 1 --max_length 1024 --gradient_checkpointing --save_freq 50 --val_freq 20
 ```
 
 ### GRPO
 
 This reproduces the results from https://github.com/volcengine/verl/blob/main/examples/grpo_trainer/run_qwen3-8b.sh.
-It runs successfully on two A6000s with 120GB of CPU memory. These details are captured in [launch.sh](launch.sh).
+It runs successfully on four RTX A6000s with 120 GB of CPU memory. These details are captured in [launch.sh](launch.sh).
 ```
-python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.6 --batch_size_per_gpu 1 --max_prompt_length 512
+python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.4 --batch_size_per_gpu 1 --max_prompt_length 512 --model_shards 2 --no-offload_weights_and_states --update_weights_bucket_mb 4096
 ```
 
 ### DrGRPO
@@ -76,37 +80,58 @@ This reproduces DrGRPO as described in https://verl.readthedocs.io/en/latest/alg
 python run_grpo.py --algorithm drgrpo
 ```
 
+### LoRA
+Verl supports `--lora_target_modules all-linear-and-embedding` which applies LoRA to the embedding layer by including `embed_tokens` in `target_modules`. This works but is non-standard — the standard peft approach is to use `modules_to_save=["embed_tokens"]`, which fully fine-tunes the embedding instead of applying a low-rank approximation. To enable this, add `"modules_to_save": ["embed_tokens"]` to the `lora_config` dict in the upstream verl SFT trainer: [fsdp_sft_trainer.py#L277-L283](https://github.com/volcengine/verl/blob/5ab92908781e7e62d769997acc1c8174cf1f2cdf/verl/trainer/fsdp_sft_trainer.py#L277-L283).
+
+
+## User Guide
 
 ### Memory Management
 
-All numbers measured on **RTX A5000 (24 GB)** GPUs with Qwen3-0.6B using GRPO, FSDP2, vLLM, with all memory optimizations enabled (`--offload_weights_and_states`, `--offload_ref_params`, `--gradient_checkpointing`, `--chunked_prefill`). See `memory_results/` for raw JSON data and `run_memory_experiments.py` to reproduce.
+All numbers measured on **RTX A5000 (24 GB)** GPUs using GRPO, FSDP2, vLLM, with all CPU offloading enabled (`--offload_weights_and_states`, `--offload_ref_params`, `--gradient_checkpointing`, `--chunked_prefill`). See `memory_results/` for raw JSON data and `run_memory_experiments.py` to reproduce.
 
-#### Quick Reference
+#### Quick Reference: What Fits Where
 
-| What fits on 1x 24 GB GPU | Max prompt length |
-|---|---|
-| Qwen3-0.6B | ~16K tokens |
-| Qwen3-0.6B (short prompts) | Comfortable at 1K-8K |
-| Qwen3-4B+ | Needs 2+ GPUs with model sharding |
-
-**Minimum CPU RAM:** 30 GB for 1 GPU, add ~6 GB per additional GPU.
-
-#### GPU Memory: What Matters and What Doesn't
-
-**Context length is the dominant factor for GPU memory.** On a single GPU with Qwen3-0.6B:
-
-| Max Prompt Length | nvidia-smi Peak | PyTorch Allocated | Status |
-|---|---|---|---|
-| 1,024 | 16.7 GB | 3.2 GB | OK |
-| 4,096 | 16.7 GB | 6.1 GB | OK |
-| 8,192 | 16.7 GB | 10.6 GB | OK |
-| 16,384 | 23.5 GB | 20.6 GB | OK (barely fits 24 GB) |
-| 32,768 | - | - | OOM |
+| Model | Min GPUs | Model Shards | Max Prompt (24 GB GPU) | GPU Peak | CPU RAM |
+|---|---|---|---|---|---|
+| Qwen3-0.6B | 1 | 1 | ~16K tokens | 17-24 GB | ~32 GB |
+| Qwen3-1.7B | 1 | 1 | ~8K tokens | 18-19 GB | ~62 GB |
+| Qwen3-4B | 1 (short) / 2 (long) | 1 / 2 | ~8K tokens (2 GPU, TP=2) | 19 GB | ~120 GB |
+| Qwen3-8B | 2 | 2 | ~4K tokens (2 GPU, TP=2) | 19-21 GB | ~210 GB |
 
 Notes:
-- nvidia-smi shows total GPU memory including vLLM's preallocated KV cache (set by `--vllm_cache_utilization`, default 0.6). At short contexts, vLLM's cache dominates the GPU footprint; at long contexts, PyTorch activations exceed it.
-- The gap between nvidia-smi and PyTorch allocated represents vLLM's KV cache (~13.5 GB at 0.6 utilization on A5000).
-- PyTorch memory scales roughly linearly with context length: ~1 GB per 1K tokens beyond the baseline 3 GB (for 0.6B model).
+- "Max Prompt" is the longest prompt tested that fits in memory. Actual limits depend on response length and cache settings.
+- 4B and 8B models can fit on 1 GPU at short prompts (1K tokens) but need model sharding for longer contexts.
+- CPU RAM is the dominant constraint for large models. 8B requires 200+ GB CPU RAM with all offloading enabled.
+
+#### GPU Memory: Context Length and Model Size
+
+**Context length is the dominant factor for GPU memory.** PyTorch training memory (activations + gradients) scales roughly linearly with total sequence length.
+
+| Model | GPUs | Shards | Max Prompt | Cache Util | nvidia-smi Peak | PyTorch Alloc | Status |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B | 1 | 1 | 1,024 | 0.6 | 16.7 GB | 3.2 GB | OK |
+| Qwen3-0.6B | 1 | 1 | 4,096 | 0.6 | 16.7 GB | 6.1 GB | OK |
+| Qwen3-0.6B | 1 | 1 | 8,192 | 0.6 | 16.7 GB | 10.6 GB | OK |
+| Qwen3-0.6B | 1 | 1 | 16,384 | 0.6 | 23.5 GB | 20.6 GB | OK (barely) |
+| Qwen3-0.6B | 1 | 1 | 32,768 | 0.6 | - | - | OOM |
+| Qwen3-1.7B | 1 | 1 | 1,024 | 0.6 | 18.1 GB | 4.3 GB | OK |
+| Qwen3-1.7B | 1 | 1 | 4,096 | 0.6 | 18.7 GB | 6.4 GB | OK |
+| Qwen3-1.7B | 1 | 1 | 8,192 | 0.6 | 18.8 GB | 11.6 GB | OK |
+| Qwen3-1.7B | 1 | 1 | 16,384 | 0.6 | 23.2 GB | - | OOM |
+| Qwen3-4B | 1 | 1 | 1,024 | 0.6 | 19.0 GB | 4.9 GB | OK |
+| Qwen3-4B | 2 | 2 | 4,096 | 0.6 | 19.1 GB | 6.8 GB | OK |
+| Qwen3-4B | 2 | 2 | 8,192 | 0.6 | 19.2 GB | 11.9 GB | OK |
+| Qwen3-8B | 2 | 2 | 1,024 | 0.6 | 19.0 GB | 7.0 GB | OK |
+| Qwen3-8B | 2 | 2 | 4,096 | 0.6 | 21.4 GB | 7.5 GB | OK |
+| Qwen3-8B | 4 | 2 | 1,024 | 0.6 | 18.3 GB | 6.4 GB | OK |
+| Qwen3-8B | 4 | 2 | 4,096 | 0.6 | 20.7 GB | 7.4 GB | OK |
+
+Notes:
+- nvidia-smi includes vLLM's preallocated KV cache (controlled by `--vllm_cache_utilization`, default 0.6). At short contexts, vLLM's cache dominates; at long contexts, PyTorch activations exceed it.
+- The gap between nvidia-smi and PyTorch allocated is vLLM's KV cache (~13.5 GB at 0.6 utilization on A5000).
+- `--vllm_cache_utilization` controls the fraction of GPU memory reserved for vLLM's KV cache. Reducing it (e.g., 0.4) frees GPU memory for FSDP model weights/optimizer states, but also **reduces the maximum context length** vLLM can serve. Use `--model_shards 2` to split the vLLM model across GPUs, freeing more memory for the KV cache per GPU.
+- **Estimated 8B limits on larger GPUs** (extrapolated from measured data): On **48 GB GPUs** (A6000), 8B with TP=2 should handle ~8K-16K prompts comfortably. On **80 GB GPUs** (A100/H100), 8B with TP=1 or TP=2 should handle 16K-32K+ prompts.
 
 **num_generations has NO impact on peak memory.** It only affects wall time:
 
@@ -120,41 +145,71 @@ Notes:
 
 This is because verl processes rollout generations sequentially through vLLM, not all at once.
 
-#### CPU Memory: Dominated by Ray Workers
+#### CPU Memory: Scales with Model Size and GPU Count
 
-**CPU RAM scales linearly with number of GPUs** (~6 GB per additional GPU for 0.6B model):
+CPU RAM is dominated by model weights in CPU memory (from FSDP offloading) and Ray worker overhead.
 
-| GPUs | Model Shards | CPU RAM | GPU Peak (per GPU) |
-|---|---|---|---|
-| 1 | 1 | 31.9 GB | 16.7 GB |
-| 2 | 1 | 38.9 GB | 16.0 GB |
-| 4 | 1 | 49.8 GB | 15.8 GB |
-| 7 | 1 | 70.3 GB | 15.7 GB |
-| 2 | 2 (TP) | 38.3 GB | 16.3 GB |
-| 4 | 2 (TP) | 48.0 GB | 16.1 GB |
-| 6 | 2 (TP) | 60.1 GB | 16.0 GB |
+| Model | GPUs | Shards | CPU RAM | GPU Peak (per GPU) |
+|---|---|---|---|---|
+| Qwen3-0.6B | 1 | 1 | 32 GB | 16.7 GB |
+| Qwen3-0.6B | 2 | 1 | 39 GB | 16.0 GB |
+| Qwen3-0.6B | 4 | 1 | 50 GB | 15.8 GB |
+| Qwen3-0.6B | 7 | 1 | 70 GB | 15.7 GB |
+| Qwen3-0.6B | 2 | 2 (TP) | 38 GB | 16.3 GB |
+| Qwen3-0.6B | 4 | 2 (TP) | 48 GB | 16.1 GB |
+| Qwen3-0.6B | 6 | 2 (TP) | 60 GB | 16.0 GB |
+| Qwen3-1.7B | 1 | 1 | 58 GB | 18.1 GB |
+| Qwen3-4B | 1 | 1 | 114 GB | 19.0 GB |
+| Qwen3-4B | 2 | 2 | 120 GB | 18.1 GB |
+| Qwen3-8B | 2 | 2 | 209 GB | 19.0 GB |
+| Qwen3-8B | 4 | 2 | 224 GB | 18.3 GB |
+| Qwen3-8B | 6 | 2 | 215 GB | 18.5 GB |
+| Qwen3-8B | 4 | 4 | 227 GB | 20.1 GB |
 
 Key observations:
-- **Base overhead is ~26 GB** (Ray + vLLM + framework), regardless of model size for small models.
-- Each additional GPU adds a Ray worker with its own vLLM instance, costing ~6 GB CPU RAM.
+- **CPU RAM scales primarily with model size:** 0.6B needs ~32 GB, 1.7B ~58 GB, 4B ~114 GB, 8B ~210 GB (with all offloading).
+- For a given model, each additional GPU adds ~6 GB CPU RAM (Ray worker overhead).
 - Model sharding (tensor parallelism) slightly reduces CPU RAM vs pure data parallelism at same GPU count.
-- GPU memory per GPU is roughly constant across GPU counts — each GPU carries the full model + vLLM cache.
+- **Adding GPUs doesn't reduce per-GPU memory** — each GPU carries the full model + vLLM cache.
 
 #### Practical Guidelines
 
-1. **Start with `gpu 1 1` on Nexus** only if you have 30+ GB CPU RAM and short prompts (< 8K tokens).
-2. **For long contexts (> 8K)**, reduce `--vllm_cache_utilization` (e.g., 0.3) to free GPU memory for activations.
-3. **Adding GPUs doesn't save GPU memory** — it only speeds up training. But it costs ~6 GB CPU RAM per GPU.
-4. **num_generations is free for memory** — increase it for better GRPO training signal without memory cost.
-5. **For larger models** (4B+), use `--model_shards 2` with 2+ GPUs to split the model across GPUs.
-6. **CPU RAM planning:** `30 + 6*(num_gpus - 1)` GB is a safe estimate for small models.
+1. **num_generations is free for memory** — increase it for better GRPO training signal without memory cost.
+2. **Adding GPUs speeds up training** but doesn't reduce per-GPU memory. It costs ~6 GB CPU RAM per GPU.
+3. **For larger models** (4B+), use `--model_shards 2` with 2+ GPUs so vLLM can shard the model during rollout.
+4. **CPU RAM is the bottleneck for large models.** If your node doesn't have 200+ GB, disable CPU offloading with `--no-offload_weights_and_states` and use more/bigger GPUs instead (see 8B guide below).
+5. **`--vllm_cache_utilization`** balances KV cache size vs available GPU memory for training. Lower values free GPU memory but reduce max context. Higher values allow longer contexts but may cause OOM during training. Default 0.6 is a good starting point; reduce to 0.4 if hitting GPU OOM.
 
-#### Investigation Status
+#### 8B Model Memory Guide (Qwen3-8B on RTX A6000)
 
-Groups A (context length), B (parallelism), and D (num_generations) are complete. Group C (model size scaling with Qwen3-1.7B, 4B, 8B) is in progress — see `memory_results/` and `run_memory_experiments.py --summarize` for latest results.
+Running an 8B model requires different memory management than 0.6B. Below are findings from experiments on **4x RTX A6000 (48 GB each)** with varying CPU RAM.
+
+**The core problem:** With all CPU offloading enabled (the defaults), Qwen3-8B requires ~210 GB of CPU RAM. This exceeds a typical 120 GB SLURM allocation and will be killed by Ray's memory monitor at 95% utilization.
+
+**Solution:** Disable actor weight/optimizer offloading (`--no-offload_weights_and_states`) and keep weights on GPU via FSDP sharding. This shifts the memory burden from CPU (~210 GB) to GPU (~33 GB per GPU across 4 GPUs), which fits comfortably in 48 GB per GPU.
+
+| Configuration | CPU RAM | GPU Peak (per GPU) | Result |
+|---|---|---|---|
+| All offloading ON (defaults) | ~210 GB | ~19 GB | CPU OOM at 120 GB |
+| `--no-offload_weights_and_states` | ~47 GB | ~33 GB | Works on 120 GB |
+
+**Required parameters for 8B on 4x RTX A6000 with 120 GB CPU RAM:**
+
+| Parameter | Value | Why |
+|---|---|---|
+| `--no-offload_weights_and_states` | (flag) | CPU offloading uses ~210 GB, exceeding 120 GB limit |
+| `--offload_ref_params` | True (default) | Reference model offloaded to CPU, only ~6 GB |
+| `--model_shards 2` | 2 | Splits vLLM model across 2 GPUs; TP=1 leaves no room for KV cache after FSDP claims ~31 GB |
+| `--vllm_cache_utilization 0.4` | 0.4 | 0.6 requests 28.4 GB but only ~16 GB free after FSDP; 0.4 requests 19.2 GB which fits |
+| `--gradient_checkpointing` | True (default) | Trades compute for memory during backward pass |
+| `--update_weights_bucket_mb 4096` | 4096 | 8B embedding exceeds default 2048 MB bucket (see below) |
+
+**What if you have 200+ GB CPU RAM?** You can use the defaults (all offloading ON) which keeps GPU usage lower (~19 GB per GPU) and opens up `--vllm_cache_utilization 0.6` for faster rollout generation.
+
+**Known issue (FSDP2 only):** When using FSDP2 (which `run_grpo.py` sets by default), the weight transfer to vLLM calls `.full_tensor()` on each parameter, gathering the complete tensor across all ranks. For 8B+ Qwen3 models, the embedding layer (151936 x 4096 x float32 = ~2.4 GB) exceeds the default 2048 MB weight update bucket, causing an assertion error. Use `--update_weights_bucket_mb 4096` to fix this. This does not affect FSDP1 (the verl default), which transfers sharded weights that fit within the bucket. See the TODO at `verl/workers/rollout/vllm_rollout/vllm_rollout.py:209`.
 
 
-### Notes:
+### Bfloat16 Warning:
 You will notice in the run log a warning about bf16 vs fp32, but you can ignore this:
 `Flash Attention 2 only supports torch.float16 and torch.bfloat16 dtypes, but the current dype in Qwen3Model is torch.float32.`
 What is happening is that Verl intentionally loads the model in fp32 because it uses this to initialize the optimizer in fp32, and then immediately converts the model to bf16 by default:
@@ -168,7 +223,7 @@ actor_rollout_ref.ref.fsdp_config.dtype=float32
 ```
 
 
-## Viewing Tomlab-specific Git History
+### Viewing Tomlab-specific Git History
 
 Show only Tomlab commits:
 ```bash
@@ -186,7 +241,7 @@ git config alias.team-log 'log --author="Monte Hoover\|Andrew Zheng\|Abhimanyu H
 git team-log
 ```
 
-Original README:
+# Original README:
 
 ------------------------
 <div align="center">

@@ -1,6 +1,6 @@
 import argparse, os, subprocess
 import torch
-from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
+from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules
 from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
 
 def main(args):
