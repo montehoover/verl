@@ -50,28 +50,14 @@ Project branches:
 
 ### SFT
 
+Quick test. The script automatically detects the number of available GPUs and uses FSDP to shard the model and parallelize data across all of them.
 ```
-PROJECT_ROOT=$PWD
-python3 examples/data_preprocess/gsm8k.py --local_save_dir $PROJECT_ROOT/data/gsm8k
-torchrun --standalone --nnodes=1 --nproc_per_node=1 \
-    -m verl.trainer.fsdp_sft_trainer \
-    data.train_files=$PROJECT_ROOT/data/gsm8k/train.parquet \
-    data.val_files=$PROJECT_ROOT/data/gsm8k/test.parquet \
-    data.prompt_key=extra_info \
-    data.response_key=extra_info \
-    optim.lr=1e-4 \
-    data.prompt_dict_keys=['question'] \
-    +data.response_dict_keys=['answer'] \
-    data.micro_batch_size_per_gpu=4 \
-    model.partial_pretrain=Qwen/Qwen2.5-0.5B-Instruct \
-    trainer.default_local_dir=$save_path \
-    trainer.project_name=gsm8k-sft \
-    trainer.experiment_name=gsm8k-sft-qwen2.5-0.5-instruct \
-    trainer.logger=console \
-    trainer.total_epochs=50 $@ \
-    model.lora_rank=32\
-    model.lora_alpha=16 \
-    model.target_modules=all-linear
+python run_sft.py --model Qwen/Qwen3-0.6B --dataset openai/gsm8k --num_examples 10
+```
+
+Full run with Qwen3-8B:
+```
+python run_sft.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 4 --lr 1e-5 --lr_schedule cosine --batch_size 256 --micro_batch_size_per_gpu 4 --max_length 1024 --gradient_checkpointing --save_freq 50 --val_freq 20
 ```
 
 ### GRPO

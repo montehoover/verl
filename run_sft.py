@@ -1,0 +1,139 @@
+import argparse, os, subprocess
+import torch
+from verl.tomlab.helpers import get_short_model_name
+from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
+
+def main(args):
+    #########################################################
+    # Setup
+    #########################################################
+    model_name = get_short_model_name(args.model)
+    dataset_name = args.dataset.split("/")[-1] if "/" in args.dataset else args.dataset
+    run_name = f"{model_name}_{dataset_name}_sft_lr{args.lr}_bs{args.batch_size}"
+    num_gpus = torch.cuda.device_count()
+    assert num_gpus > 0, "No GPUs found. Double check that this is being called where you expect it to be."
+
+    if args.use_wandb:
+        os.environ["WANDB_ENTITY"] = args.wandb_entity
+        logger_entries = ["console", "wandb"]
+    else:
+        logger_entries = ["console"]
+
+    #########################################################
+    # Dataset
+    #########################################################
+    train_files, val_files, num_train_examples = preprocess_dataset_gsm8k(
+        hf_dataset_name=args.dataset,
+        local_save_dir=args.data_download_dir,
+        num_examples=args.num_examples,
+        val_split=args.val_split,
+        val_size=args.val_size,
+    )
+
+    # The SFT trainer divides train_batch_size by dp_size (num_gpus), then asserts
+    # the result is divisible by micro_batch_size_per_gpu. So we need:
+    #   batch_size % (num_gpus * micro_batch_size_per_gpu) == 0
+    granularity = num_gpus * args.micro_batch_size_per_gpu
+
+    if args.batch_size > num_train_examples:
+        print(f"Note: batch_size ({args.batch_size}) > num training examples ({num_train_examples}). Reducing batch_size to {num_train_examples}.")
+        args.batch_size = num_train_examples
+
+    if args.batch_size % granularity != 0:
+        args.batch_size = max(granularity, (args.batch_size // granularity) * granularity)
+        print(f"Note: batch_size must be divisible by num_gpus * micro_batch_size_per_gpu ({granularity}). Adjusted to {args.batch_size}.")
+
+    #########################################################
+    # Build torchrun command
+    #########################################################
+    print(f"\nStarting SFT training...\n")
+    sft_cmd = [
+        "torchrun",
+        "--standalone",
+        f"--nnodes=1",
+        f"--nproc_per_node={num_gpus}",
+        "-m",
+        "verl.trainer.fsdp_sft_trainer",
+        # Dataset
+        f"data.train_files={train_files}",
+        f"data.val_files={val_files or train_files}",
+        f"data.prompt_key=extra_info",
+        f"data.response_key=extra_info",
+        "data.prompt_dict_keys=['question']",
+        "+data.response_dict_keys=['answer']",
+        f"data.train_batch_size={args.batch_size}",
+        f"data.micro_batch_size_per_gpu={args.micro_batch_size_per_gpu}",
+        f"data.max_length={args.max_length}",
+        f"data.truncation={args.truncation}",
+        # Model
+        f"model.partial_pretrain={args.model}",
+        f"model.strategy={args.strategy}",
+        f"model.enable_gradient_checkpointing={args.gradient_checkpointing}",
+        f"model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
+        f"model.lora_alpha={16 if args.lora_alpha is None else args.lora_alpha}",
+        f"model.target_modules={args.lora_target_modules}",
+        # Optimizer
+        f"optim.lr={args.lr}",
+        f"optim.lr_scheduler={args.lr_schedule}",
+        # Trainer
+        f"trainer.project_name={args.wandb_project}",
+        f"trainer.experiment_name={run_name}",
+        f"trainer.default_local_dir={args.checkpoint_dir}/{run_name}",
+        f"trainer.total_epochs={args.epochs}",
+        f"trainer.logger={logger_entries!r}",
+        f"trainer.save_freq={args.save_freq}",
+        f"trainer.test_freq={args.val_freq}",
+    ]
+
+    env = os.environ.copy()
+    env.pop("ROCR_VISIBLE_DEVICES", None)
+    env["PYTHONUNBUFFERED"] = "1"
+    subprocess.run(sft_cmd, check=True, env=env)
+
+    print(f"\nSFT training completed successfully.")
+    print(f"Checkpoints saved to: {args.checkpoint_dir}/{run_name}\n")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="This script runs SFT (Supervised Fine-Tuning) with configurable parameters.")
+
+    # Admin Settings
+    parser.add_argument("--use_wandb", default=True, action=argparse.BooleanOptionalAction, help="Enable Weights & Biases logging")
+    parser.add_argument("--wandb_entity", default="tomg-group-umd", help="Weights & Biases entity")
+    parser.add_argument("--wandb_project", default="verl_demo_sft", help="Weights & Biases project")
+    parser.add_argument("--checkpoint_dir", default="checkpoints", help="Directory for checkpoints")
+    parser.add_argument("--save_freq", default=-1, type=int, help="At how many steps to save a checkpoint. -1 to disable.")
+    parser.add_argument("--val_freq", default=-1, type=int, help="At how many steps to run validation loop. -1 to disable.")
+
+    # Dataset
+    parser.add_argument("--dataset", default="openai/gsm8k", help="Dataset name")
+    parser.add_argument("--data_download_dir", default="data/verl_demo", help="Local directory for data")
+    parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
+    parser.add_argument("--val_split", default=None, help="Validation dataset split")
+    parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
+
+    # Model
+    parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
+    parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
+    parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
+    parser.add_argument("--lora_target_modules", default="all-linear", help="Target modules for LoRA adaptation")
+
+    # Training Parameters
+    parser.add_argument("--epochs", default=4, type=int, help="Number of epochs")
+    parser.add_argument("--lr", default="1e-5", help="Learning rate")
+    parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd"], help="Learning rate schedule")
+    parser.add_argument("--batch_size", default=256, type=int, help="Global training batch size")
+    parser.add_argument("--micro_batch_size_per_gpu", default=4, type=int, help="Micro batch size per GPU for gradient accumulation")
+    parser.add_argument("--max_length", default=1024, type=int, help="Max sequence length (prompt + response)")
+    parser.add_argument("--truncation", default="error", choices=["error", "left", "right", "middle"], help="Truncation behavior when sequences exceed max length")
+
+    # Memory management
+    parser.add_argument("--gradient_checkpointing", default=True, action=argparse.BooleanOptionalAction, help="Enable gradient checkpointing")
+    parser.add_argument("--strategy", default="fsdp2", choices=["fsdp", "fsdp2"], help="FSDP strategy. fsdp2 requires PyTorch >= 2.4")
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)
