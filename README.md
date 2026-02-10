@@ -168,6 +168,24 @@ actor_rollout_ref.ref.fsdp_config.dtype=float32
 ```
 
 
+## Viewing Tomlab-specific Git History
+
+Show only Tomlab commits:
+```bash
+git log --author="Monte Hoover\|Andrew Zheng\|Abhimanyu Hans" --oneline
+```
+
+Show commits with dates:
+```
+git log --author="Monte Hoover\|Andrew Zheng\|Abhimanyu Hans" --format="%h %an %ad %s" --date=short
+```
+
+If you want to make it a git alias:
+```bash
+git config alias.team-log 'log --author="Monte Hoover\|Andrew Zheng\|Abhimanyu Hans" --format="%h %an %ad %s" --date=short'
+git team-log
+```
+
 Original README:
 
 ------------------------
