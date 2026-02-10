@@ -1,6 +1,6 @@
 import argparse, os, subprocess
 import torch
-from verl.tomlab.helpers import get_short_model_name, get_last_checkpoint_path
+from verl.tomlab.helpers import get_short_model_name, get_last_checkpoint_path, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
 
 def main(args):
@@ -20,6 +20,8 @@ def main(args):
         rollout_batch_size = args.batch_size
     else:
         rollout_batch_size = args.rollout_batch_size
+
+    lora_target_modules = get_lora_target_modules(args.lora_target_modules)
 
     if args.use_wandb:
         os.environ["WANDB_ENTITY"] = args.wandb_entity
@@ -119,6 +121,7 @@ def main(args):
         f"actor_rollout_ref.model.use_remove_padding=True",
         f"actor_rollout_ref.model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
         f"actor_rollout_ref.model.lora_alpha={0 if args.lora_rank is None else args.lora_alpha}",
+        f"actor_rollout_ref.model.target_modules={lora_target_modules}",
         # Training Parameters
         f"actor_rollout_ref.actor.optim.lr={args.lr}",
         f"actor_rollout_ref.actor.optim.lr_scheduler_type={args.lr_schedule}",
@@ -146,6 +149,7 @@ def main(args):
         f"actor_rollout_ref.actor.fsdp_config.offload_policy={args.offload_weights_and_states}",
         f"actor_rollout_ref.rollout.agent.num_workers={args.num_workers}",
         f"actor_rollout_ref.rollout.name=vllm",
+        f"actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes={args.update_weights_bucket_mb}",
         f"actor_rollout_ref.actor.strategy=fsdp2", # Set to "fsdp" if using pytorch < 2.4
         f"actor_rollout_ref.ref.strategy=fsdp2",  # Set to "fsdp" if using pytorch < 2.4
     ] + ppo_stuff
@@ -187,7 +191,12 @@ def parse_args():
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
     parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
-    
+    parser.add_argument("--lora_target_modules", default="all-linear",
+                        choices=LORA_TARGET_MODULE_CHOICES,
+                        help="Target modules for LoRA adaptation. all-linear: all linear layers. "
+                             "all-linear-and-embedding: all linear layers + input embedding (Qwen-specific module names). "
+                             "attention: q/k/v/o projections. qv: q/v projections only.")
+
     # Training Parameters
     parser.add_argument("--epochs", default=1, type=int, help="Number of epochs")
     parser.add_argument("--lr", default="1e-6", help="Learning rate")
@@ -212,7 +221,8 @@ def parse_args():
     parser.add_argument("--gradient_checkpointing", default=True, action=argparse.BooleanOptionalAction, help="Enable gradient checkpointing (recomputing activations during backward pass). Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--offload_ref_params", default=True, action=argparse.BooleanOptionalAction, help="Offload the weights of the reference model (frozen version of model being trained). Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--offload_weights_and_states", default=True, action=argparse.BooleanOptionalAction, help="FSDP2 native offload policy for model weights and optimizer states. Only works with FSDP2. If using FSDP, set to false.")
-    
+    parser.add_argument("--update_weights_bucket_mb", default=4096, type=int, help="Size in MB of the bucket for transferring weights from FSDP2 to vLLM. Must be larger than the biggest single parameter in fp32. Default 4096 accommodates 8B models. Verl default is 2048, and that worked with FSDP1, but not FSDP2.")
+
     # Note that Verl uses the number of dataset prompts (meaning rows) as its atomic unit for batch sizes. --rollout_batch_size controls the number of prompts used
     # to to generate a bunch of rollouts at once and the wandb update interval. This is regardless of the actual gradient update batch size (--batch_size) or 
     # the number of rollouts per prompt (--num_generations).

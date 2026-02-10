@@ -1,6 +1,6 @@
 import argparse, os, subprocess
 import torch
-from verl.tomlab.helpers import get_short_model_name
+from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
 
 def main(args):
@@ -12,6 +12,8 @@ def main(args):
     run_name = f"{model_name}_{dataset_name}_sft_lr{args.lr}_bs{args.batch_size}"
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check that this is being called where you expect it to be."
+
+    lora_target_modules = get_lora_target_modules(args.lora_target_modules)
 
     if args.use_wandb:
         os.environ["WANDB_ENTITY"] = args.wandb_entity
@@ -54,6 +56,13 @@ def main(args):
         f"--nproc_per_node={num_gpus}",
         "-m",
         "verl.trainer.fsdp_sft_trainer",
+        # Admin Settings
+        f"trainer.project_name={args.wandb_project}",
+        f"trainer.experiment_name={run_name}",
+        f"trainer.default_local_dir={args.checkpoint_dir}/{run_name}",
+        f"trainer.logger={logger_entries!r}",
+        f"trainer.save_freq={args.save_freq}",
+        f"trainer.test_freq={args.val_freq}",
         # Dataset
         f"data.train_files={train_files}",
         f"data.val_files={val_files or train_files}",
@@ -61,28 +70,22 @@ def main(args):
         f"data.response_key=extra_info",
         "data.prompt_dict_keys=['question']",
         "+data.response_dict_keys=['answer']",
-        f"data.train_batch_size={args.batch_size}",
-        f"data.micro_batch_size_per_gpu={args.micro_batch_size_per_gpu}",
-        f"data.max_length={args.max_length}",
-        f"data.truncation={args.truncation}",
         # Model
         f"model.partial_pretrain={args.model}",
-        f"model.strategy={args.strategy}",
-        f"model.enable_gradient_checkpointing={args.gradient_checkpointing}",
         f"model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
         f"model.lora_alpha={16 if args.lora_alpha is None else args.lora_alpha}",
-        f"model.target_modules={args.lora_target_modules}",
-        # Optimizer
+        f"model.target_modules={lora_target_modules}",
+        # Training parameters
         f"optim.lr={args.lr}",
         f"optim.lr_scheduler={args.lr_schedule}",
-        # Trainer
-        f"trainer.project_name={args.wandb_project}",
-        f"trainer.experiment_name={run_name}",
-        f"trainer.default_local_dir={args.checkpoint_dir}/{run_name}",
         f"trainer.total_epochs={args.epochs}",
-        f"trainer.logger={logger_entries!r}",
-        f"trainer.save_freq={args.save_freq}",
-        f"trainer.test_freq={args.val_freq}",
+        f"data.train_batch_size={args.batch_size}",
+        # Memory management
+        f"data.micro_batch_size_per_gpu={args.micro_batch_size_per_gpu}",
+        f"model.enable_gradient_checkpointing={args.gradient_checkpointing}",
+        f"model.strategy={args.strategy}",
+        f"data.max_length={args.max_length}",
+        f"data.truncation={args.truncation}",
     ]
 
     env = os.environ.copy()
@@ -116,20 +119,20 @@ def parse_args():
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
     parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
-    parser.add_argument("--lora_target_modules", default="all-linear", help="Target modules for LoRA adaptation")
+    parser.add_argument("--lora_target_modules", default="all-linear", choices=["all-linear", "all-linear-and-embedding", "all-attention", "qv-only"], help="Target modules for LoRA matrices")
 
     # Training Parameters
     parser.add_argument("--epochs", default=4, type=int, help="Number of epochs")
     parser.add_argument("--lr", default="1e-5", help="Learning rate")
     parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd"], help="Learning rate schedule")
     parser.add_argument("--batch_size", default=256, type=int, help="Global training batch size")
-    parser.add_argument("--micro_batch_size_per_gpu", default=4, type=int, help="Micro batch size per GPU for gradient accumulation")
-    parser.add_argument("--max_length", default=1024, type=int, help="Max sequence length (prompt + response)")
-    parser.add_argument("--truncation", default="error", choices=["error", "left", "right", "middle"], help="Truncation behavior when sequences exceed max length")
 
     # Memory management
     parser.add_argument("--gradient_checkpointing", default=True, action=argparse.BooleanOptionalAction, help="Enable gradient checkpointing")
     parser.add_argument("--strategy", default="fsdp2", choices=["fsdp", "fsdp2"], help="FSDP strategy. fsdp2 requires PyTorch >= 2.4")
+    parser.add_argument("--max_length", default=1024, type=int, help="Max sequence length (prompt + response)")
+    parser.add_argument("--truncation", default="error", choices=["error", "left", "right"], help="Truncation behavior when sequences exceed max length")
+    parser.add_argument("--micro_batch_size_per_gpu", default=1, type=int, help="Micro batch size per GPU for gradient accumulation")
 
     return parser.parse_args()
 
