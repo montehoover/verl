@@ -87,13 +87,85 @@ python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test
 This reproduces DrGRPO as described in https://verl.readthedocs.io/en/latest/algo/grpo.html#drgrpo
 
 ```
-python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.6 --batch_size_per_gpu 1 --max_prompt_length 512 --algorithm drgrpo
+python run_grpo.py --algorithm drgrpo
 ```
 
 
 ### Memory Management
-The CPU memory overhead for running Verl is about 28GB, so if you run tests on Nexus with `gpu 1 1` and get 30GB of CPU memory, you don't have any room to run --offload_weights_and_states.
 
+All numbers measured on **RTX A5000 (24 GB)** GPUs with Qwen3-0.6B using GRPO, FSDP2, vLLM, with all memory optimizations enabled (`--offload_weights_and_states`, `--offload_ref_params`, `--gradient_checkpointing`, `--chunked_prefill`). See `memory_results/` for raw JSON data and `run_memory_experiments.py` to reproduce.
+
+#### Quick Reference
+
+| What fits on 1x 24 GB GPU | Max prompt length |
+|---|---|
+| Qwen3-0.6B | ~16K tokens |
+| Qwen3-0.6B (short prompts) | Comfortable at 1K-8K |
+| Qwen3-4B+ | Needs 2+ GPUs with model sharding |
+
+**Minimum CPU RAM:** 30 GB for 1 GPU, add ~6 GB per additional GPU.
+
+#### GPU Memory: What Matters and What Doesn't
+
+**Context length is the dominant factor for GPU memory.** On a single GPU with Qwen3-0.6B:
+
+| Max Prompt Length | nvidia-smi Peak | PyTorch Allocated | Status |
+|---|---|---|---|
+| 1,024 | 16.7 GB | 3.2 GB | OK |
+| 4,096 | 16.7 GB | 6.1 GB | OK |
+| 8,192 | 16.7 GB | 10.6 GB | OK |
+| 16,384 | 23.5 GB | 20.6 GB | OK (barely fits 24 GB) |
+| 32,768 | - | - | OOM |
+
+Notes:
+- nvidia-smi shows total GPU memory including vLLM's preallocated KV cache (set by `--vllm_cache_utilization`, default 0.6). At short contexts, vLLM's cache dominates the GPU footprint; at long contexts, PyTorch activations exceed it.
+- The gap between nvidia-smi and PyTorch allocated represents vLLM's KV cache (~13.5 GB at 0.6 utilization on A5000).
+- PyTorch memory scales roughly linearly with context length: ~1 GB per 1K tokens beyond the baseline 3 GB (for 0.6B model).
+
+**num_generations has NO impact on peak memory.** It only affects wall time:
+
+| num_generations | nvidia-smi Peak | PyTorch Allocated | CPU RAM | Wall Time |
+|---|---|---|---|---|
+| 1 | 16.7 GB | 3.2 GB | 31.9 GB | 184s |
+| 2 | 16.7 GB | 3.2 GB | 32.0 GB | 199s |
+| 5 | 16.7 GB | 3.2 GB | 31.9 GB | 243s |
+| 10 | 16.7 GB | 3.2 GB | 31.8 GB | 344s |
+| 16 | 16.7 GB | 3.2 GB | 32.1 GB | 413s |
+
+This is because verl processes rollout generations sequentially through vLLM, not all at once.
+
+#### CPU Memory: Dominated by Ray Workers
+
+**CPU RAM scales linearly with number of GPUs** (~6 GB per additional GPU for 0.6B model):
+
+| GPUs | Model Shards | CPU RAM | GPU Peak (per GPU) |
+|---|---|---|---|
+| 1 | 1 | 31.9 GB | 16.7 GB |
+| 2 | 1 | 38.9 GB | 16.0 GB |
+| 4 | 1 | 49.8 GB | 15.8 GB |
+| 7 | 1 | 70.3 GB | 15.7 GB |
+| 2 | 2 (TP) | 38.3 GB | 16.3 GB |
+| 4 | 2 (TP) | 48.0 GB | 16.1 GB |
+| 6 | 2 (TP) | 60.1 GB | 16.0 GB |
+
+Key observations:
+- **Base overhead is ~26 GB** (Ray + vLLM + framework), regardless of model size for small models.
+- Each additional GPU adds a Ray worker with its own vLLM instance, costing ~6 GB CPU RAM.
+- Model sharding (tensor parallelism) slightly reduces CPU RAM vs pure data parallelism at same GPU count.
+- GPU memory per GPU is roughly constant across GPU counts — each GPU carries the full model + vLLM cache.
+
+#### Practical Guidelines
+
+1. **Start with `gpu 1 1` on Nexus** only if you have 30+ GB CPU RAM and short prompts (< 8K tokens).
+2. **For long contexts (> 8K)**, reduce `--vllm_cache_utilization` (e.g., 0.3) to free GPU memory for activations.
+3. **Adding GPUs doesn't save GPU memory** — it only speeds up training. But it costs ~6 GB CPU RAM per GPU.
+4. **num_generations is free for memory** — increase it for better GRPO training signal without memory cost.
+5. **For larger models** (4B+), use `--model_shards 2` with 2+ GPUs to split the model across GPUs.
+6. **CPU RAM planning:** `30 + 6*(num_gpus - 1)` GB is a safe estimate for small models.
+
+#### Investigation Status
+
+Groups A (context length), B (parallelism), and D (num_generations) are complete. Group C (model size scaling with Qwen3-1.7B, 4B, 8B) is in progress — see `memory_results/` and `run_memory_experiments.py --summarize` for latest results.
 
 
 ### Notes:

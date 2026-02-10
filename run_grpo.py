@@ -189,18 +189,6 @@ def parse_args():
     parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
     
     # Training Parameters
-    # Note that Verl uses the number of dataset prompts (meaning rows) as its atomic unit for batch sizes. --rollout_batch_size controls the number of prompts used
-    # to to generate a bunch of rollouts at once and the wandb update interval. This is regardless of the actual gradient update batch size (--batch_size) or 
-    # the number of rollouts per prompt (--num_generations).
-    # Further, the number of prompts in a gradient update is always based on --batch_size, but there will always be more sequences in the batch than prompts, because
-    # each gradient update batch has batch_size * num_generations sequences.
-    # The relationship between rollout_batch_size and batch_size is one that determines how much policy staleness there is. (Larger rollout_batch_size gives more
-    # policy staleness, but faster training.)
-    # In conclusion, for a fixed dataset size, changing batch_size will change the number of gradient updates, but it will not change the number of wandb updates.
-    # And increasing num_generations will increase the number of sequences in a gradient update, but not the total number updates.
-    # rollout_batch_size == num prompts in batch generation pass and wandb update (https://github.com/volcengine/verl/issues/1524)
-    # batch_size == num prompts in a gradient update (https://github.com/volcengine/verl/issues/180)
-    # batch_size * num_generations == num sequences in a gradient update (https://github.com/volcengine/verl/issues/180)
     parser.add_argument("--epochs", default=1, type=int, help="Number of epochs")
     parser.add_argument("--lr", default="1e-6", help="Learning rate")
     parser.add_argument("--batch_size", default=256, type=int, help="Effective batch size for each gradient update")
@@ -224,7 +212,19 @@ def parse_args():
     parser.add_argument("--gradient_checkpointing", default=True, action=argparse.BooleanOptionalAction, help="Enable gradient checkpointing (recomputing activations during backward pass). Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--offload_ref_params", default=True, action=argparse.BooleanOptionalAction, help="Offload the weights of the reference model (frozen version of model being trained). Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--offload_weights_and_states", default=True, action=argparse.BooleanOptionalAction, help="FSDP2 native offload policy for model weights and optimizer states. Only works with FSDP2. If using FSDP, set to false.")
-
+    
+    # Note that Verl uses the number of dataset prompts (meaning rows) as its atomic unit for batch sizes. --rollout_batch_size controls the number of prompts used
+    # to to generate a bunch of rollouts at once and the wandb update interval. This is regardless of the actual gradient update batch size (--batch_size) or 
+    # the number of rollouts per prompt (--num_generations).
+    # Further, the number of prompts in a gradient update is always based on --batch_size, but there will always be more sequences in the batch than prompts, because
+    # each gradient update batch has batch_size * num_generations sequences.
+    # The relationship between rollout_batch_size and batch_size is one that determines how much policy staleness there is. (Larger rollout_batch_size gives more
+    # policy staleness, but faster training.)
+    # In conclusion, for a fixed dataset size, changing batch_size will change the number of gradient updates, but it will not change the number of wandb updates.
+    # And increasing num_generations will increase the number of sequences in a gradient update, but not the total number updates.
+    # rollout_batch_size == num prompts in batch generation pass and wandb update (https://github.com/volcengine/verl/issues/1524)
+    # batch_size == num prompts in a gradient update (https://github.com/volcengine/verl/issues/180)
+    # batch_size * num_generations == num sequences in a gradient update (https://github.com/volcengine/verl/issues/180)
     return parser.parse_args()
 
 
