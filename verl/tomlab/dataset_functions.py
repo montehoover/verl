@@ -2,6 +2,9 @@ import os
 import re
 import datasets
 
+GSM8K_DATASET_NAME = "openai/gsm8k"
+DYNABENCH_DATASET_NAME = "tomg-group-umd/dynabench"
+
 
 def extract_solution_gsm8k(solution_str):
     solution = re.search("#### (\\-?[0-9\\.\\,]+)", solution_str)
@@ -30,57 +33,64 @@ def load_hf_dataset(dataset_path, dataset_subset):
     return datasets.load_dataset(dataset_path, name=resolved_subset)
 
 
-def preprocess_dataset_gsm8k(
-    hf_dataset_name="openai/gsm8k",
+# ---------------------------------------------------------------------------
+# Generic entrypoint — contains all shared boilerplate
+# ---------------------------------------------------------------------------
+
+def list_dataset_map_functions():
+    excluded_names = {"preprocess_dataset"}
+    names = []
+    for name, value in globals().items():
+        if name.startswith("preprocess_") and name not in excluded_names and callable(value):
+            names.append(name)
+    return sorted(names)
+
+
+def get_dataset_map_function(map_fn_name):
+    assert isinstance(map_fn_name, str), f"Expected map function name string, got {type(map_fn_name)}: {map_fn_name!r}"
+    map_fn = globals().get(map_fn_name)
+    assert callable(map_fn), (
+        f"Unknown map function '{map_fn_name}'. Available: {', '.join(list_dataset_map_functions())}"
+    )
+    return map_fn
+
+
+def preprocess_dataset(
+    map_fn_name,
+    hf_dataset_name,
     hf_dataset_subset=None,
     local_dataset_path=None,
-    local_save_dir="data/gsm8k",
+    local_save_dir="data",
     num_examples=-1,
     val_split=None,
     val_size=0.0,
 ):
-    """Download and preprocess the GSM8K dataset into verl's expected parquet format.
+    """Download, preprocess, and save a dataset into verl's expected parquet format.
 
-    Transforms each row into the schema verl expects, and saves train/test splits as
-    parquet files. The output parquet files contain the following fields per row:
-
-        - "data_source": The dataset identifier string (e.g. "openai/gsm8k"). Used by
-            the reward manager to route to the correct reward function.
-        - "prompt": A list of chat messages in HuggingFace chat_template format
-            (e.g. [{"role": "user", "content": "..."}]). The tokenizer in RLHFDataset
-            applies the chat template and tokenizes this.
-        - "ability": Task category string (set to "math" for GSM8K).
-        - "reward_model": A dict with "style" ("rule") and "ground_truth" (the
-            extracted numeric answer as a string). The ground_truth is what gets
-            passed to the reward function during training.
-        - "extra_info": A dict with metadata ("split", "index", "answer", "question").
-            Passed through to the reward function as extra_info.
-
-    The output format is designed to pair with the verl reward function format.
-    See verl/tomlab/reward_functions.py, where "reward_model.ground_truth" becomes the
-    ground_truth argument and "data_source" becomes the data_source argument.
+    This is the generic entrypoint that handles all shared boilerplate: loading
+    the dataset, resolving validation splits, limiting examples, applying the
+    per-row transform, and saving parquet files.
 
     Args:
-        hf_dataset_name: HuggingFace dataset identifier. Stored as "data_source" in
-            each row so the reward manager can identify which reward function to use.
-        hf_dataset_subset: Optional HF dataset subset/config name (e.g. "main").
+        map_fn_name: Name of the map function in this file that returns a
+            ``split -> process_fn`` callable. Examples: ``preprocess_gsm8k`` or
+            ``preprocess_dynabench``.
+        hf_dataset_name: HuggingFace dataset identifier.
+        hf_dataset_subset: Optional HF dataset subset/config name.
         local_dataset_path: If provided, load from this local path instead of
             HuggingFace Hub.
         local_save_dir: Directory to save the output parquet files.
-        num_examples: Number of training examples to use. -1 for all. If larger than
-            the dataset, all examples are used and a note is printed.
-        val_split: Name of a split in the HF dataset to use as validation (e.g. "test").
-            If the split doesn't exist, falls back to val_size.
-        val_size: Fraction of the train split to hold out for validation (0.0 to 1.0).
-            Only used when val_split is None or the requested val_split doesn't exist.
-            If 0.0, no validation set is created and None is returned for val_path.
+        num_examples: Number of training examples to use. -1 for all.
+        val_split: Name of a split in the HF dataset to use as validation.
+        val_size: Fraction of the train split to hold out for validation.
 
     Returns:
-        A tuple of (train_path, val_path, num_train_examples). val_path is None if no
-        validation set is created (val_size=0.0 and no valid val_split).
-
-    See: https://verl.readthedocs.io/en/latest/preparation/prepare_data.html
+        A tuple of (train_path, val_path, num_train_examples). val_path is None
+        if no validation set is created.
     """
+    map_fn_builder = get_dataset_map_function(map_fn_name)
+    make_map_fn = map_fn_builder()
+
     if local_dataset_path is not None:
         dataset = load_hf_dataset(local_dataset_path, hf_dataset_subset)
     else:
@@ -108,38 +118,6 @@ def preprocess_dataset_gsm8k(
         else:
             train_dataset = train_dataset.select(range(num_examples))
 
-    instruction_following = 'Let\'s think step by step and output the final answer after "####".'
-
-    # add a row to each data item that represents a unique id
-    def make_map_fn(split):
-        def process_fn(example, idx):
-            question_raw = example.pop("question")
-
-            question = question_raw + " " + instruction_following
-
-            answer_raw = example.pop("answer")
-            solution = extract_solution_gsm8k(answer_raw)
-            data = {
-                "data_source": hf_dataset_name,
-                "prompt": [
-                    {
-                        "role": "user",
-                        "content": question,
-                    }
-                ],
-                "ability": "math",
-                "reward_model": {"style": "rule", "ground_truth": solution},
-                "extra_info": {
-                    "split": split,
-                    "index": idx,
-                    "answer": answer_raw,
-                    "question": question_raw,
-                },
-            }
-            return data
-
-        return process_fn
-
     train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True)
     os.makedirs(local_save_dir, exist_ok=True)
     train_path = os.path.join(local_save_dir, "train.parquet")
@@ -155,3 +133,62 @@ def preprocess_dataset_gsm8k(
         print(f"Dataset saved to {train_path} ({len(train_dataset)} examples). No validation set.")
 
     return train_path, val_path, len(train_dataset)
+
+
+# ---------------------------------------------------------------------------
+# Per-dataset map functions — just the row transform logic
+# ---------------------------------------------------------------------------
+
+def preprocess_gsm8k():
+    """Return a ``make_map_fn`` closure for GSM8K rows."""
+    dataset_name = GSM8K_DATASET_NAME
+    instruction_following = 'Let\'s think step by step and output the final answer after "####".'
+
+    def make_map_fn(split):
+        def process_fn(example, idx):
+            question_raw = example.pop("question")
+            question = question_raw + " " + instruction_following
+            answer_raw = example.pop("answer")
+            solution = extract_solution_gsm8k(answer_raw)
+            data = {
+                "data_source": dataset_name,
+                "prompt": [{"role": "user", "content": question}],
+                "ability": "math",
+                "reward_model": {"style": "rule", "ground_truth": solution},
+                "extra_info": {
+                    "split": split,
+                    "index": idx,
+                    "answer": answer_raw,
+                    "question": question_raw,
+                },
+            }
+            return data
+        return process_fn
+    return make_map_fn
+
+
+def preprocess_dynabench():
+    """Return a ``make_map_fn`` closure for DynaBench rows."""
+    dataset_name = DYNABENCH_DATASET_NAME
+    def make_map_fn(split):
+        def process_fn(example, idx):
+            question = example["formatted_input"]
+            answer = example["formatted_output"]
+            label = example["label"]
+            data = {
+                "data_source": dataset_name,
+                "prompt": [{"role": "user", "content": question}],
+                "ability": "safety",
+                "reward_model": {"style": "rule", "ground_truth": label},
+                "extra_info": {
+                    "split": split,
+                    "index": idx,
+                    "answer": answer,
+                    "question": question,
+                },
+            }
+            return data
+        return process_fn
+    return make_map_fn
+
+

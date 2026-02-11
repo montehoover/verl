@@ -26,6 +26,9 @@ def get_last_checkpoint_path(run_name, checkpoint_dir="checkpoints"):
     return checkpoint_path
 
 
+LORA_TARGET_MODULE_CHOICES = ["all-linear", "all-linear-and-embedding", "all-attention", "qv-only"]
+
+
 def get_lora_target_modules(name):
     """Convert a friendly LoRA target module name to the Hydra config value.
 
