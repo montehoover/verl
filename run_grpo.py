@@ -1,4 +1,4 @@
-import argparse, os, subprocess
+import argparse, os, shutil, subprocess
 import torch
 from verl.tomlab.helpers import get_short_model_name, get_last_checkpoint_path, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
@@ -29,10 +29,20 @@ def main(args):
     else:
         logger_entries = ["console"]
 
+    checkpoint_path = f"{args.checkpoint_dir}/{run_name}"
     if args.resume_training:
         resume_mode = "auto"
     else:
         resume_mode = "disable"
+        if os.path.exists(checkpoint_path):
+            if args.overwrite:
+                print(f"Note: Removing old checkpoint directory: {checkpoint_path}")
+                shutil.rmtree(checkpoint_path)
+            else:
+                print("Checkpoint directory already exists: {checkpoint_path}")
+                print(f"  Use --overwrite to remove it and start fresh.")
+                print(f"  Use --resume_training to continue from the last checkpoint.")
+                raise SystemExit(1)
 
     # See: https://verl.readthedocs.io/en/latest/algo/grpo.html#drgrpo
     if args.algorithm == "grpo":
@@ -65,6 +75,7 @@ def main(args):
     #########################################################
     train_files, val_files, num_train_examples = preprocess_dataset_gsm8k(
         hf_dataset_name=args.dataset,
+        hf_dataset_subset=args.subset,
         local_save_dir=args.data_download_dir,
         num_examples=args.num_examples,
         val_split=args.val_split,
@@ -107,7 +118,7 @@ def main(args):
         f"trainer.logger={logger_entries!r}",
         f"trainer.project_name={args.wandb_project}",
         f"trainer.experiment_name={run_name}",
-        f"trainer.default_local_dir={args.checkpoint_dir}/{run_name}",
+        f"trainer.default_local_dir={checkpoint_path}",
         f"trainer.resume_mode={resume_mode}",
         # Dataset
         f"data.train_files={train_files}",
@@ -135,12 +146,12 @@ def main(args):
         f"algorithm.norm_adv_by_std_in_grpo={norm_adv_by_std_in_grpo}",
         f"trainer.total_epochs={args.epochs}",
         f"custom_reward_function.path=verl/tomlab/reward_functions.py",
-        f"custom_reward_function.name=gsm8k_reward",
+        f"custom_reward_function.name={args.reward_function}",
         # Memory Management
         f"actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
         f"actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
         f"actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu={args.batch_size_per_gpu}",
-        f"actor_rollout_ref.rollout.tensor_model_parallel_size={args.model_shards}",
+        f"actor_rollout_ref.rollout.tensor_model_parallel_size={args.vllm_model_shards}",
         f"actor_rollout_ref.rollout.gpu_memory_utilization={args.vllm_cache_utilization}",
         f"actor_rollout_ref.rollout.max_model_len={args.max_prompt_length + args.max_response_length}",
         f"actor_rollout_ref.rollout.enable_chunked_prefill={args.chunked_prefill}",
@@ -178,15 +189,18 @@ def parse_args():
     parser.add_argument("--val_freq", default=5, type=int, help="At how many steps to run validation loop. Set to -1 to disable validation.")
     parser.add_argument("--val_before_train", default=False, action=argparse.BooleanOptionalAction, help="Run validation before training")
     parser.add_argument("--num_checkpoints_to_keep", default=1, type=int, help="Number of checkpoints to keep. If None, I think they all are saved.")
+    parser.add_argument("--overwrite", default=False, action=argparse.BooleanOptionalAction, help="Remove old checkpoint directory if it exists. Required to start fresh when checkpoints already exist.")
 
     # Dataset
     parser.add_argument("--dataset", default="openai/gsm8k", help="Dataset name")
-    parser.add_argument("--data_download_dir", default="data/verl_demo", help="Local directory for data")
+    parser.add_argument("--subset", default=None, help="Dataset subset/config name")
     parser.add_argument("--split", default=None, help="Dataset split")
     parser.add_argument("--val_split", default=None, help="Validation dataset split")
+    parser.add_argument("--data_download_dir", default="data/gsm8k", help="Local directory for data")
+    parser.add_argument("--reward_function", default="gsm8k_reward", help="Reward function to use")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
-   
+    
     # Model
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
@@ -209,7 +223,7 @@ def parse_args():
     # Memory management
     parser.add_argument("--num_nodes", default=1, type=int, help="Number of nodes to we are using")
     parser.add_argument("--vllm_cache_utilization", default=0.6, type=float, help="VLLM cache utilization. Set very low if running out of GPU memory.")
-    parser.add_argument("--model_shards", default=1, type=int, help="Number of model shards. Examples show using 2 when doing a 7B model on 8 GPUs. They use 4 when doing a 32B model on 32 GPUs.")
+    parser.add_argument("--vllm_model_shards", default=1, type=int, help="Number of model shards for Vllm. Set as low as possible given the model size for fastest generations. Examples show using 2 when doing a 7B model on 8 GPUs. They use 4 when doing a 32B model on 32 GPUs.")
     parser.add_argument("--batch_size_per_gpu",default=1, type=int, help="Batch size per GPU. Reduce if hitting OOM. Increase for faster training.")
     parser.add_argument("--num_workers", default=8, type=int, help="Number of CPU agent loop workers that orchestrate rollout generation. Verl defaults to 8. rollout_batch_size must be divisible by this.")
     parser.add_argument("--max_prompt_length", default=512, type=int, help="Remove samples from the dataset that are longer than this")

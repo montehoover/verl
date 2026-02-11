@@ -1,6 +1,6 @@
-import argparse, os, subprocess
+import argparse, os, shutil, subprocess
 import torch
-from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules
+from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
 
 def main(args):
@@ -15,6 +15,21 @@ def main(args):
 
     lora_target_modules = get_lora_target_modules(args.lora_target_modules)
 
+    checkpoint_path = f"{args.checkpoint_dir}/{run_name}"
+    if args.resume_training:
+        resume_mode = "auto"
+    else:
+        resume_mode = "disable"
+        if os.path.exists(checkpoint_path):
+            if args.overwrite:
+                print(f"Note: Removing old checkpoint directory: {checkpoint_path}")
+                shutil.rmtree(checkpoint_path)
+            else:
+                print(f"Checkpoint directory already exists: {checkpoint_path}")
+                print(f"  Use --overwrite to remove it and start fresh.")
+                print(f"  Use --resume_training to continue from the last checkpoint.")
+                raise SystemExit(1)
+
     if args.use_wandb:
         os.environ["WANDB_ENTITY"] = args.wandb_entity
         logger_entries = ["console", "wandb"]
@@ -26,6 +41,7 @@ def main(args):
     #########################################################
     train_files, val_files, num_train_examples = preprocess_dataset_gsm8k(
         hf_dataset_name=args.dataset,
+        hf_dataset_subset=args.subset,
         local_save_dir=args.data_download_dir,
         num_examples=args.num_examples,
         val_split=args.val_split,
@@ -59,7 +75,8 @@ def main(args):
         # Admin Settings
         f"trainer.project_name={args.wandb_project}",
         f"trainer.experiment_name={run_name}",
-        f"trainer.default_local_dir={args.checkpoint_dir}/{run_name}",
+        f"trainer.default_local_dir={checkpoint_path}",
+        f"trainer.resume_mode={resume_mode}",
         f"trainer.logger={logger_entries!r}",
         f"trainer.save_freq={args.save_freq}",
         f"trainer.test_freq={args.val_freq}",
@@ -94,7 +111,7 @@ def main(args):
     subprocess.run(sft_cmd, check=True, env=env)
 
     print(f"\nSFT training completed successfully.")
-    print(f"Checkpoints saved to: {args.checkpoint_dir}/{run_name}\n")
+    print(f"Checkpoints saved to: {checkpoint_path}\n")
 
 
 def parse_args():
@@ -107,19 +124,22 @@ def parse_args():
     parser.add_argument("--checkpoint_dir", default="checkpoints", help="Directory for checkpoints")
     parser.add_argument("--save_freq", default=-1, type=int, help="At how many steps to save a checkpoint. -1 to disable.")
     parser.add_argument("--val_freq", default=-1, type=int, help="At how many steps to run validation loop. -1 to disable.")
+    parser.add_argument("--resume_training", default=False, action=argparse.BooleanOptionalAction, help="Resume from last checkpoint.")
+    parser.add_argument("--overwrite", default=False, action=argparse.BooleanOptionalAction, help="Remove old checkpoint directory if it exists. Required to start fresh when checkpoints already exist.")
 
     # Dataset
     parser.add_argument("--dataset", default="openai/gsm8k", help="Dataset name")
+    parser.add_argument("--subset", default=None, help="Dataset subset/config name")
+    parser.add_argument("--val_split", default=None, help="Validation dataset split")
     parser.add_argument("--data_download_dir", default="data/verl_demo", help="Local directory for data")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
-    parser.add_argument("--val_split", default=None, help="Validation dataset split")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
 
     # Model
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--lora_rank", default=None, type=int, help="LoRA rank. If None, LoRA is disabled")
     parser.add_argument("--lora_alpha", default=None, type=int, help="LoRA alpha. If None, LoRA is disabled")
-    parser.add_argument("--lora_target_modules", default="all-linear", choices=["all-linear", "all-linear-and-embedding", "all-attention", "qv-only"], help="Target modules for LoRA matrices")
+    parser.add_argument("--lora_target_modules", default="all-linear", choices=LORA_TARGET_MODULE_CHOICES, help="Target modules for LoRA matrices")
 
     # Training Parameters
     parser.add_argument("--epochs", default=4, type=int, help="Number of epochs")

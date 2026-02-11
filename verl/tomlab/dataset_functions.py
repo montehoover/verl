@@ -11,8 +11,34 @@ def extract_solution_gsm8k(solution_str):
     return final_solution
 
 
-def preprocess_dataset_gsm8k(hf_dataset_name="openai/gsm8k", local_dataset_path=None, local_save_dir="data/gsm8k",
-                             num_examples=-1, val_split=None, val_size=0.0):
+def resolve_dataset_subset(dataset_path, dataset_subset):
+    """Return a config name or None to pass as name= in load_dataset.
+
+    Passing None defers to HuggingFace defaults; it loads single-config datasets
+    and raises if the dataset requires an explicit config name.
+    """
+    config_names = datasets.get_dataset_config_names(dataset_path)
+    if not config_names:
+        return None
+    else:
+        print(f"Note: No subset provided. Using first subset/config name: {config_names[0]}")
+        return config_names[0]
+
+
+def load_hf_dataset(dataset_path, dataset_subset):
+    resolved_subset = dataset_subset or resolve_dataset_subset(dataset_path, dataset_subset)
+    return datasets.load_dataset(dataset_path, name=resolved_subset)
+
+
+def preprocess_dataset_gsm8k(
+    hf_dataset_name="openai/gsm8k",
+    hf_dataset_subset=None,
+    local_dataset_path=None,
+    local_save_dir="data/gsm8k",
+    num_examples=-1,
+    val_split=None,
+    val_size=0.0,
+):
     """Download and preprocess the GSM8K dataset into verl's expected parquet format.
 
     Transforms each row into the schema verl expects, and saves train/test splits as
@@ -37,6 +63,7 @@ def preprocess_dataset_gsm8k(hf_dataset_name="openai/gsm8k", local_dataset_path=
     Args:
         hf_dataset_name: HuggingFace dataset identifier. Stored as "data_source" in
             each row so the reward manager can identify which reward function to use.
+        hf_dataset_subset: Optional HF dataset subset/config name (e.g. "main").
         local_dataset_path: If provided, load from this local path instead of
             HuggingFace Hub.
         local_save_dir: Directory to save the output parquet files.
@@ -55,9 +82,9 @@ def preprocess_dataset_gsm8k(hf_dataset_name="openai/gsm8k", local_dataset_path=
     See: https://verl.readthedocs.io/en/latest/preparation/prepare_data.html
     """
     if local_dataset_path is not None:
-        dataset = datasets.load_dataset(local_dataset_path, "main")
+        dataset = load_hf_dataset(local_dataset_path, hf_dataset_subset)
     else:
-        dataset = datasets.load_dataset(hf_dataset_name, "main")
+        dataset = load_hf_dataset(hf_dataset_name, hf_dataset_subset)
 
     train_dataset = dataset["train"]
 
