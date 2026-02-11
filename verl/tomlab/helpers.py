@@ -26,21 +26,26 @@ def get_last_checkpoint_path(run_name, checkpoint_dir="checkpoints"):
     return checkpoint_path
 
 
+LORA_TARGET_MODULE_MAPPING = {
+    "all-linear": "all-linear",
+    "all-linear-and-embedding": "[q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj,embed_tokens]",
+    "all-attention": "[q_proj,k_proj,v_proj,o_proj]",
+    "qv-only": "[q_proj,v_proj]",
+}
+LORA_TARGET_MODULE_CHOICES = list(LORA_TARGET_MODULE_MAPPING)
+
+
 def get_lora_target_modules(name):
     """Convert a friendly LoRA target module name to the Hydra config value.
 
     Passed to peft's LoraConfig via actor_rollout_ref.model.target_modules (GRPO/PPO)
     or model.target_modules (SFT). Module names are for Qwen-style architectures.
     """
-    mapping = {
-        "all-linear": "all-linear",
-        "all-linear-and-embedding": "[q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj,embed_tokens]",
-        "all-attention": "[q_proj,k_proj,v_proj,o_proj]",
-        "qv-only": "[q_proj,v_proj]",
-    }
-    if name not in mapping:
-        raise ValueError(f"Unknown lora_target_modules: {name!r}. Choose from: {list(mapping.keys())}")
-    return mapping[name]
+    if name not in LORA_TARGET_MODULE_MAPPING:
+        raise ValueError(
+            f"Unknown lora_target_modules: {name!r}. Choose from: {list(LORA_TARGET_MODULE_MAPPING.keys())}"
+        )
+    return LORA_TARGET_MODULE_MAPPING[name]
 
 
 def get_short_model_name(model_path):
