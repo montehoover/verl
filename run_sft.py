@@ -1,7 +1,7 @@
 import argparse, os, shutil, subprocess
 import torch
 from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
-from verl.tomlab.dataset_functions import preprocess_dataset_gsm8k
+from verl.tomlab.dataset_functions import preprocess_dataset
 
 def main(args):
     #########################################################
@@ -39,7 +39,8 @@ def main(args):
     #########################################################
     # Dataset
     #########################################################
-    train_files, val_files, num_train_examples = preprocess_dataset_gsm8k(
+    train_files, val_files, num_train_examples = preprocess_dataset(
+        map_fn_name=args.dataset_function,
         hf_dataset_name=args.dataset,
         hf_dataset_subset=args.subset,
         local_save_dir=args.data_download_dir,
@@ -131,7 +132,8 @@ def parse_args():
     parser.add_argument("--dataset", default="openai/gsm8k", help="Dataset name")
     parser.add_argument("--subset", default=None, help="Dataset subset/config name")
     parser.add_argument("--val_split", default=None, help="Validation dataset split")
-    parser.add_argument("--data_download_dir", default="data/verl_demo", help="Local directory for data")
+    parser.add_argument("--dataset_function", default="preprocess_gsm8k", help="Name of the dataset preprocessing function in dataset_functions.py")
+    parser.add_argument("--data_download_dir", default="data/gsm8k", help="Local directory for data")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
 
