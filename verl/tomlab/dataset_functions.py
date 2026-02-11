@@ -3,7 +3,6 @@ import re
 import datasets
 
 GSM8K_DATASET_NAME = "openai/gsm8k"
-DYNABENCH_DATASET_NAME = "tomg-group-umd/dynabench"
 
 
 def extract_solution_gsm8k(solution_str):
@@ -160,31 +159,6 @@ def preprocess_gsm8k():
                     "index": idx,
                     "answer": answer_raw,
                     "question": question_raw,
-                },
-            }
-            return data
-        return process_fn
-    return make_map_fn
-
-
-def preprocess_dynabench():
-    """Return a ``make_map_fn`` closure for DynaBench rows."""
-    dataset_name = DYNABENCH_DATASET_NAME
-    def make_map_fn(split):
-        def process_fn(example, idx):
-            question = example["formatted_input"]
-            answer = example["formatted_output"]
-            label = example["label"]
-            data = {
-                "data_source": dataset_name,
-                "prompt": [{"role": "user", "content": question}],
-                "ability": "safety",
-                "reward_model": {"style": "rule", "ground_truth": label},
-                "extra_info": {
-                    "split": split,
-                    "index": idx,
-                    "answer": answer,
-                    "question": question,
                 },
             }
             return data
