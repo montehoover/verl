@@ -67,7 +67,7 @@ python run_sft.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test 
 This reproduces the results from https://github.com/volcengine/verl/blob/main/examples/grpo_trainer/run_qwen3-8b.sh.
 It runs successfully on four RTX A6000s with 120 GB of CPU memory. These details are captured in [launch.sh](launch.sh).
 ```
-python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.8 --batch_size_per_gpu 1 --max_prompt_length 512 --vllm_model_shards 2 --no-offload_weights_and_states --update_weights_bucket_mb 4096
+python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.4 --batch_size_per_gpu 1 --max_prompt_length 512 --vllm_model_shards 2 --no-offload_weights_and_states --update_weights_bucket_mb 4096
 ```
 
 ### DrGRPO
@@ -97,11 +97,16 @@ Both scripts accept `--lora_target_modules` with choices: `all-linear` (default)
 
 ## Memory Management
 
-Numbers measured on **RTX A5000 (24 GB)** and **RTX A6000 (48 GB)** GPUs using GRPO, FSDP2, vLLM, with all CPU offloading enabled (`--offload_weights_and_states`, `--offload_ref_params`, `--gradient_checkpointing`, `--chunked_prefill`). 80 GB values are extrapolated. See `memory_results/` for raw JSON data and `run_memory_experiments.py` to reproduce.
+### VLLM Cache Utilization and CPU Offloading
+
+During GRPO runs, the context length for generations is limited by VLLM Cache Utilization, which Verl defaults to 0.6. The context length for the backward pass is limited by the activations, which grow roughly linearly because of flash attention. Memory taken by the optimizer states remains on the GPU during VLLM generation unless we do offloading. If we don't do offloading, we need to lower VLLM Cache Utilization to the largest possible value it can be and still fit the optimizer states on the GPU. Finding this vllm_cache_utilization value depends only on model size and GPU memory, not context length. If we have enough CPU memory to do offloading, the optimizer states are taken off the GPU during the rollout generations and we can safely set vllm_cache_utilization to it's highest possible value (0.8 or a little above).
 
 ### Max Context Length
 
-This table lists the max context length possible for GRPO for a given model on a given GPU, and the vllm_cache_utilization setting that enables the max context length. See the notes below for a discussion of when context length is limited by vllm rollouts and when it is limited by training activations. All values assume CPU offloading enabled, which requires a surprising amount of CPU memory.
+This table lists the max context length possible for GRPO for a given model on a given GPU, and the vllm_cache_utilization setting that enables the max context length. See the notes below for a discussion of when context length is limited by vllm rollouts and when it is limited by training activations. All values assume CPU offloading enabled (`--offload_weights_and_states`), which requires a surprising amount of CPU memory. **Without CPU offloading**, FSDP keeps optimizer states on GPU (~24 GB/GPU for 8B), so you must use a much lower cache (0.3-0.4) and context lengths are shorter.
+
+Numbers measured on RTX A5000 (24 GB) and RTX A6000 (48 GB) GPUs using GRPO, FSDP2, vLLM, with  CPU offloading enabled (`--offload_weights_and_states`). 80 GB values are extrapolated. Because we did CPU offloading and set the vllm_cache_utilization to max, the limiting factor was always the backward pass and not the rollouts.
+
 
 | Model | 24GB GPU | 48GB GPU | 80GB GPU |
 |---|---|---|---|
@@ -118,12 +123,10 @@ This table lists the max context length possible for GRPO for a given model on a
 Notes:
 - Num Shards is the vLLM tensor parallel size. Splits model weights across GPUs for generations, freeing per-GPU VRAM for KV cache. Does not reduce training activation memory. Requires 1 GPU per shard.
 - `--vllm_cache_utilization` controls how much GPU memory vLLM reserves for model weights + KV cache during rollout. With vLLM ≥ 0.8.5 and `sleep_level=2` (verl's default), vLLM releases all GPU memory (weights + KV cache) during training. This means higher cache utilization helps rollout (more KV cache for longer sequences) without hurting training. Cache of 0.3 caused rollout failure because KV cache was too small. Default 0.6 is a good starting point; increase to 0.7-0.8 if you need longer rollout sequences.
-- **Two independent bottlenecks for long context:**
+- Two independent bottlenecks for long context:
   With `sleep_level=2`, vLLM releases all GPU memory during training, so the rollout and training phases never compete for memory. Each phase has its own limiting factor:
-  1. **Rollout generation (KV cache):** During generation, vLLM needs enough KV cache to hold the full sequence. If `vllm_cache_utilization` is too low, the KV cache is too small and rollout fails at initialization. *Example:* 0.6B model, 16K prompt, cache=0.3 on 24GB GPU — vLLM reserved only 7.2 GB total (0.3×24), leaving ~6 GB for KV cache after model weights, which wasn't enough for 16K tokens. Fix: increase cache to 0.8.
-  2. **Training backward pass (activations):** During training, PyTorch stores activation tensors that scale with context length × model size. Even with gradient checkpointing, very long contexts exceed GPU memory during the backward pass. *Example:* 0.6B model, 32K prompt on 24GB GPU — rollout succeeded fine, but the backward pass OOM'd because 32K activations required ~40 GB. *Example:* 8B model (2 shards), 32K prompt on 48GB GPU — rollout succeeded (model split across GPUs with plenty of KV cache), but training OOM'd because activations required ~48 GB. Fix: use a larger GPU or reduce context length.
-
-  In practice, training activations are nearly always the binding constraint. Rollout only becomes the bottleneck at very low cache utilization (≤0.3) or when a large model leaves almost no room for KV cache on a single GPU.
+  1. Rollout generation (KV cache): During generation, vLLM needs enough KV cache to hold the full sequence. If `vllm_cache_utilization` is too low, the KV cache is too small and rollout fails at initialization. Example: 0.6B model, 16K prompt, cache=0.3 on 24GB GPU — vLLM reserved only 7.2 GB total (0.3×24), leaving ~6 GB for KV cache after model weights, which wasn't enough for 16K tokens.
+  2. Training backward pass (activations): During training, PyTorch stores activation tensors that scale with context length × model size. Even with gradient checkpointing, very long contexts exceed GPU memory during the backward pass. Example: 0.6B model, 32K prompt on 24GB GPU — rollout succeeded fine, but the backward pass OOM'd because 32K activations required ~40 GB. Example: 8B model (2 shards), 32K prompt on 48GB GPU — rollout succeeded (model split across GPUs with plenty of KV cache), but training OOM'd because activations required ~48 GB.
 - Num Generations only affects wall clock time, and not linearly.
   | num_generations | Wall Time |
   |----|------|
