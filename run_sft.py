@@ -1,4 +1,14 @@
-import argparse, os, shutil, subprocess
+import argparse, os, shutil, subprocess, warnings
+# Suppress future warnings and user warnings everywhere. Here is what gets suppressed:
+# - Torch pynvml package is deprecated
+# - Ray future warning about default behavior when num gpus environment variable is set to 0
+# - Verl dataloader warning stating that default value of 8 workers might not be optimal
+# - Verl tokenizer warning that always gets printed when not using a multimodal model
+# - Verl warning stating that it is not using critic for GRPO
+warning_filters = "ignore::UserWarning,ignore::FutureWarning"
+warnings.filterwarnings("ignore", category=FutureWarning)
+os.environ["PYTHONWARNINGS"] = warning_filters # For subprocesses
+
 import torch
 from verl.tomlab.helpers import get_short_model_name, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset

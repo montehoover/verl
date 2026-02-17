@@ -23,7 +23,7 @@ def resolve_dataset_subset(dataset_path, dataset_subset):
     if not config_names:
         return None
     else:
-        print(f"Note: No subset provided. Using first subset/config name: {config_names[0]}")
+        print(f"Note: No dataset subset provided. Using the default dataset subset: {config_names[0]}")
         return config_names[0]
 
 

@@ -1,4 +1,14 @@
-import argparse, os, shutil, subprocess
+import argparse, os, shutil, subprocess, warnings
+# Suppress future warnings and user warnings everywhere. Here is what gets suppressed:
+# - Torch pynvml package is deprecated
+# - Ray future warning about default behavior when num gpus environment variable is set to 0
+# - Verl dataloader warning stating that default value of 8 workers might not be optimal
+# - Verl tokenizer warning that always gets printed when not using a multimodal model
+# - Verl warning stating that it is not using critic for GRPO
+warning_filters = "ignore::UserWarning,ignore::FutureWarning"
+warnings.filterwarnings("ignore", category=FutureWarning)
+os.environ["PYTHONWARNINGS"] = warning_filters # For subprocesses
+
 import torch
 from verl.tomlab.helpers import get_short_model_name, get_last_checkpoint_path, get_lora_target_modules, LORA_TARGET_MODULE_CHOICES
 from verl.tomlab.dataset_functions import preprocess_dataset
@@ -121,6 +131,7 @@ def main(args):
         f"trainer.experiment_name={run_name}",
         f"trainer.default_local_dir={checkpoint_path}",
         f"trainer.resume_mode={resume_mode}",
+        f"+ray_kwargs.ray_init.runtime_env.env_vars.PYTHONWARNINGS='{warning_filters}'",
         # Dataset
         f"data.train_files={train_files}",
         f"data.val_files={val_files or train_files}",
@@ -234,7 +245,7 @@ def parse_args():
     parser.add_argument("--chunked_prefill", default=True, action=argparse.BooleanOptionalAction, help="Enable chunked prefill in vllm. Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--gradient_checkpointing", default=True, action=argparse.BooleanOptionalAction, help="Enable gradient checkpointing (recomputing activations during backward pass). Trades memory savings for speed, and is True by default in Verl.")
     parser.add_argument("--offload_ref_params", default=True, action=argparse.BooleanOptionalAction, help="Offload the weights of the reference model (frozen version of model being trained). Trades memory savings for speed, and is True by default in Verl.")
-    parser.add_argument("--offload_weights_and_states", default=True, action=argparse.BooleanOptionalAction, help="FSDP2 native offload policy for model weights and optimizer states. Only works with FSDP2. If using FSDP, set to false.")
+    parser.add_argument("--offload_weights_and_states", default=False, action=argparse.BooleanOptionalAction, help="FSDP2 native offload policy for model weights and optimizer states. Only works with FSDP2. If using FSDP, set to false.")
     parser.add_argument("--update_weights_bucket_mb", default=4096, type=int, help="Size in MB of the bucket for transferring weights from FSDP2 to vLLM. Must be larger than the biggest single parameter in fp32. Default 4096 accommodates 8B models. Verl default is 2048, and that worked with FSDP1, but not FSDP2.")
 
     # Note that Verl uses the number of dataset prompts (meaning rows) as its atomic unit for batch sizes. --rollout_batch_size controls the number of prompts used

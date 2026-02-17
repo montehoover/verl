@@ -42,7 +42,7 @@ Project branches:
    
 3. Confirm installation by running a few GRPO training steps. One RTXA5000 has enough memory for this:
    ```
-   python run_grpo.py --model Qwen/Qwen3-0.6B --dataset openai/gsm8k --num_examples 10 --no-offload_weights_and_states
+   python run_grpo.py --model Qwen/Qwen3-0.6B --dataset openai/gsm8k --num_examples 10
    ```
 
 
@@ -67,7 +67,7 @@ python run_sft.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test 
 This reproduces the results from https://github.com/volcengine/verl/blob/main/examples/grpo_trainer/run_qwen3-8b.sh.
 It runs successfully on four RTX A6000s with 120 GB of CPU memory. These details are captured in [launch.sh](launch.sh).
 ```
-python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.4 --batch_size_per_gpu 1 --max_prompt_length 512 --vllm_model_shards 2 --no-offload_weights_and_states --update_weights_bucket_mb 4096
+python run_grpo.py --model Qwen/Qwen3-8B --dataset openai/gsm8k --val_split test --epochs 15 --lr 1e-6 --batch_size 256 --rollout_batch_size 1024 --num_generations 5 --max_response_length 1024 --kl_coef 0.001 --lr_schedule constant --save_freq 20 --val_freq 5 --vllm_cache_utilization 0.4 --batch_size_per_gpu 1 --max_prompt_length 512 --vllm_model_shards 2 
 ```
 
 ### DrGRPO
