@@ -204,4 +204,3 @@ def dynabench_reward(data_source, solution_str, ground_truth, extra_info=None, *
     xml_count = dynabench_xml_count_reward(solution_str, label_opening, label_closing, rules_opening, rules_closing, points=0.05)
 
     return correctness + label_fmt + strict_fmt + soft_fmt + xml_count
-

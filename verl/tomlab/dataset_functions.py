@@ -172,8 +172,9 @@ def preprocess_dynabench():
     dataset_name = DYNABENCH_DATASET_NAME
     def make_map_fn(split):
         def process_fn(example, idx):
-            question = example["formatted_input"]
-            answer = example["formatted_output"]
+            question = (f"<policy>\n{example["policy"]}\n<\policy>\n"
+                f"\n<transcript>\n{example["transcript"]}\n<\transcript>")
+            answer = (f"<answer>\n{example["label"]}\n<\answer>")
             label = example["label"]
             data = {
                 "data_source": dataset_name,

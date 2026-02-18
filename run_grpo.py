@@ -121,6 +121,8 @@ def main(args):
         f"trainer.experiment_name={run_name}",
         f"trainer.default_local_dir={checkpoint_path}",
         f"trainer.resume_mode={resume_mode}",
+        f"+trainer.tensor_model_parallel_size={args.vllm_model_shards}",
+        f"+trainer.strategy=fsdp2",
         # Dataset
         f"data.train_files={train_files}",
         f"data.val_files={val_files or train_files}",
@@ -198,7 +200,7 @@ def parse_args():
     parser.add_argument("--split", default=None, help="Dataset split")
     parser.add_argument("--val_split", default=None, help="Validation dataset split")
     parser.add_argument("--data_download_dir", default="data/gsm8k", help="Local directory for data")
-    parser.add_argument("--dataset_function", default="preprocess_gsm8k", help="Name of the dataset preprocessing function in dataset_functions.py")
+    parser.add_argument("--dataset_function", default="preprocess_dynabench", help="Name of the dataset preprocessing function in dataset_functions.py")
     parser.add_argument("--reward_function", default="gsm8k_reward", help="Reward function to use")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
