@@ -73,7 +73,7 @@ checkpoints_volume: modal.Volume = modal.Volume.from_name("verl-sft-checkpoints"
         MODELS_PATH: checkpoints_volume,
         DATA_PATH: data_volume,
     },
-    secrets=[modal.Secret.from_name("wandb-secret")],
+    # secrets=[modal.Secret.from_name("wandb-secret")],  # Uncomment if using WandB
     timeout=24 * 60 * MINUTES,
 )
 def train(*arglist) -> None:
@@ -98,7 +98,7 @@ def train(*arglist) -> None:
         f"trainer.default_local_dir={MODELS_PATH}",
         "trainer.project_name=verl-sft-gsm8k",
         "trainer.experiment_name=qwen2.5-0.5b-sft",
-        "trainer.logger=['console','wandb']",
+        "trainer.logger=['console']",
         "trainer.total_epochs=50",
         # LoRA configuration
         "model.lora_rank=32",
