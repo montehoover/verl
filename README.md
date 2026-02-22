@@ -5,6 +5,23 @@ This fork of verl is tested and documented for easy use on Nexus. [main](https:/
 Project branches:
 - [dynaguard1](https://github.com/montehoover/verl/tree/dynaguard1)
 
+
+## Modal stuff
+
+Use this command to kick off a modal run:
+```
+pip install modal
+modal run deployment/modal_sft.py::prep_dataset
+```
+
+Or
+```
+pip install modal
+modal run --detach deployment/modal_sft.py::train -- trainer.total_epochs=100
+```
+
+`--detach` allows it to run in the background
+
 ## Quickstart
 
 (This is a Nexus-confirmed version of the [official quickstart](https://verl.readthedocs.io/en/latest/start/install.html#install-dependencies).)
