@@ -12,12 +12,14 @@ Use this command to kick off a modal run:
 ```
 pip install modal
 modal run deployment/modal_sft.py::prep_dataset
+modal run --detach deployment/modal_sft.py::train -- trainer.total_epochs=100
+
 ```
 
 Or
 ```
 pip install modal
-modal run --detach deployment/modal_sft.py::train -- trainer.total_epochs=100
+modal run --detach deployment/dynaguard_modal_sft.py::main -- trainer.total_epochs=100
 ```
 
 `--detach` allows it to run in the background
