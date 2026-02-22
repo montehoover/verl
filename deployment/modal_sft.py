@@ -34,9 +34,8 @@ image = (
 # and a [Modal Volume](https://modal.com/docs/guide/volumes#volumes) to store the data.
 
 DATA_PATH: Path = Path("/data")
-data_volume: modal.Volume = modal.Volume.from_name(
-    "verl-sft-data", create_if_missing=True
-)
+data_volume: modal.Volume = modal.Volume.from_name("verl-sft-data", create_if_missing=True)
+
 
 # We write a Modal Function to populate the Volume with the data.
 @app.function(image=image, volumes={DATA_PATH: data_volume})
@@ -51,6 +50,7 @@ def prep_dataset() -> None:
         check=True,
     )
 
+
 # You can kick off the dataset download with
 # `modal run deployment/modal_sft.py::prep_dataset`
 
@@ -60,16 +60,15 @@ MODELS_PATH: Path = Path("/models")
 MINUTES: int = 60
 
 # We define a Volume for storing model checkpoints.
-checkpoints_volume: modal.Volume = modal.Volume.from_name(
-    "verl-sft-checkpoints", create_if_missing=True
-)
+checkpoints_volume: modal.Volume = modal.Volume.from_name("verl-sft-checkpoints", create_if_missing=True)
 
 # Now, we write a Modal Function for kicking off the SFT training run.
 # If you wish to use Weights & Biases, you'll need to create a Weights & Biases [Secret.](https://modal.com/docs/guide/secrets#secrets)
 
+
 @app.function(
     image=image,
-    gpu="H100:2",
+    gpu="A100:2",
     volumes={
         MODELS_PATH: checkpoints_volume,
         DATA_PATH: data_volume,
@@ -111,6 +110,7 @@ def train(*arglist) -> None:
 
     subprocess.run(cmd, check=True)
     checkpoints_volume.commit()
+
 
 # You can now run the training using `modal run --detach deployment/modal_sft.py::train`,
 # or pass in additional args like `modal run --detach deployment/modal_sft.py::train -- trainer.total_epochs=100`
