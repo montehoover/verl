@@ -98,7 +98,7 @@ checkpoints_volume: modal.Volume = modal.Volume.from_name("verl-grpo-checkpoints
 
 @app.function(
     image=image,
-    gpu="H100:2",
+    gpu="A100:2",
     volumes={
         MODELS_PATH: checkpoints_volume,
         DATA_PATH: data_volume,
@@ -167,13 +167,14 @@ def _build_train_cmd(*, use_wandb: bool) -> list[str]:
         f"custom_reward_function.name={REWARD_FUNCTION_NAME}",
     ]
 
+
 # Run with: modal run --detach deployment/modal_grpo.py::train
 # Or with custom args: modal run --detach deployment/modal_grpo.py::train -- trainer.total_epochs=100
 
 
 @app.function(
     image=image,
-    gpu="H100:2",
+    gpu="A100:2",
     volumes={
         MODELS_PATH: checkpoints_volume,
         DATA_PATH: data_volume,
@@ -224,7 +225,7 @@ vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
 @app.function(
     image=vllm_image,
-    gpu="H100:2",
+    gpu="A100:2",
     scaledown_window=15 * MINUTES,
     timeout=10 * MINUTES,
     volumes={"/root/.cache/vllm": vllm_cache_vol, MODELS_PATH: checkpoints_volume},
