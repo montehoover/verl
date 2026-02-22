@@ -24,6 +24,9 @@ modal run --detach deployment/dynaguard_modal_sft.py::main -- trainer.total_epoc
 
 `--detach` allows it to run in the background
 
+Full docs: https://modal.com/docs/guide/apps 
+Stuff on CPU memory: https://modal.com/docs/guide/resources
+
 ## Quickstart
 
 (This is a Nexus-confirmed version of the [official quickstart](https://verl.readthedocs.io/en/latest/start/install.html#install-dependencies).)
