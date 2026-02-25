@@ -121,7 +121,7 @@ def main(args):
         f"trainer.experiment_name={run_name}",
         f"trainer.default_local_dir={checkpoint_path}",
         f"trainer.resume_mode={resume_mode}",
-        f"+trainer.tensor_model_parallel_size={args.vllm_model_shards}",
+        # f"+trainer.tensor_model_parallel_size={args.vllm_model_shards}",
         f"+trainer.strategy=fsdp2",
         # Dataset
         f"data.train_files={train_files}",
@@ -166,6 +166,8 @@ def main(args):
         f"actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes={args.update_weights_bucket_mb}",
         f"actor_rollout_ref.actor.strategy=fsdp2", # Set to "fsdp" if using pytorch < 2.4
         f"actor_rollout_ref.ref.strategy=fsdp2",  # Set to "fsdp" if using pytorch < 2.4
+        f"actor_rollout_ref.actor.fsdp_config.model_dtype=bf16",
+        f"actor_rollout_ref.ref.fsdp_config.model_dtype=bf16",
     ] + ppo_stuff
     # Ensure that ROCR_VISIBLE_DEVICES is not set, otherwise it will conflict with CUDA_VISIBLE_DEVICES.
     # Ensure that the output is not buffered, so that we can see the output in real time.
