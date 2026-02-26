@@ -9,7 +9,7 @@ def main(args):
     #########################################################
     model_name = get_short_model_name(args.model)
     dataset_name = args.dataset.split("/")[-1] if "/" in args.dataset else args.dataset
-    run_name = f"{model_name}_{dataset_name}_lr{args.lr}_bs{args.batch_size}"
+    run_name = f"{model_name}_{dataset_name}_lr{args.lr}_bs{args.batch_size}_subset{args.subset}"
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check the that this is being called where you expect it to be."  
     
@@ -39,7 +39,7 @@ def main(args):
                 print(f"Note: Removing old checkpoint directory: {checkpoint_path}")
                 shutil.rmtree(checkpoint_path)
             else:
-                print("Checkpoint directory already exists: {checkpoint_path}")
+                print(f"Checkpoint directory already exists: {checkpoint_path}")
                 print(f"  Use --overwrite to remove it and start fresh.")
                 print(f"  Use --resume_training to continue from the last checkpoint.")
                 raise SystemExit(1)

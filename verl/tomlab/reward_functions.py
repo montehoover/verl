@@ -197,6 +197,9 @@ def dynabench_reward(data_source, solution_str, ground_truth, extra_info=None, *
     pos_label = "FAIL"
     neg_label = "PASS"
 
+    print(f"solution_str: {solution_str} THEEND")
+    print(f"ground_truth: {ground_truth} THEEND")
+
     correctness = dynabench_correctness_reward(solution_str, ground_truth, label_opening, label_closing, points=0.50)
     label_fmt = dynabench_label_format_reward(solution_str, label_opening, label_closing, pos_label, neg_label, points=0.10)
     strict_fmt = dynabench_strict_format_reward(solution_str, label_opening, label_closing, points=0.10)
