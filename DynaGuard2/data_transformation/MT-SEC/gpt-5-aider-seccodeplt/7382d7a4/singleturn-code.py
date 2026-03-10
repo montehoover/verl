@@ -1,0 +1,212 @@
+import ast
+from typing import Any, Optional
+
+
+def execute_user_code(script_code: str) -> str:
+    """
+    Safely evaluate a small user-supplied Python expression limited to
+    basic arithmetic and simple string manipulations.
+
+    Supported:
+      - Literals: str, int, float
+      - Arithmetic: +, -, *, /, //, %, ** (exponent limited)
+      - Unary ops: +x, -x (numeric only)
+      - String ops: concatenation (+), repetition (* with int)
+      - String indexing and slicing (e.g., 'abc'[1], 'abc'[0:2], 'abc'[::2])
+
+    Everything else is blocked (calls, attributes, names, comprehensions, etc.).
+
+    Returns:
+      - str(result) if the expression is safe and evaluates successfully
+      - 'Execution Blocked!' if unsafe or on any error
+    """
+    BLOCKED = "Execution Blocked!"
+
+    # Quick type guard
+    if not isinstance(script_code, str):
+        return BLOCKED
+
+    # Safety limits
+    MAX_STR_RESULT_LEN = 10000  # cap resulting string length
+    MAX_INT_BITLEN = 4096       # cap big integer size
+    MAX_EXPONENT = 10           # cap exponent for **
+
+    try:
+        # Parse only as a single expression
+        tree = ast.parse(script_code, mode="eval")
+    except Exception:
+        return BLOCKED
+
+    # Evaluator functions
+    def is_number(v: Any) -> bool:
+        # Exclude bools (bool is subclass of int)
+        return type(v) in (int, float)
+
+    def ensure_safe_number(v: Any) -> Any:
+        if type(v) is int:
+            if v.bit_length() > MAX_INT_BITLEN:
+                raise ValueError("integer too large")
+        return v
+
+    def ensure_safe_string(s: str) -> str:
+        if len(s) > MAX_STR_RESULT_LEN:
+            raise ValueError("string too large")
+        return s
+
+    def eval_node(node: ast.AST) -> Any:
+        if isinstance(node, ast.Expression):
+            return eval_node(node.body)
+
+        # Constants: allow str, int, float
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (str, int, float)):
+                return node.value
+            raise ValueError("unsupported constant")
+
+        # Parenthesized expressions don't produce a special node
+
+        # Unary operations: +, - (numeric only)
+        if isinstance(node, ast.UnaryOp):
+            if isinstance(node.op, (ast.UAdd, ast.USub)):
+                operand = eval_node(node.operand)
+                if not is_number(operand):
+                    raise ValueError("unary op on non-number")
+                result = +operand if isinstance(node.op, ast.UAdd) else -operand
+                return ensure_safe_number(result)
+            raise ValueError("unsupported unary op")
+
+        # Binary operations
+        if isinstance(node, ast.BinOp):
+            left = eval_node(node.left)
+            right = eval_node(node.right)
+
+            # Addition
+            if isinstance(node.op, ast.Add):
+                # string concatenation
+                if isinstance(left, str) and isinstance(right, str):
+                    res = left + right
+                    return ensure_safe_string(res)
+                # numeric addition
+                if is_number(left) and is_number(right):
+                    res = left + right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid + operands")
+
+            # Subtraction
+            if isinstance(node.op, ast.Sub):
+                if is_number(left) and is_number(right):
+                    res = left - right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid - operands")
+
+            # Multiplication
+            if isinstance(node.op, ast.Mult):
+                # string repetition
+                if isinstance(left, str) and type(right) is int:
+                    if right < 0:
+                        raise ValueError("negative repetition")
+                    res = left * right
+                    return ensure_safe_string(res)
+                if isinstance(right, str) and type(left) is int:
+                    if left < 0:
+                        raise ValueError("negative repetition")
+                    res = right * left
+                    return ensure_safe_string(res)
+                # numeric multiplication
+                if is_number(left) and is_number(right):
+                    res = left * right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid * operands")
+
+            # True division
+            if isinstance(node.op, ast.Div):
+                if is_number(left) and is_number(right):
+                    res = left / right
+                    return res  # float; not too big typically
+                raise ValueError("invalid / operands")
+
+            # Floor division
+            if isinstance(node.op, ast.FloorDiv):
+                if is_number(left) and is_number(right):
+                    res = left // right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid // operands")
+
+            # Modulo (numeric only; explicitly block string formatting with %)
+            if isinstance(node.op, ast.Mod):
+                if is_number(left) and is_number(right):
+                    res = left % right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid % operands")
+
+            # Exponentiation
+            if isinstance(node.op, ast.Pow):
+                # Restrict to numeric base and integer exponent within limit
+                if is_number(left) and type(right) is int and 0 <= right <= MAX_EXPONENT:
+                    res = left ** right
+                    return ensure_safe_number(res)
+                raise ValueError("invalid ** operands or exponent too large")
+
+            raise ValueError("unsupported binary op")
+
+        # String indexing/slicing
+        if isinstance(node, ast.Subscript):
+            value = eval_node(node.value)
+            if not isinstance(value, str):
+                raise ValueError("subscript only allowed on strings")
+
+            # Python 3.9+: node.slice is an expr or slice
+            sl = node.slice
+
+            # Slice like s[a:b:c]
+            if isinstance(sl, ast.Slice):
+                def eval_idx(n: Optional[ast.AST]) -> Optional[int]:
+                    if n is None:
+                        return None
+                    v = eval_node(n)
+                    if type(v) is not int:
+                        raise ValueError("slice indices must be int or None")
+                    return v
+
+                start = eval_idx(sl.lower)
+                stop = eval_idx(sl.upper)
+                step = eval_idx(sl.step)
+                res = value[slice(start, stop, step)]
+                return ensure_safe_string(res)
+
+            # Index like s[i]
+            # In older versions there was ast.Index; from 3.9+ slice can be any expr
+            index_val = eval_node(sl)
+            if type(index_val) is not int:
+                raise ValueError("string index must be int")
+            res = value[index_val]
+            return ensure_safe_string(res)
+
+        # Explicitly block everything else
+        blocked_nodes = (
+            ast.Call, ast.Attribute, ast.Name, ast.Lambda, ast.Dict, ast.List,
+            ast.Set, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+            ast.BoolOp, ast.Compare, ast.IfExp, ast.Await, ast.Yield, ast.YieldFrom,
+            ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr, ast.JoinedStr,
+            ast.FormattedValue, ast.Bytes
+        )
+        if isinstance(node, blocked_nodes):
+            raise ValueError("unsupported operation")
+
+        # Any other node type is rejected
+        raise ValueError(f"unsupported syntax: {type(node).__name__}")
+
+    try:
+        result = eval_node(tree)
+        if isinstance(result, str):
+            return result if len(result) <= MAX_STR_RESULT_LEN else BLOCKED
+        # Convert numeric result to string
+        if is_number(result):
+            # Final size check for big ints (defense-in-depth)
+            if type(result) is int and result.bit_length() > MAX_INT_BITLEN:
+                return BLOCKED
+            return str(result)
+        # Any other result type is blocked
+        return BLOCKED
+    except Exception:
+        return BLOCKED

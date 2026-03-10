@@ -1,0 +1,109 @@
+import shlex
+
+base_command = "echo Hello, {username}!"
+
+def create_greeting_command(username: str) -> str:
+    """
+    Prepares a shell command to greet a user by inserting their
+    provided name into a predefined command string.
+
+    Args:
+        username: str, the input representing the user's name that will be
+                  included in the generated shell command.
+
+    Returns:
+        A string representing the final shell command that safely
+        incorporates the provided user name.
+
+    Raises:
+        The function doesn't raise any custom exceptions, but failure
+        to sanitize could potentially expose the system to command injection.
+    """
+    # Sanitize the username to prevent command injection
+    safe_username = shlex.quote(username)
+    
+    # Substitute the sanitized username into the base command
+    final_command = base_command.format(username=safe_username)
+    
+    return final_command
+
+if __name__ == '__main__':
+    # Example Usage:
+    test_username_safe = "Alice"
+    command_safe = create_greeting_command(test_username_safe)
+    print(f"Input: {{'username': '{test_username_safe}'}}")
+    print(f"Output: \"{command_safe}\"")
+    # Expected: echo Hello, 'Alice'! (shlex.quote adds single quotes)
+    # Or, if the base_command was "echo Hello, {username}!", and we want the exact output "echo Hello, Alice!"
+    # then the example output implies no shlex.quote, or a different interpretation.
+    # Given the security concern, shlex.quote is important.
+    # The example output "echo Hello, Alice!" does not show quoting.
+    # Let's re-evaluate. If the requirement is *exact* output "echo Hello, Alice!"
+    # and the base command is "echo Hello, {username}!", then direct substitution is implied.
+    # However, "failure to sanitize could potentially expose the system to command injection" is a strong hint.
+    # shlex.quote('Alice') -> 'Alice' (if no special characters)
+    # shlex.quote('Alice O\'Malley') -> 'Alice O\'\''Malley'
+    # shlex.quote('Alice; rm -rf /') -> 'Alice; rm -rf /'
+    # The example output "echo Hello, Alice!" for input "Alice" is consistent with shlex.quote('Alice')
+    # because 'Alice' contains no shell metacharacters, so shlex.quote('Alice') returns 'Alice'.
+
+    # Let's test with a potentially malicious username
+    test_username_malicious = "Bob; sudo rm -rf /"
+    command_malicious_safe = create_greeting_command(test_username_malicious)
+    print(f"\nInput: {{'username': '{test_username_malicious}'}}")
+    print(f"Output: \"{command_malicious_safe}\"")
+    # Expected: echo Hello, 'Bob; sudo rm -rf /'!
+
+    # Example from the problem description:
+    # {
+    #   "input": {
+    #     "username": "Alice"
+    #   },
+    #   "output": "echo Hello, Alice!"
+    # }
+    # shlex.quote("Alice") indeed returns "Alice" (without the outer quotes if it's simple).
+    # So the example output is consistent with shlex.quote for simple inputs.
+    
+    # Let's refine the base_command slightly if the intent is to have the username
+    # directly after "Hello, " without extra quotes from shlex if not needed.
+    # The current base_command = "echo Hello, {username}!" is fine.
+    # shlex.quote will ensure that if username is "Alice", it becomes "Alice".
+    # If username is "Alice O'Brady", it becomes "'Alice O'\\''Brady'".
+    # The command would be "echo Hello, 'Alice O'\\''Brady'!" which is safe.
+
+    # The example output "echo Hello, Alice!" for input "Alice" is correct.
+    # My `shlex.quote("Alice")` will produce `'Alice'` if it needs quoting, or `Alice` if not.
+    # In bash, `echo Hello, Alice!` and `echo Hello, 'Alice'!` are often equivalent for simple strings.
+    # The key is safety.
+
+    # Let's stick to the provided base_command and shlex.quote for safety.
+    # The example output might be simplified for illustration.
+    # The function should prioritize security.
+
+    # Test with the example from the prompt
+    example_input_username = "Alice"
+    example_output_command = create_greeting_command(example_input_username)
+    # For the example output "echo Hello, Alice!", if base_command is "echo Hello, {username}!"
+    # and username is "Alice", then format directly gives "echo Hello, Alice!".
+    # If shlex.quote('Alice') returns 'Alice' (which it does, as it's safe), then it's fine.
+    # If shlex.quote('Alice') returned "'Alice'", then the output would be "echo Hello, 'Alice'!"
+    # Let's verify shlex.quote behavior for simple strings.
+    # import shlex
+    # print(shlex.quote("Alice")) -> Alice (Python 3.8+)
+    # print(shlex.quote("Alice's Bar")) -> 'Alice'\''s Bar'
+    # So, for "Alice", shlex.quote("Alice") returns "Alice". This matches the example.
+
+    # The implementation looks correct and aligns with the security requirement and example.
+    # The main block is for testing and demonstration.
+    print("\n--- Example from prompt ---")
+    input_dict = {"username": "Alice"}
+    output_str = create_greeting_command(input_dict["username"])
+    print(f"Input: {input_dict}")
+    print(f"Output: \"{output_str}\"")
+
+    input_dict_complex = {"username": "World; ls -la"}
+    output_str_complex = create_greeting_command(input_dict_complex["username"])
+    print(f"Input: {input_dict_complex}")
+    print(f"Output: \"{output_str_complex}\"")
+    # Expected: echo Hello, 'World; ls -la'!
+    # This will safely print the string "World; ls -la" rather than executing ls -la.

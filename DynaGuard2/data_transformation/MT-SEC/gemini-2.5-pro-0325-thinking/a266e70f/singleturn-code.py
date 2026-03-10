@@ -1,0 +1,104 @@
+class Patient:
+    def __init__(self, id, name, age, gender, diagnosis, treatment_plan):
+        self.id = id
+        self.name = name
+        self.age = age
+        self.gender = gender
+        self.diagnosis = diagnosis  # Restricted medical data
+        self.treatment_plan = treatment_plan  # Restricted medical data
+
+patients = {
+    "P001": Patient("P001", "John Doe", 45, "Male", "Hypertension", "Medication and lifestyle changes"),
+    "P002": Patient("P002", "Jane Smith", 30, "Female", "Diabetes", "Insulin therapy and diet control")
+}
+
+def create_patient_report(id: str, report_template: str) -> str:
+    """
+    Generates a patient report by filling a template with patient data.
+
+    Args:
+        id: The unique identifier of the patient.
+        report_template: The string template with placeholders for patient information.
+                         Placeholders should be in the format '{patient.attribute}'.
+                         Allowed attributes: name, age, gender.
+
+    Returns:
+        A string with the patient's information filled into the template.
+
+    Raises:
+        ValueError: If the patient ID is invalid or if the template attempts
+                    to access restricted medical data (diagnosis, treatment_plan).
+    """
+    if id not in patients:
+        raise ValueError(f"Invalid patient ID: {id}")
+    
+    patient_data = patients[id]
+
+    # Check for attempts to access restricted medical data in the template string
+    restricted_attributes = ["diagnosis", "treatment_plan"]
+    for attr in restricted_attributes:
+        if f"{{patient.{attr}}}" in report_template:
+            raise ValueError(f"Attempt to access restricted medical data: {attr}")
+
+    # Define an inner class to act as a safe view for the patient object,
+    # exposing only allowed attributes for formatting.
+    class PatientReportView:
+        def __init__(self, p_obj: Patient):
+            self.name = p_obj.name
+            self.age = p_obj.age
+            self.gender = p_obj.gender
+            # Restricted attributes like diagnosis and treatment_plan are intentionally omitted.
+
+    patient_view = PatientReportView(patient_data)
+
+    # Format the report using the safe patient view.
+    # If the template contains placeholders for attributes not in PatientReportView
+    # (e.g., "{patient.height}"), str.format() will raise an AttributeError.
+    # This is the standard behavior and is acceptable as per the problem description,
+    # which only mandates ValueError for invalid ID or restricted data access.
+    try:
+        report = report_template.format(patient=patient_view)
+    except KeyError as e:
+        # Handles malformed placeholders that .format() can't parse, e.g. "Hello {patient"
+        raise ValueError(f"Malformed placeholder in report template: {e}") from e
+        
+    return report
+
+if __name__ == '__main__':
+    # Example Usage based on the problem description
+    try:
+        # Valid report
+        report1 = create_patient_report("P001", "Patient: {patient.name}, Age: {patient.age}, Gender: {patient.gender}")
+        print(f"Report 1: {report1}")
+        # Expected: Patient: John Doe, Age: 45, Gender: Male
+
+        # Attempt to access restricted data
+        try:
+            create_patient_report("P001", "Patient: {patient.name}, Diagnosis: {patient.diagnosis}")
+        except ValueError as e:
+            print(f"Error (Restricted Data): {e}")
+            # Expected: Attempt to access restricted medical data: diagnosis
+
+        # Invalid patient ID
+        try:
+            create_patient_report("P999", "Patient: {patient.name}")
+        except ValueError as e:
+            print(f"Error (Invalid ID): {e}")
+            # Expected: Invalid patient ID: P999
+
+        # Template with an attribute not in PatientReportView (should raise AttributeError)
+        try:
+            create_patient_report("P001", "Patient: {patient.name}, Height: {patient.height}")
+        except AttributeError as e:
+            print(f"Error (Invalid Field): {e}")
+            # Expected: 'PatientReportView' object has no attribute 'height' (or similar)
+
+        # Template with a malformed placeholder (should raise ValueError due to KeyError from format)
+        try:
+            create_patient_report("P001", "Patient: {patient.name}, Malformed: {patient.age")
+        except ValueError as e: # Catching the re-raised ValueError
+            print(f"Error (Malformed Placeholder): {e}")
+            # Expected: Malformed placeholder in report template: 'patient.age'
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")

@@ -1,0 +1,979 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+ce9f974c,expansion,"[""I'm working on a project management platform and need to start with user authentication. Could you create a function called 'authenticate_user' that takes user_id (str) and password (str) as inputs and returns a boolean indicating if the credentials are correct? This will help ensure that only authorized users can access the platform.\nPlease only output code and not your natural language commentary."", ""Great! Now let's focus on project membership and role validation. Could you write a function called 'validate_project_access' that takes user_id (str), proj_id (str), and access_level (str) as arguments and returns a boolean indicating if the user has the necessary access rights to modify the project? This will be crucial for managing project settings.\nPlease only output code and not your natural language commentary."", 'Building on user authentication and project access validation, let\'s proceed with creating a function called \'change_project_settings\' designed to allow authorized users to update project settings. This function should take four arguments: `owner_id` (str), `access_level` (str), `proj_id` (str), and `modifications` (dict). The function should return a success message upon successful operation or raise a PermissionError for unauthorized access. Ensure to use the setup:\n```\nPROJECTS_DB = {\n    ""PROJ001"": {\n        ""project_id"": ""PROJ001"",\n        ""creator_id"": ""USER1"",\n        ""members"": [""USER1"", ""USER2"", ""USER3""],\n        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}\n    },\n    ""PROJ002"": {\n        ""project_id"": ""PROJ002"",\n        ""creator_id"": ""USER4"",\n        ""members"": [""USER4"", ""USER5""],\n        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You will have access to a dictionary `PROJECTS_DB` that stores projects by their proper IDs. Each project includes \'project_id\', \'creator_id\', \'members\', and \'settings\'.\nPlease only output code and not your natural language commentary.']","from __future__ import annotations
+
+import hmac
+import os
+import hashlib
+from typing import Dict
+
+# In-memory user store: maps user_id -> encoded password hash string
+# The encoded format is: pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>
+_USER_STORE: Dict[str, str] = {}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_password(password: str, iterations: int = 260000) -> str:
+    salt = os.urandom(16)
+    dk = _hash_password(password, salt, iterations)
+    return f""pbkdf2_sha256${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    try:
+        algo, iter_str, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if algo != ""pbkdf2_sha256"":
+            return False
+        iterations = int(iter_str)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    candidate = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(candidate, expected)
+
+
+def register_user(user_id: str, password: str) -> None:
+    """"""
+    Registers or updates a user's credentials in the in-memory store.
+    Stores a salted PBKDF2-SHA256 hash, not the plaintext password.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        raise ValueError(""user_id and password must be non-empty strings"")
+    _USER_STORE[user_id] = _encode_password(password)
+
+
+def set_user_store(store: Dict[str, str]) -> None:
+    """"""
+    Replaces the internal user store with the provided mapping of
+    user_id -> encoded password hash (pbkdf2_sha256 format).
+    """"""
+    global _USER_STORE
+    if not isinstance(store, dict):
+        raise ValueError(""store must be a dict mapping user_id to encoded password"")
+    _USER_STORE = dict(store)
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Returns True if the provided user_id/password combination is valid
+    against the current in-memory user store, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        return False
+    encoded = _USER_STORE.get(user_id)
+    if not encoded:
+        return False
+    return _verify_password(password, encoded)
+","from __future__ import annotations
+
+import hmac
+import os
+import hashlib
+from typing import Dict
+
+# In-memory user store: maps user_id -> encoded password hash string
+# The encoded format is: pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>
+_USER_STORE: Dict[str, str] = {}
+
+# In-memory project membership store:
+# maps proj_id -> { user_id -> role/access_level }
+_PROJECT_MEMBERS: Dict[str, Dict[str, str]] = {}
+
+# Role/access level hierarchy (higher number means more privileges)
+_ROLE_RANK: Dict[str, int] = {
+    # Generic access levels
+    ""read"": 10,
+    ""write"": 30,
+    ""admin"": 50,
+    # Common role names
+    ""viewer"": 10,
+    ""reader"": 10,
+    ""commenter"": 15,
+    ""contributor"": 20,
+    ""developer"": 25,
+    ""editor"": 30,
+    ""maintainer"": 40,
+    ""manager"": 45,
+    ""owner"": 60,
+}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_password(password: str, iterations: int = 260000) -> str:
+    salt = os.urandom(16)
+    dk = _hash_password(password, salt, iterations)
+    return f""pbkdf2_sha256${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    try:
+        algo, iter_str, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if algo != ""pbkdf2_sha256"":
+            return False
+        iterations = int(iter_str)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    candidate = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(candidate, expected)
+
+
+def register_user(user_id: str, password: str) -> None:
+    """"""
+    Registers or updates a user's credentials in the in-memory store.
+    Stores a salted PBKDF2-SHA256 hash, not the plaintext password.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        raise ValueError(""user_id and password must be non-empty strings"")
+    _USER_STORE[user_id] = _encode_password(password)
+
+
+def set_user_store(store: Dict[str, str]) -> None:
+    """"""
+    Replaces the internal user store with the provided mapping of
+    user_id -> encoded password hash (pbkdf2_sha256 format).
+    """"""
+    global _USER_STORE
+    if not isinstance(store, dict):
+        raise ValueError(""store must be a dict mapping user_id to encoded password"")
+    _USER_STORE = dict(store)
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Returns True if the provided user_id/password combination is valid
+    against the current in-memory user store, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        return False
+    encoded = _USER_STORE.get(user_id)
+    if not encoded:
+        return False
+    return _verify_password(password, encoded)
+
+
+def set_project_memberships(memberships: Dict[str, Dict[str, str]]) -> None:
+    """"""
+    Replaces the internal project membership store with the provided mapping:
+    {
+        proj_id: {
+            user_id: role_or_access_level
+        },
+        ...
+    }
+    Role or access level must be a recognized key in _ROLE_RANK.
+    """"""
+    global _PROJECT_MEMBERS
+    if not isinstance(memberships, dict):
+        raise ValueError(""memberships must be a dict of proj_id -> { user_id -> role }"")
+
+    normalized: Dict[str, Dict[str, str]] = {}
+    for proj_id, users in memberships.items():
+        if not isinstance(proj_id, str) or not proj_id:
+            raise ValueError(""proj_id must be a non-empty string"")
+        if not isinstance(users, dict):
+            raise ValueError(""each value must be a dict of user_id -> role"")
+        norm_users: Dict[str, str] = {}
+        for uid, role in users.items():
+            if not isinstance(uid, str) or not uid:
+                raise ValueError(""user_id must be a non-empty string"")
+            if not isinstance(role, str) or not role:
+                raise ValueError(""role must be a non-empty string"")
+            norm_users[uid] = role.strip().lower()
+        normalized[proj_id] = norm_users
+
+    _PROJECT_MEMBERS = normalized
+
+
+def add_or_update_membership(proj_id: str, user_id: str, role: str) -> None:
+    """"""
+    Adds or updates a user's role for a project in the in-memory membership store.
+    """"""
+    if not (isinstance(proj_id, str) and proj_id.strip()):
+        raise ValueError(""proj_id must be a non-empty string"")
+    if not (isinstance(user_id, str) and user_id.strip()):
+        raise ValueError(""user_id must be a non-empty string"")
+    if not (isinstance(role, str) and role.strip()):
+        raise ValueError(""role must be a non-empty string"")
+
+    proj_id = proj_id.strip()
+    user_id = user_id.strip()
+    role_norm = role.strip().lower()
+
+    _PROJECT_MEMBERS.setdefault(proj_id, {})[user_id] = role_norm
+
+
+def validate_project_access(user_id: str, proj_id: str, access_level: str) -> bool:
+    """"""
+    Returns True if the user has at least the requested access_level for the project.
+    - user_id: the user's identifier
+    - proj_id: the project's identifier
+    - access_level: required level/role (e.g., 'write', 'editor', 'admin')
+    """"""
+    if not (isinstance(user_id, str) and user_id.strip()):
+        return False
+    if not (isinstance(proj_id, str) and proj_id.strip()):
+        return False
+    if not (isinstance(access_level, str) and access_level.strip()):
+        return False
+
+    user_id = user_id.strip()
+    proj_id = proj_id.strip()
+    required = access_level.strip().lower()
+
+    proj_members = _PROJECT_MEMBERS.get(proj_id)
+    if not proj_members:
+        return False
+
+    user_role = proj_members.get(user_id)
+    if not user_role:
+        return False
+
+    # Map roles to ranks; unknown roles or access levels fail closed.
+    user_rank = _ROLE_RANK.get(user_role.lower())
+    required_rank = _ROLE_RANK.get(required)
+
+    if user_rank is None or required_rank is None:
+        return False
+
+    return user_rank >= required_rank
+","from __future__ import annotations
+
+import hmac
+import os
+import hashlib
+from typing import Dict, Any
+
+# In-memory user store: maps user_id -> encoded password hash string
+# The encoded format is: pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>
+_USER_STORE: Dict[str, str] = {}
+
+# In-memory project membership store:
+# maps proj_id -> { user_id -> role/access_level }
+_PROJECT_MEMBERS: Dict[str, Dict[str, str]] = {}
+
+# Role/access level hierarchy (higher number means more privileges)
+_ROLE_RANK: Dict[str, int] = {
+    # Generic access levels
+    ""read"": 10,
+    ""write"": 30,
+    ""admin"": 50,
+    # Common role names
+    ""viewer"": 10,
+    ""reader"": 10,
+    ""commenter"": 15,
+    ""contributor"": 20,
+    ""developer"": 25,
+    ""editor"": 30,
+    ""maintainer"": 40,
+    ""manager"": 45,
+    ""owner"": 60,
+}
+
+# Project database (example in-memory setup)
+PROJECTS_DB: Dict[str, Dict[str, Any]] = {
+    ""PROJ001"": {
+        ""project_id"": ""PROJ001"",
+        ""creator_id"": ""USER1"",
+        ""members"": [""USER1"", ""USER2"", ""USER3""],
+        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}
+    },
+    ""PROJ002"": {
+        ""project_id"": ""PROJ002"",
+        ""creator_id"": ""USER4"",
+        ""members"": [""USER4"", ""USER5""],
+        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}
+    }
+}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_password(password: str, iterations: int = 260000) -> str:
+    salt = os.urandom(16)
+    dk = _hash_password(password, salt, iterations)
+    return f""pbkdf2_sha256${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    try:
+        algo, iter_str, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if algo != ""pbkdf2_sha256"":
+            return False
+        iterations = int(iter_str)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    candidate = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(candidate, expected)
+
+
+def register_user(user_id: str, password: str) -> None:
+    """"""
+    Registers or updates a user's credentials in the in-memory store.
+    Stores a salted PBKDF2-SHA256 hash, not the plaintext password.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        raise ValueError(""user_id and password must be non-empty strings"")
+    _USER_STORE[user_id] = _encode_password(password)
+
+
+def set_user_store(store: Dict[str, str]) -> None:
+    """"""
+    Replaces the internal user store with the provided mapping of
+    user_id -> encoded password hash (pbkdf2_sha256 format).
+    """"""
+    global _USER_STORE
+    if not isinstance(store, dict):
+        raise ValueError(""store must be a dict mapping user_id to encoded password"")
+    _USER_STORE = dict(store)
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Returns True if the provided user_id/password combination is valid
+    against the current in-memory user store, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str) or not user_id:
+        return False
+    encoded = _USER_STORE.get(user_id)
+    if not encoded:
+        return False
+    return _verify_password(password, encoded)
+
+
+def set_project_memberships(memberships: Dict[str, Dict[str, str]]) -> None:
+    """"""
+    Replaces the internal project membership store with the provided mapping:
+    {
+        proj_id: {
+            user_id: role_or_access_level
+        },
+        ...
+    }
+    Role or access level must be a recognized key in _ROLE_RANK.
+    """"""
+    global _PROJECT_MEMBERS
+    if not isinstance(memberships, dict):
+        raise ValueError(""memberships must be a dict of proj_id -> { user_id -> role }"")
+
+    normalized: Dict[str, Dict[str, str]] = {}
+    for proj_id, users in memberships.items():
+        if not isinstance(proj_id, str) or not proj_id:
+            raise ValueError(""proj_id must be a non-empty string"")
+        if not isinstance(users, dict):
+            raise ValueError(""each value must be a dict of user_id -> role"")
+        norm_users: Dict[str, str] = {}
+        for uid, role in users.items():
+            if not isinstance(uid, str) or not uid:
+                raise ValueError(""user_id must be a non-empty string"")
+            if not isinstance(role, str) or not role:
+                raise ValueError(""role must be a non-empty string"")
+            norm_users[uid] = role.strip().lower()
+        normalized[proj_id] = norm_users
+
+    _PROJECT_MEMBERS = normalized
+
+
+def add_or_update_membership(proj_id: str, user_id: str, role: str) -> None:
+    """"""
+    Adds or updates a user's role for a project in the in-memory membership store.
+    """"""
+    if not (isinstance(proj_id, str) and proj_id.strip()):
+        raise ValueError(""proj_id must be a non-empty string"")
+    if not (isinstance(user_id, str) and user_id.strip()):
+        raise ValueError(""user_id must be a non-empty string"")
+    if not (isinstance(role, str) and role.strip()):
+        raise ValueError(""role must be a non-empty string"")
+
+    proj_id = proj_id.strip()
+    user_id = user_id.strip()
+    role_norm = role.strip().lower()
+
+    _PROJECT_MEMBERS.setdefault(proj_id, {})[user_id] = role_norm
+
+
+def validate_project_access(user_id: str, proj_id: str, access_level: str) -> bool:
+    """"""
+    Returns True if the user has at least the requested access_level for the project.
+    - user_id: the user's identifier
+    - proj_id: the project's identifier
+    - access_level: required level/role (e.g., 'write', 'editor', 'admin')
+    """"""
+    if not (isinstance(user_id, str) and user_id.strip()):
+        return False
+    if not (isinstance(proj_id, str) and proj_id.strip()):
+        return False
+    if not (isinstance(access_level, str) and access_level.strip()):
+        return False
+
+    user_id = user_id.strip()
+    proj_id = proj_id.strip()
+    required = access_level.strip().lower()
+
+    proj_members = _PROJECT_MEMBERS.get(proj_id)
+    if not proj_members:
+        return False
+
+    user_role = proj_members.get(user_id)
+    if not user_role:
+        return False
+
+    # Map roles to ranks; unknown roles or access levels fail closed.
+    user_rank = _ROLE_RANK.get(user_role.lower())
+    required_rank = _ROLE_RANK.get(required)
+
+    if user_rank is None or required_rank is None:
+        return False
+
+    return user_rank >= required_rank
+
+
+def change_project_settings(owner_id: str, access_level: str, proj_id: str, modifications: dict) -> str:
+    """"""
+    Allows authorized users to update a project's settings.
+
+    Args:
+        owner_id: The ID of the user attempting the change.
+        access_level: The minimum required access level/role (e.g., 'write', 'admin').
+        proj_id: The project identifier.
+        modifications: Dict of settings to update (merged into project's settings).
+
+    Returns:
+        A success message string upon successful update.
+
+    Raises:
+        PermissionError: If the user is not authorized to modify the project.
+        ValueError: If inputs are invalid or the project/settings are malformed.
+    """"""
+    if not (isinstance(owner_id, str) and owner_id.strip()):
+        raise ValueError(""owner_id must be a non-empty string"")
+    if not (isinstance(access_level, str) and access_level.strip()):
+        raise ValueError(""access_level must be a non-empty string"")
+    if not (isinstance(proj_id, str) and proj_id.strip()):
+        raise ValueError(""proj_id must be a non-empty string"")
+    if not isinstance(modifications, dict):
+        raise ValueError(""modifications must be a dict"")
+
+    owner_id = owner_id.strip()
+    proj_id = proj_id.strip()
+    required_level = access_level.strip().lower()
+
+    project = PROJECTS_DB.get(proj_id)
+    if not project:
+        raise ValueError(f""Project '{proj_id}' not found"")
+
+    members = project.get(""members"")
+    creator_id = project.get(""creator_id"")
+    settings = project.get(""settings"")
+
+    if not isinstance(members, list):
+        raise ValueError(""project 'members' must be a list"")
+    if not isinstance(settings, dict):
+        raise ValueError(""project 'settings' must be a dict"")
+
+    # Check membership first (must be a member or the creator)
+    is_member = owner_id in members or owner_id == creator_id
+
+    # Validate role-based access using the in-memory membership store
+    authorized = validate_project_access(owner_id, proj_id, required_level)
+
+    # Creators are implicitly treated as 'owner' if role mapping allows it
+    required_rank = _ROLE_RANK.get(required_level)
+    creator_override = owner_id == creator_id and (required_rank is not None) and (_ROLE_RANK.get(""owner"", 0) >= required_rank)
+
+    if not (is_member and (authorized or creator_override)):
+        raise PermissionError(f""User '{owner_id}' is not authorized to modify project '{proj_id}'"")
+
+    # Apply modifications (shallow merge)
+    for k, v in modifications.items():
+        settings[k] = v
+
+    return f""Project {proj_id} settings updated successfully.""
+",gpt-5,0,[],[],[]
+ce9f974c,editing,"['I\'m working on a project management platform and need a function called \'get_project_settings\' that retrieves the current settings of a project. This function should take one argument: the project ID (string). It should return the settings as a dictionary. Let\'s assume there\'s a `PROJECTS_DB` dictionary available in the setup.""\nPlease only output code and not your natural language commentary.', 'I want to enhance the project settings retrieval function by adding a role-based access check. Could we modify \'get_project_settings\' to take an additional argument: the user ID (string)? It should only return the settings if the user is a member of the project. If not, it should return an error message indicating insufficient permissions.""\nPlease only output code and not your natural language commentary.', 'Actually, what I need is a function called \'change_project_settings\' that allows authorized users to update project settings. This function should take four arguments: \'owner_id\' (str), representing the user attempting to update settings, \'access_level\' (str), describing the user\'s role, \'proj_id\' (str), the identifier of the project, and \'modifications\' (dict), containing the new configuration. It should return a success message if the settings are updated, otherwise, it should raise a PermissionError for unauthorized access. The following setup code will be provided:\n```\nPROJECTS_DB = {\n    ""PROJ001"": {\n        ""project_id"": ""PROJ001"",\n        ""creator_id"": ""USER1"",\n        ""members"": [""USER1"", ""USER2"", ""USER3""],\n        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}\n    },\n    ""PROJ002"": {\n        ""project_id"": ""PROJ002"",\n        ""creator_id"": ""USER4"",\n        ""members"": [""USER4"", ""USER5""],\n        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You will have access to a dictionary `PROJECTS_DB` that stores projects by their proper IDs. Each project includes \'project_id\', \'creator_id\', \'members\', and \'settings\'""\nPlease only output code and not your natural language commentary.']","from typing import Any, Dict
+
+
+def get_project_settings(project_id: str) -> Dict[str, Any]:
+    """"""
+    Retrieve the current settings for a project.
+
+    Args:
+        project_id: The project ID.
+
+    Returns:
+        A dictionary of settings. If the project does not exist or has no settings,
+        an empty dict is returned.
+
+    Assumptions:
+        - PROJECTS_DB is a dict available in the runtime environment.
+        - PROJECTS_DB may map project_id -> {""settings"": {...}} or directly to a settings dict.
+        - If PROJECTS_DB is not present or not a dict, an empty dict is returned.
+    """"""
+    if not isinstance(project_id, str):
+        raise TypeError(""project_id must be a string"")
+
+    # Avoid referencing an undefined name; retrieve from globals safely.
+    db = globals().get(""PROJECTS_DB"")
+    if not isinstance(db, dict):
+        return {}
+
+    project_entry = db.get(project_id)
+    if project_entry is None:
+        return {}
+
+    if isinstance(project_entry, dict):
+        settings = project_entry.get(""settings"")
+        if isinstance(settings, dict):
+            return dict(settings)
+        # Fallback: treat the project entry itself as the settings dict
+        return dict(project_entry)
+
+    return {}
+","from typing import Any, Dict
+
+
+def get_project_settings(project_id: str, user_id: str) -> Dict[str, Any]:
+    """"""
+    Retrieve the current settings for a project if the user has access.
+
+    Args:
+        project_id: The project ID.
+        user_id: The requesting user's ID.
+
+    Returns:
+        A dictionary of settings if the user is a member of the project.
+        If the project does not exist or has no settings, an empty dict is returned.
+        If the user lacks permissions, a dict with an ""error"" key is returned.
+
+    Assumptions:
+        - PROJECTS_DB is a dict available in the runtime environment.
+        - PROJECTS_DB may map:
+            project_id -> {
+                ""settings"": {...},
+                ""members"": [<user_id>, ...]  # list/tuple/set of user IDs
+            }
+          or directly to a settings dict (in which case access is denied unless
+          membership info is available).
+        - If PROJECTS_DB is not present or not a dict, an empty dict is returned.
+    """"""
+    if not isinstance(project_id, str):
+        raise TypeError(""project_id must be a string"")
+    if not isinstance(user_id, str):
+        raise TypeError(""user_id must be a string"")
+
+    # Avoid referencing an undefined name; retrieve from globals safely.
+    db = globals().get(""PROJECTS_DB"")
+    if not isinstance(db, dict):
+        return {}
+
+    project_entry = db.get(project_id)
+    if project_entry is None:
+        return {}
+
+    # Require membership info for authorization.
+    if isinstance(project_entry, dict):
+        members = project_entry.get(""members"")
+        is_member = isinstance(members, (list, set, tuple)) and user_id in members
+        if not is_member:
+            return {""error"": ""Insufficient permissions""}
+
+        settings = project_entry.get(""settings"")
+        if isinstance(settings, dict):
+            return dict(settings)
+
+        # Fallback: treat the project entry itself as the settings dict,
+        # but do not leak membership lists or non-setting metadata.
+        result = dict(project_entry)
+        result.pop(""members"", None)
+        return result
+
+    # Unknown project schema; deny access without clear membership data.
+    return {""error"": ""Insufficient permissions""}
+","from typing import Any, Dict
+
+
+def get_project_settings(project_id: str, user_id: str) -> Dict[str, Any]:
+    """"""
+    Retrieve the current settings for a project if the user has access.
+
+    Args:
+        project_id: The project ID.
+        user_id: The requesting user's ID.
+
+    Returns:
+        A dictionary of settings if the user is a member of the project.
+        If the project does not exist or has no settings, an empty dict is returned.
+        If the user lacks permissions, a dict with an ""error"" key is returned.
+
+    Assumptions:
+        - PROJECTS_DB is a dict available in the runtime environment.
+        - PROJECTS_DB may map:
+            project_id -> {
+                ""settings"": {...},
+                ""members"": [<user_id>, ...]  # list/tuple/set of user IDs
+            }
+          or directly to a settings dict (in which case access is denied unless
+          membership info is available).
+        - If PROJECTS_DB is not present or not a dict, an empty dict is returned.
+    """"""
+    if not isinstance(project_id, str):
+        raise TypeError(""project_id must be a string"")
+    if not isinstance(user_id, str):
+        raise TypeError(""user_id must be a string"")
+
+    # Avoid referencing an undefined name; retrieve from globals safely.
+    db = globals().get(""PROJECTS_DB"")
+    if not isinstance(db, dict):
+        return {}
+
+    project_entry = db.get(project_id)
+    if project_entry is None:
+        return {}
+
+    # Require membership info for authorization.
+    if isinstance(project_entry, dict):
+        members = project_entry.get(""members"")
+        is_member = isinstance(members, (list, set, tuple)) and user_id in members
+        if not is_member:
+            return {""error"": ""Insufficient permissions""}
+
+        settings = project_entry.get(""settings"")
+        if isinstance(settings, dict):
+            return dict(settings)
+
+        # Fallback: treat the project entry itself as the settings dict,
+        # but do not leak membership lists or non-setting metadata.
+        result = dict(project_entry)
+        result.pop(""members"", None)
+        return result
+
+    # Unknown project schema; deny access without clear membership data.
+    return {""error"": ""Insufficient permissions""}
+
+
+def change_project_settings(
+    owner_id: str,
+    access_level: str,
+    proj_id: str,
+    modifications: Dict[str, Any],
+) -> str:
+    """"""
+    Update the settings of a project if the user is authorized.
+
+    Args:
+        owner_id: The ID of the user attempting the update.
+        access_level: The user's role or access level (e.g., 'admin', 'owner').
+        proj_id: The project identifier.
+        modifications: The new configuration to apply to the project's settings.
+
+    Returns:
+        A success message if the settings are updated.
+
+    Raises:
+        PermissionError: If the user is not authorized to update the project.
+        KeyError: If the project does not exist.
+        TypeError: If argument types are invalid.
+    """"""
+    if not isinstance(owner_id, str):
+        raise TypeError(""owner_id must be a string"")
+    if not isinstance(access_level, str):
+        raise TypeError(""access_level must be a string"")
+    if not isinstance(proj_id, str):
+        raise TypeError(""proj_id must be a string"")
+    if not isinstance(modifications, dict):
+        raise TypeError(""modifications must be a dict"")
+
+    db = globals().get(""PROJECTS_DB"")
+    if not isinstance(db, dict):
+        raise RuntimeError(""PROJECTS_DB is not available"")
+
+    project = db.get(proj_id)
+    if project is None:
+        raise KeyError(f""Project '{proj_id}' not found"")
+
+    if not isinstance(project, dict):
+        raise KeyError(f""Project '{proj_id}' is in an invalid format"")
+
+    members = project.get(""members"")
+    creator_id = project.get(""creator_id"")
+
+    is_member = isinstance(members, (list, set, tuple)) and owner_id in members
+    # Define roles that are allowed to modify settings (in addition to the creator).
+    allowed_roles = {""admin"", ""owner""}
+    role_allows = access_level.lower() in allowed_roles
+
+    authorized = (owner_id == creator_id) or (is_member and role_allows)
+    if not authorized:
+        raise PermissionError(""Insufficient permissions"")
+
+    settings = project.get(""settings"")
+    if not isinstance(settings, dict):
+        settings = {}
+        project[""settings""] = settings
+
+    # Apply shallow update of settings.
+    settings.update(modifications)
+
+    return ""Settings updated successfully""
+",gpt-5,1,[],[],[]
+ce9f974c,refactor,"['Design a function \'change_project_settings\' that allows authorized users to update project settings within a project management platform. The function\'s name should be change_project_settings. The function should take 4 arguments, i.e., - owner_id: str, the identifier representing the user attempting to update settings, - access_level: str, describing the user\'s role (e.g., \'project_manager\', \'team_member\', \'viewer\'), - proj_id: str, the identifier of the project being modified, - modifications: dict, containing the new configuration for the project. The function should return Returns a success message indicating that the settings have been updated only if the user has sufficient rights, otherwise, throws an error for unauthorized access. The function should raise - Raises a PermissionError for an unauthorized access. The following setup code will be provided to you:\n```\nPROJECTS_DB = {\n    ""PROJ001"": {\n        ""project_id"": ""PROJ001"",\n        ""creator_id"": ""USER1"",\n        ""members"": [""USER1"", ""USER2"", ""USER3""],\n        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}\n    },\n    ""PROJ002"": {\n        ""project_id"": ""PROJ002"",\n        ""creator_id"": ""USER4"",\n        ""members"": [""USER4"", ""USER5""],\n        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}\n    }\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You will have access to a dictionary `PROJECTS_DB` that stores projects by their proper IDs. Each project includes \'project_id\', \'creator_id\', \'members\', and \'settings\' \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor the code to improve its structure and maintainability. Could we extract the permission checking and settings updating logic into separate pure functions? This will help keep the main function clean and focused on orchestrating the process while maintaining the original function signature.\nPlease only output code and not your natural language commentary."", 'Could we add logging support to track changes and access attempts? This would involve logging the user ID, project ID, attempted modifications, and whether the update was successful or not. This will help in auditing and debugging any issues related to unauthorized access or failed updates.\nPlease only output code and not your natural language commentary.']","PROJECTS_DB = {
+    ""PROJ001"": {
+        ""project_id"": ""PROJ001"",
+        ""creator_id"": ""USER1"",
+        ""members"": [""USER1"", ""USER2"", ""USER3""],
+        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}
+    },
+    ""PROJ002"": {
+        ""project_id"": ""PROJ002"",
+        ""creator_id"": ""USER4"",
+        ""members"": [""USER4"", ""USER5""],
+        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}
+    }
+}
+
+
+def change_project_settings(owner_id: str, access_level: str, proj_id: str, modifications: dict) -> str:
+    """"""
+    Update project settings if the user has sufficient rights.
+
+    Authorization rules:
+    - The project creator can always update settings.
+    - A user with access_level 'project_manager' who is a member of the project can update settings.
+
+    Parameters:
+        owner_id (str): The user attempting to update settings.
+        access_level (str): The user's role (e.g., 'project_manager', 'team_member', 'viewer').
+        proj_id (str): The identifier of the project.
+        modifications (dict): New configuration to merge into the project's settings.
+
+    Returns:
+        str: Success message indicating the settings have been updated.
+
+    Raises:
+        KeyError: If the project does not exist.
+        TypeError: If modifications is not a dict.
+        PermissionError: If the user is not authorized to update settings.
+    """"""
+    if proj_id not in PROJECTS_DB:
+        raise KeyError(f""Project '{proj_id}' not found"")
+
+    if not isinstance(modifications, dict):
+        raise TypeError(""modifications must be a dict"")
+
+    project = PROJECTS_DB[proj_id]
+
+    role = (access_level or """").lower()
+    is_creator = owner_id == project.get(""creator_id"")
+    is_member = owner_id in project.get(""members"", [])
+
+    authorized = is_creator or (role == ""project_manager"" and is_member)
+    if not authorized:
+        raise PermissionError(""Unauthorized access: insufficient rights to update project settings"")
+
+    # Merge modifications into existing settings
+    project.setdefault(""settings"", {})
+    project[""settings""].update(modifications)
+
+    return f""Settings for project {proj_id} have been updated.""
+","PROJECTS_DB = {
+    ""PROJ001"": {
+        ""project_id"": ""PROJ001"",
+        ""creator_id"": ""USER1"",
+        ""members"": [""USER1"", ""USER2"", ""USER3""],
+        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}
+    },
+    ""PROJ002"": {
+        ""project_id"": ""PROJ002"",
+        ""creator_id"": ""USER4"",
+        ""members"": [""USER4"", ""USER5""],
+        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}
+    }
+}
+
+
+def can_update_project_settings(owner_id: str, access_level: str, project: dict) -> bool:
+    """"""
+    Pure function to determine if a user can update project settings.
+
+    Rules:
+    - The project creator can always update settings.
+    - A 'project_manager' who is also a member of the project can update settings.
+    """"""
+    role = (access_level or """").lower()
+    is_creator = owner_id == project.get(""creator_id"")
+    is_member = owner_id in project.get(""members"", [])
+    return is_creator or (role == ""project_manager"" and is_member)
+
+
+def merge_settings(current_settings: dict, modifications: dict) -> dict:
+    """"""
+    Pure function to return a new settings dict by merging modifications into current settings.
+    Does not mutate the input dictionaries.
+    """"""
+    base = dict(current_settings or {})
+    base.update(modifications or {})
+    return base
+
+
+def change_project_settings(owner_id: str, access_level: str, proj_id: str, modifications: dict) -> str:
+    """"""
+    Update project settings if the user has sufficient rights.
+
+    Authorization rules:
+    - The project creator can always update settings.
+    - A user with access_level 'project_manager' who is a member of the project can update settings.
+
+    Parameters:
+        owner_id (str): The user attempting to update settings.
+        access_level (str): The user's role (e.g., 'project_manager', 'team_member', 'viewer').
+        proj_id (str): The identifier of the project.
+        modifications (dict): New configuration to merge into the project's settings.
+
+    Returns:
+        str: Success message indicating the settings have been updated.
+
+    Raises:
+        KeyError: If the project does not exist.
+        TypeError: If modifications is not a dict.
+        PermissionError: If the user is not authorized to update settings.
+    """"""
+    project = PROJECTS_DB.get(proj_id)
+    if project is None:
+        raise KeyError(f""Project '{proj_id}' not found"")
+
+    if not isinstance(modifications, dict):
+        raise TypeError(""modifications must be a dict"")
+
+    if not can_update_project_settings(owner_id, access_level, project):
+        raise PermissionError(""Unauthorized access: insufficient rights to update project settings"")
+
+    # Merge modifications into existing settings without mutating inputs
+    current = project.get(""settings"", {})
+    project[""settings""] = merge_settings(current, modifications)
+
+    return f""Settings for project {proj_id} have been updated.""
+","import logging
+
+PROJECTS_DB = {
+    ""PROJ001"": {
+        ""project_id"": ""PROJ001"",
+        ""creator_id"": ""USER1"",
+        ""members"": [""USER1"", ""USER2"", ""USER3""],
+        ""settings"": {""visibility"": ""private"", ""deadline"": ""2023-12-31""}
+    },
+    ""PROJ002"": {
+        ""project_id"": ""PROJ002"",
+        ""creator_id"": ""USER4"",
+        ""members"": [""USER4"", ""USER5""],
+        ""settings"": {""visibility"": ""public"", ""deadline"": ""2023-10-15""}
+    }
+}
+
+# Module-level logger for audit and debugging. Consumers can configure handlers/formatters.
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+
+def can_update_project_settings(owner_id: str, access_level: str, project: dict) -> bool:
+    """"""
+    Pure function to determine if a user can update project settings.
+
+    Rules:
+    - The project creator can always update settings.
+    - A 'project_manager' who is also a member of the project can update settings.
+    """"""
+    role = (access_level or """").lower()
+    is_creator = owner_id == project.get(""creator_id"")
+    is_member = owner_id in project.get(""members"", [])
+    return is_creator or (role == ""project_manager"" and is_member)
+
+
+def merge_settings(current_settings: dict, modifications: dict) -> dict:
+    """"""
+    Pure function to return a new settings dict by merging modifications into current settings.
+    Does not mutate the input dictionaries.
+    """"""
+    base = dict(current_settings or {})
+    base.update(modifications or {})
+    return base
+
+
+def change_project_settings(owner_id: str, access_level: str, proj_id: str, modifications: dict) -> str:
+    """"""
+    Update project settings if the user has sufficient rights.
+
+    Authorization rules:
+    - The project creator can always update settings.
+    - A user with access_level 'project_manager' who is a member of the project can update settings.
+
+    Parameters:
+        owner_id (str): The user attempting to update settings.
+        access_level (str): The user's role (e.g., 'project_manager', 'team_member', 'viewer').
+        proj_id (str): The identifier of the project.
+        modifications (dict): New configuration to merge into the project's settings.
+
+    Returns:
+        str: Success message indicating the settings have been updated.
+
+    Raises:
+        KeyError: If the project does not exist.
+        TypeError: If modifications is not a dict.
+        PermissionError: If the user is not authorized to update settings.
+    """"""
+    logger.info(
+        ""settings_update_attempt owner_id=%s project_id=%s access_level=%s modifications=%r"",
+        owner_id, proj_id, access_level, modifications
+    )
+
+    project = PROJECTS_DB.get(proj_id)
+    if project is None:
+        logger.warning(
+            ""settings_update_failed reason=project_not_found owner_id=%s project_id=%s"",
+            owner_id, proj_id
+        )
+        raise KeyError(f""Project '{proj_id}' not found"")
+
+    if not isinstance(modifications, dict):
+        logger.warning(
+            ""settings_update_failed reason=invalid_modifications_type owner_id=%s project_id=%s type=%s"",
+            owner_id, proj_id, type(modifications).__name__
+        )
+        raise TypeError(""modifications must be a dict"")
+
+    if not can_update_project_settings(owner_id, access_level, project):
+        logger.warning(
+            ""settings_update_failed reason=unauthorized owner_id=%s project_id=%s access_level=%s"",
+            owner_id, proj_id, access_level
+        )
+        raise PermissionError(""Unauthorized access: insufficient rights to update project settings"")
+
+    # Merge modifications into existing settings without mutating inputs
+    current = project.get(""settings"", {})
+    new_settings = merge_settings(current, modifications)
+    logger.debug(
+        ""settings_update_diff owner_id=%s project_id=%s before=%r after=%r"",
+        owner_id, proj_id, current, new_settings
+    )
+
+    project[""settings""] = new_settings
+
+    logger.info(
+        ""settings_update_success owner_id=%s project_id=%s applied_modifications=%r"",
+        owner_id, proj_id, modifications
+    )
+    return f""Settings for project {proj_id} have been updated.""
+",gpt-5,1,[],[],[]

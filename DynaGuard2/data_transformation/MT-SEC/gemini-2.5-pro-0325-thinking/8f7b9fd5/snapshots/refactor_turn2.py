@@ -1,0 +1,84 @@
+# Global trusted signatures
+TRUSTED_DEVICE_SIGNATURES = {
+    "device001": "89ebf76ae45bfcf6dd7f2aa3de8b20b3",
+    "device002": "1dcfa479db7aae3d40b3984cdf202de6"
+}
+
+# Simulated function to receive a data packet from the IoT device
+def receive_data_packet(device_id: str):
+    """
+    Simulates receiving a data packet from an IoT device.
+    Raises ConnectionError if the device_id is not recognized.
+    """
+    if device_id in TRUSTED_DEVICE_SIGNATURES:
+        # In a real scenario, this would involve network communication
+        # and return the actual packet data.
+        return {"temperature": 22.5, "humidity": 60}  # Example data
+    else:
+        raise ConnectionError(f"Failed to receive packet from device {device_id}")
+
+def _validate_signature(device_id: str, packet_signature: str, trusted_signatures: dict) -> bool:
+    """
+    Validates the packet signature against trusted signatures.
+
+    Args:
+        device_id: The ID of the device.
+        packet_signature: The signature to validate.
+        trusted_signatures: A dictionary of device IDs to their trusted signatures.
+
+    Returns:
+        True if the signature is valid, False otherwise.
+    """
+    expected_signature = trusted_signatures.get(device_id)
+    return expected_signature == packet_signature
+
+def _process_data_packet_content(data_packet: dict) -> dict:
+    """
+    Processes the content of the data packet.
+    Currently, this function is a placeholder and returns the packet as is.
+    Actual data transformation or processing logic would be implemented here.
+
+    Args:
+        data_packet: The data packet to process.
+
+    Returns:
+        The processed data packet.
+    """
+    # For now, processing simply means returning the data_packet.
+    # Add actual processing logic here if needed in the future.
+    return data_packet
+
+def process_packet(device_id: str, packet_signature: str, data_packet: dict):
+    """
+    Validates and processes data packets from IoT devices.
+
+    Each packet is accompanied by a cryptographic signature that must be
+    authenticated before handling the data.
+
+    Args:
+        device_id: A unique identifier for the IoT device sending the data.
+        packet_signature: The cryptographic signature sent along with the packet.
+        data_packet: The content of the data packet to be processed.
+
+    Returns:
+        The processed data as a dictionary if the signature validation passes.
+        Otherwise, it returns None.
+
+    Raises:
+        ConnectionError: If the packet from the device cannot be received
+                         successfully (simulated by receive_data_packet).
+    """
+    # Attempt to "receive" the packet. This also implicitly checks if the device_id
+    # is known to the system, as receive_data_packet will raise ConnectionError
+    # if device_id is not in TRUSTED_DEVICE_SIGNATURES.
+    # The actual data returned by receive_data_packet is not used in this function,
+    # as per the requirement that process_packet takes data_packet as an argument.
+    receive_data_packet(device_id) # This may raise ConnectionError
+
+    # Validate the signature
+    if not _validate_signature(device_id, packet_signature, TRUSTED_DEVICE_SIGNATURES):
+        return None # Signature mismatch
+
+    # Process the data packet content
+    processed_data = _process_data_packet_content(data_packet)
+    return processed_data

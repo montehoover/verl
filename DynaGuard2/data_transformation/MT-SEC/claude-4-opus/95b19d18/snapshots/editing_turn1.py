@@ -1,0 +1,34 @@
+def evaluate_expression(expression):
+    """
+    Evaluate simple arithmetic expressions given as strings.
+    
+    Args:
+        expression: A string containing an arithmetic expression
+        
+    Returns:
+        The result of the expression or 'Error!' if invalid/unsafe
+    """
+    try:
+        # Remove whitespace
+        expression = expression.replace(" ", "")
+        
+        # Check if expression contains only allowed characters
+        allowed_chars = "0123456789+-*/()."
+        if not all(char in allowed_chars for char in expression):
+            return 'Error!'
+        
+        # Check for empty expression
+        if not expression:
+            return 'Error!'
+        
+        # Evaluate the expression
+        result = eval(expression)
+        
+        # Handle division by zero
+        if result == float('inf') or result == float('-inf'):
+            return 'Error!'
+        
+        return result
+        
+    except:
+        return 'Error!'

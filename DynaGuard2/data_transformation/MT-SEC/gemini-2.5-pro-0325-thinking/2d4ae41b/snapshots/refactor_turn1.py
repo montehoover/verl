@@ -1,0 +1,23 @@
+import html
+
+html_template = "<html><body><h1>Welcome!</h1><p>{user_content}</p></body></html>"
+
+def render_html_page(visitor_message: str) -> str:
+    """
+    Creates an HTML response by inserting user content into a given HTML structure.
+
+    The generated response will display user-provided information within a predefined format.
+
+    Args:
+        visitor_message: The content contributed by a user which will be
+                         inserted into the HTML template.
+
+    Returns:
+        The resulting HTML string that includes the user’s content safely embedded into it.
+    
+    Raises:
+        No explicit exceptions are handled, though improper HTML escaping could
+        potentially lead to undesired outcomes.
+    """
+    safe_user_content = html.escape(visitor_message)
+    return html_template.format(user_content=safe_user_content)

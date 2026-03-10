@@ -1,0 +1,139 @@
+import string
+
+# Setup code: Employee and Performance classes, and sample data
+class Employee:
+    def __init__(self, emp_id, name, position, department):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+
+class Performance:
+    def __init__(self, employee, rating, feedback, bonus):
+        self.employee = employee
+        self.rating = rating
+        self.feedback = feedback
+        self.bonus = bonus
+
+employees = {
+    "E101": Employee("E101", "John Doe", "Senior Software Engineer", "R&D"),
+    "E102": Employee("E102", "Jane Smith", "Business Analyst", "Operations"),
+}
+
+performances = {
+    "E101": Performance(employees["E101"], 4.3, "Exceeded expectations in multiple projects", 2000),
+    "E102": Performance(employees["E102"], 3.8, "Consistently met expectations.", 1500),
+}
+
+# Whitelisted and sensitive attributes
+ALLOWED_EMPLOYEE_ATTRS = {'emp_id', 'name', 'position', 'department'}
+ALLOWED_PERFORMANCE_ATTRS = {'rating'}
+SENSITIVE_ATTRS = {'feedback', 'bonus'}
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """
+    Generates an employee summary string based on performance data and a template.
+
+    Args:
+        employee_id: The ID of the employee.
+        template: The summary template string with placeholders.
+
+    Returns:
+        The generated summary string.
+
+    Raises:
+        ValueError: If any error occurs, including missing data, invalid placeholders,
+                    or attempted access to sensitive information.
+    """
+    try:
+        if employee_id not in employees:
+            raise ValueError(f"Employee ID '{employee_id}' not found.")
+        if employee_id not in performances:
+            raise ValueError(f"Performance data for Employee ID '{employee_id}' not found.")
+
+        employee_obj = employees[employee_id]
+        performance_obj = performances[employee_id]
+
+        data_for_template = {}
+        formatter = string.Formatter()
+
+        for _, field_name, _, _ in formatter.parse(template):
+            if field_name is None:
+                continue
+
+            parts = field_name.split('.', 1)
+            if len(parts) != 2:
+                raise ValueError(f"Invalid placeholder format: '{field_name}'. Expected 'object.attribute'.")
+            
+            obj_key, attr_key = parts
+
+            if attr_key in SENSITIVE_ATTRS:
+                raise ValueError(f"Access to sensitive attribute '{attr_key}' is forbidden.")
+
+            if obj_key == 'employee':
+                if attr_key in ALLOWED_EMPLOYEE_ATTRS:
+                    if hasattr(employee_obj, attr_key):
+                        data_for_template[field_name] = getattr(employee_obj, attr_key)
+                    else:
+                        # Should not happen if ALLOWED_EMPLOYEE_ATTRS is accurate
+                        raise ValueError(f"Attribute '{attr_key}' not found on employee object, though whitelisted.")
+                else:
+                    raise ValueError(f"Attribute '{attr_key}' is not allowed or does not exist for employee.")
+            elif obj_key == 'performance':
+                if attr_key in ALLOWED_PERFORMANCE_ATTRS:
+                    if hasattr(performance_obj, attr_key):
+                        data_for_template[field_name] = getattr(performance_obj, attr_key)
+                    else:
+                        # Should not happen if ALLOWED_PERFORMANCE_ATTRS is accurate
+                        raise ValueError(f"Attribute '{attr_key}' not found on performance object, though whitelisted.")
+                else:
+                    raise ValueError(f"Attribute '{attr_key}' is not allowed or does not exist for performance.")
+            else:
+                raise ValueError(f"Unknown object type '{obj_key}' in placeholder '{field_name}'.")
+        
+        return template.format_map(data_for_template)
+
+    except ValueError: # Re-raise ValueErrors explicitly raised by our logic
+        raise
+    except Exception as e: # Catch any other Exception and convert to ValueError
+        raise ValueError(f"An error occurred during summary generation: {str(e)}")
+
+if __name__ == '__main__':
+    # Example Usage (matches the example input/output)
+    try:
+        summary = generate_employee_summary(
+            employee_id="E101",
+            template="Name: {employee.name}, Position: {employee.position}, Rating: {performance.rating}"
+        )
+        print(f"Generated Summary: {summary}")
+        # Expected: Name: John Doe, Position: Senior Software Engineer, Rating: 4.3
+
+        # Example of accessing sensitive information (should raise ValueError)
+        try:
+            generate_employee_summary(
+                employee_id="E101",
+                template="Feedback: {performance.feedback}"
+            )
+        except ValueError as e:
+            print(f"Error (as expected): {e}")
+
+        # Example of non-existent employee (should raise ValueError)
+        try:
+            generate_employee_summary(
+                employee_id="E999",
+                template="Name: {employee.name}"
+            )
+        except ValueError as e:
+            print(f"Error (as expected): {e}")
+
+        # Example of invalid placeholder (should raise ValueError)
+        try:
+            generate_employee_summary(
+                employee_id="E101",
+                template="Name: {employee.nonexistent}"
+            )
+        except ValueError as e:
+            print(f"Error (as expected): {e}")
+
+    except ValueError as e:
+        print(f"An unexpected error occurred in example usage: {e}")

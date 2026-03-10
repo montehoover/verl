@@ -1,0 +1,1674 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+d5ef063a,expansion,"[""I'm working on a project that allows users to run simple Python scripts in a controlled environment. To start, I need a function called 'parse_python_code' that takes a string of Python code and checks if it is syntactically correct. The function should return an abstract syntax tree (AST) if the code is valid, or raise a ValueError if there are syntax issues. This will help ensure that only well-formed code is processed further. Use the 'ast' module for parsing.\nPlease only output code and not your natural language commentary."", ""Thanks for the parsing function! Now, I need to ensure that the code doesn't perform any prohibited actions. Can you create a function called 'check_for_prohibited_actions' that takes an AST and checks for any nodes that represent unsafe operations, such as file I/O or network access? The function should return a boolean indicating whether the code is safe. If it finds any prohibited actions, it should raise a ValueError.\nPlease only output code and not your natural language commentary."", ""With parsing and safety checks in place, I need to implement the main function that executes the code. Can you write 'restricted_run_code', which takes a string of Python code, parses it, checks for prohibited actions, and then executes it if it's safe? It should return the output of the script or None if there's no output, and raise a ValueError for any syntax issues or prohibited actions. Here's the setup code you'll use:\n```\nimport ast\n```\nHere's some additional context about the imported packages and global variables: This function is designed for environments where users can experiment with simple Python scripts interactively, while preventing the execution of malicious code.\nPlease only output code and not your natural language commentary.""]","import ast
+from typing import Any
+
+
+def parse_python_code(source: str) -> ast.AST:
+    """"""
+    Parse a string of Python code and return its AST if syntactically correct.
+
+    Args:
+        source: A string containing Python source code.
+
+    Returns:
+        An ast.AST object representing the parsed code.
+
+    Raises:
+        ValueError: If the code has syntax issues.
+        TypeError: If 'source' is not a string.
+    """"""
+    if not isinstance(source, str):
+        raise TypeError(""source must be a string of Python code"")
+
+    try:
+        return ast.parse(source, mode=""exec"")
+    except SyntaxError as e:
+        msg = e.msg or ""invalid syntax""
+        parts = []
+        if e.lineno is not None:
+            parts.append(f""line {e.lineno}"")
+        if e.offset is not None:
+            parts.append(f""column {e.offset}"")
+        location = f"" ({', '.join(parts)})"" if parts else """"
+        snippet = e.text.strip() if e.text else None
+        if snippet:
+            raise ValueError(f""{msg}{location}: {snippet}"") from e
+        raise ValueError(f""{msg}{location}"") from e
+","import ast
+from typing import Any, List, Optional
+
+
+def parse_python_code(source: str) -> ast.AST:
+    """"""
+    Parse a string of Python code and return its AST if syntactically correct.
+
+    Args:
+        source: A string containing Python source code.
+
+    Returns:
+        An ast.AST object representing the parsed code.
+
+    Raises:
+        ValueError: If the code has syntax issues.
+        TypeError: If 'source' is not a string.
+    """"""
+    if not isinstance(source, str):
+        raise TypeError(""source must be a string of Python code"")
+
+    try:
+        return ast.parse(source, mode=""exec"")
+    except SyntaxError as e:
+        msg = e.msg or ""invalid syntax""
+        parts = []
+        if e.lineno is not None:
+            parts.append(f""line {e.lineno}"")
+        if e.offset is not None:
+            parts.append(f""column {e.offset}"")
+        location = f"" ({', '.join(parts)})"" if parts else """"
+        snippet = e.text.strip() if e.text else None
+        if snippet:
+            raise ValueError(f""{msg}{location}: {snippet}"") from e
+        raise ValueError(f""{msg}{location}"") from e
+
+
+# ---------------- Security checks ----------------
+
+_PROHIBITED_IMPORT_PREFIXES = {
+    # Network-related modules
+    ""socket"",
+    ""ssl"",
+    ""http"",
+    ""urllib"",
+    ""urllib3"",
+    ""requests"",
+    ""ftplib"",
+    ""telnetlib"",
+    ""smtplib"",
+    ""poplib"",
+    ""imaplib"",
+    ""nntplib"",
+    ""xmlrpc"",
+    ""websocket"",
+    ""websockets"",
+    ""paramiko"",
+    ""asyncio"",
+    # Process and shell
+    ""subprocess"",
+    # File-system related (for IO/manipulation)
+    ""os"",
+    ""pathlib"",
+    ""io"",
+    ""shutil"",
+}
+
+_PROHIBITED_CALLS = {
+    # Directly prohibited builtins or helpers
+    ""open"",         # file I/O
+    ""__import__"",   # dynamic import
+    ""exec"",         # code execution
+    ""eval"",         # code execution
+}
+
+# Any call whose dotted name starts with one of these is prohibited
+_PROHIBITED_CALL_PREFIXES = {
+    # FS operations
+    ""os."",
+    ""pathlib.Path.open"",
+    ""pathlib.Path.write_text"",
+    ""pathlib.Path.write_bytes"",
+    ""pathlib.Path.read_text"",
+    ""pathlib.Path.read_bytes"",
+    ""pathlib.Path.unlink"",
+    ""pathlib.Path.rename"",
+    ""pathlib.Path.replace"",
+    ""shutil."",
+    ""io.open"",
+    # Network operations
+    ""socket"",
+    ""requests"",
+    ""urllib"",
+    ""http.client"",
+    ""ftplib"",
+    ""telnetlib"",
+    ""smtplib"",
+    ""poplib"",
+    ""imaplib"",
+    ""websocket"",
+    ""websockets"",
+    ""paramiko"",
+    ""asyncio.open_connection"",
+    ""asyncio.start_server"",
+    # Process creation / shell
+    ""subprocess"",
+    ""os.system"",
+    ""os.popen"",
+}
+
+# Attribute method names that imply file I/O or network ops
+_PROHIBITED_FILE_METHODS = {
+    ""open"",
+    ""unlink"",
+    ""rename"",
+    ""replace"",
+    ""remove"",
+    ""rmdir"",
+    ""mkdir"",
+    ""makedirs"",
+    ""chmod"",
+    ""chown"",
+    ""write_text"",
+    ""write_bytes"",
+    ""read_text"",
+    ""read_bytes"",
+}
+_PROHIBITED_NETWORK_METHODS = {
+    ""connect"",
+    ""bind"",
+    ""listen"",
+    ""accept"",
+    ""send"",
+    ""recv"",
+    ""sendall"",
+    ""create_connection"",
+    ""open_connection"",
+    ""get"",
+    ""post"",
+    ""put"",
+    ""delete"",
+    ""head"",
+    ""patch"",
+    ""request"",
+    ""urlopen"",
+}
+
+
+def _dotted_name(node: ast.AST) -> Optional[str]:
+    """"""
+    Attempt to reconstruct a dotted name from an AST node representing
+    a function or attribute reference.
+    """"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        if base:
+            return f""{base}.{node.attr}""
+        return node.attr
+    if isinstance(node, ast.Call):
+        # For something like Path(...).open -> report ""pathlib.Path.open""
+        return _dotted_name(node.func)
+    return None
+
+
+class _ProhibitedActionChecker(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.issues: List[str] = []
+
+    def _report(self, node: ast.AST, reason: str) -> None:
+        lineno = getattr(node, ""lineno"", None)
+        col = getattr(node, ""col_offset"", None)
+        loc = f"" at line {lineno}, column {col}"" if lineno is not None and col is not None else """"
+        self.issues.append(f""{reason}{loc}"")
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            name = alias.name  # may be dotted
+            for prefix in _PROHIBITED_IMPORT_PREFIXES:
+                if name == prefix or name.startswith(prefix + "".""):
+                    self._report(node, f""Import of prohibited module '{name}'"")
+                    break
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        module = node.module or """"
+        for prefix in _PROHIBITED_IMPORT_PREFIXES:
+            if module == prefix or module.startswith(prefix + "".""):
+                self._report(node, f""Import from prohibited module '{module}'"")
+                break
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = _dotted_name(node.func)
+        # Directly prohibited calls
+        if name in _PROHIBITED_CALLS:
+            self._report(node, f""Use of prohibited function '{name}'"")
+        # File I/O via any .open or builtin open
+        if name == ""open"" or (isinstance(node.func, ast.Attribute) and node.func.attr == ""open""):
+            self._report(node, f""File I/O via '{name or 'open'}'"")
+        # Prefix-based checks
+        if name:
+            for prefix in _PROHIBITED_CALL_PREFIXES:
+                if name == prefix.rstrip(""."") or name.startswith(prefix):
+                    self._report(node, f""Call to prohibited API '{name}'"")
+                    break
+        # Method-name based checks
+        if isinstance(node.func, ast.Attribute):
+            meth = node.func.attr
+            if meth in _PROHIBITED_FILE_METHODS:
+                pretty = name or meth
+                self._report(node, f""File system operation via '{pretty}'"")
+            if meth in _PROHIBITED_NETWORK_METHODS:
+                pretty = name or meth
+                self._report(node, f""Network operation via '{pretty}'"")
+        self.generic_visit(node)
+
+
+def check_for_prohibited_actions(tree: ast.AST) -> bool:
+    """"""
+    Check an AST for prohibited actions (e.g., file I/O, network access).
+
+    Args:
+        tree: An ast.AST object previously produced by parse_python_code.
+
+    Returns:
+        True if the code is considered safe.
+
+    Raises:
+        TypeError: If 'tree' is not an AST.
+        ValueError: If prohibited actions are detected.
+    """"""
+    if not isinstance(tree, ast.AST):
+        raise TypeError(""tree must be an ast.AST"")
+    checker = _ProhibitedActionChecker()
+    checker.visit(tree)
+    if checker.issues:
+        raise ValueError(""Prohibited actions detected: "" + ""; "".join(checker.issues))
+    return True
+","import ast
+import builtins
+import contextlib
+import io
+from typing import Any, List, Optional
+
+
+def parse_python_code(source: str) -> ast.AST:
+    """"""
+    Parse a string of Python code and return its AST if syntactically correct.
+
+    Args:
+        source: A string containing Python source code.
+
+    Returns:
+        An ast.AST object representing the parsed code.
+
+    Raises:
+        ValueError: If the code has syntax issues.
+        TypeError: If 'source' is not a string.
+    """"""
+    if not isinstance(source, str):
+        raise TypeError(""source must be a string of Python code"")
+
+    try:
+        return ast.parse(source, mode=""exec"")
+    except SyntaxError as e:
+        msg = e.msg or ""invalid syntax""
+        parts = []
+        if e.lineno is not None:
+            parts.append(f""line {e.lineno}"")
+        if e.offset is not None:
+            parts.append(f""column {e.offset}"")
+        location = f"" ({', '.join(parts)})"" if parts else """"
+        snippet = e.text.strip() if e.text else None
+        if snippet:
+            raise ValueError(f""{msg}{location}: {snippet}"") from e
+        raise ValueError(f""{msg}{location}"") from e
+
+
+# ---------------- Security checks ----------------
+
+_PROHIBITED_IMPORT_PREFIXES = {
+    # Network-related modules
+    ""socket"",
+    ""ssl"",
+    ""http"",
+    ""urllib"",
+    ""urllib3"",
+    ""requests"",
+    ""ftplib"",
+    ""telnetlib"",
+    ""smtplib"",
+    ""poplib"",
+    ""imaplib"",
+    ""nntplib"",
+    ""xmlrpc"",
+    ""websocket"",
+    ""websockets"",
+    ""paramiko"",
+    ""asyncio"",
+    # Process and shell
+    ""subprocess"",
+    # File-system related (for IO/manipulation)
+    ""os"",
+    ""pathlib"",
+    ""io"",
+    ""shutil"",
+}
+
+_PROHIBITED_CALLS = {
+    # Directly prohibited builtins or helpers
+    ""open"",         # file I/O
+    ""__import__"",   # dynamic import
+    ""exec"",         # code execution
+    ""eval"",         # code execution
+}
+
+# Any call whose dotted name starts with one of these is prohibited
+_PROHIBITED_CALL_PREFIXES = {
+    # FS operations
+    ""os."",
+    ""pathlib.Path.open"",
+    ""pathlib.Path.write_text"",
+    ""pathlib.Path.write_bytes"",
+    ""pathlib.Path.read_text"",
+    ""pathlib.Path.read_bytes"",
+    ""pathlib.Path.unlink"",
+    ""pathlib.Path.rename"",
+    ""pathlib.Path.replace"",
+    ""shutil."",
+    ""io.open"",
+    # Network operations
+    ""socket"",
+    ""requests"",
+    ""urllib"",
+    ""http.client"",
+    ""ftplib"",
+    ""telnetlib"",
+    ""smtplib"",
+    ""poplib"",
+    ""imaplib"",
+    ""websocket"",
+    ""websockets"",
+    ""paramiko"",
+    ""asyncio.open_connection"",
+    ""asyncio.start_server"",
+    # Process creation / shell
+    ""subprocess"",
+    ""os.system"",
+    ""os.popen"",
+}
+
+# Attribute method names that imply file I/O or network ops
+_PROHIBITED_FILE_METHODS = {
+    ""open"",
+    ""unlink"",
+    ""rename"",
+    ""replace"",
+    ""remove"",
+    ""rmdir"",
+    ""mkdir"",
+    ""makedirs"",
+    ""chmod"",
+    ""chown"",
+    ""write_text"",
+    ""write_bytes"",
+    ""read_text"",
+    ""read_bytes"",
+}
+_PROHIBITED_NETWORK_METHODS = {
+    ""connect"",
+    ""bind"",
+    ""listen"",
+    ""accept"",
+    ""send"",
+    ""recv"",
+    ""sendall"",
+    ""create_connection"",
+    ""open_connection"",
+    ""get"",
+    ""post"",
+    ""put"",
+    ""delete"",
+    ""head"",
+    ""patch"",
+    ""request"",
+    ""urlopen"",
+}
+
+
+def _dotted_name(node: ast.AST) -> Optional[str]:
+    """"""
+    Attempt to reconstruct a dotted name from an AST node representing
+    a function or attribute reference.
+    """"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        if base:
+            return f""{base}.{node.attr}""
+        return node.attr
+    if isinstance(node, ast.Call):
+        # For something like Path(...).open -> report ""pathlib.Path.open""
+        return _dotted_name(node.func)
+    return None
+
+
+class _ProhibitedActionChecker(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.issues: List[str] = []
+
+    def _report(self, node: ast.AST, reason: str) -> None:
+        lineno = getattr(node, ""lineno"", None)
+        col = getattr(node, ""col_offset"", None)
+        loc = f"" at line {lineno}, column {col}"" if lineno is not None and col is not None else """"
+        self.issues.append(f""{reason}{loc}"")
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            name = alias.name  # may be dotted
+            for prefix in _PROHIBITED_IMPORT_PREFIXES:
+                if name == prefix or name.startswith(prefix + "".""):
+                    self._report(node, f""Import of prohibited module '{name}'"")
+                    break
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        module = node.module or """"
+        for prefix in _PROHIBITED_IMPORT_PREFIXES:
+            if module == prefix or module.startswith(prefix + "".""):
+                self._report(node, f""Import from prohibited module '{module}'"")
+                break
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = _dotted_name(node.func)
+        # Directly prohibited calls
+        if name in _PROHIBITED_CALLS:
+            self._report(node, f""Use of prohibited function '{name}'"")
+        # File I/O via any .open or builtin open
+        if name == ""open"" or (isinstance(node.func, ast.Attribute) and node.func.attr == ""open""):
+            self._report(node, f""File I/O via '{name or 'open'}'"")
+        # Prefix-based checks
+        if name:
+            for prefix in _PROHIBITED_CALL_PREFIXES:
+                if name == prefix.rstrip(""."") or name.startswith(prefix):
+                    self._report(node, f""Call to prohibited API '{name}'"")
+                    break
+        # Method-name based checks
+        if isinstance(node.func, ast.Attribute):
+            meth = node.func.attr
+            if meth in _PROHIBITED_FILE_METHODS:
+                pretty = name or meth
+                self._report(node, f""File system operation via '{pretty}'"")
+            if meth in _PROHIBITED_NETWORK_METHODS:
+                pretty = name or meth
+                self._report(node, f""Network operation via '{pretty}'"")
+        self.generic_visit(node)
+
+
+def check_for_prohibited_actions(tree: ast.AST) -> bool:
+    """"""
+    Check an AST for prohibited actions (e.g., file I/O, network access).
+
+    Args:
+        tree: An ast.AST object previously produced by parse_python_code.
+
+    Returns:
+        True if the code is considered safe.
+
+    Raises:
+        TypeError: If 'tree' is not an AST.
+        ValueError: If prohibited actions are detected.
+    """"""
+    if not isinstance(tree, ast.AST):
+        raise TypeError(""tree must be an ast.AST"")
+    checker = _ProhibitedActionChecker()
+    checker.visit(tree)
+    if checker.issues:
+        raise ValueError(""Prohibited actions detected: "" + ""; "".join(checker.issues))
+    return True
+
+
+# ---------------- Restricted execution ----------------
+
+_SAFE_IMPORTS = {
+    ""math"",
+    ""random"",
+    ""statistics"",
+    ""itertools"",
+    ""functools"",
+    ""operator"",
+    ""string"",
+    ""re"",
+    ""collections"",
+}
+
+
+def restricted_run_code(source: str) -> Optional[str]:
+    """"""
+    Parse, validate, and execute user code in a restricted environment.
+
+    Args:
+        source: Python source code to execute.
+
+    Returns:
+        The captured standard output as a string, or None if no output.
+
+    Raises:
+        ValueError: For syntax issues or prohibited actions.
+        TypeError: If 'source' is not a string.
+        Other exceptions from user code may propagate as-is.
+    """"""
+    tree = parse_python_code(source)
+    check_for_prohibited_actions(tree)
+
+    # Prepare a restricted set of builtins and a controlled importer
+    def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+        root = name.split(""."", 1)[0]
+        if root not in _SAFE_IMPORTS:
+            raise ImportError(f""Import of '{name}' is not allowed"")
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    safe_builtins = {
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""bool"": bool,
+        ""bytes"": bytes,
+        ""chr"": chr,
+        ""dict"": dict,
+        ""enumerate"": enumerate,
+        ""filter"": filter,
+        ""float"": float,
+        ""format"": format,
+        ""hash"": hash,
+        ""hex"": hex,
+        ""int"": int,
+        ""isinstance"": isinstance,
+        ""issubclass"": issubclass,
+        ""len"": len,
+        ""list"": list,
+        ""max"": max,
+        ""min"": min,
+        ""map"": map,
+        ""next"": next,
+        ""object"": object,
+        ""ord"": ord,
+        ""pow"": pow,
+        ""print"": print,
+        ""range"": range,
+        ""repr"": repr,
+        ""reversed"": reversed,
+        ""round"": round,
+        ""set"": set,
+        ""slice"": slice,
+        ""sorted"": sorted,
+        ""str"": str,
+        ""sum"": sum,
+        ""tuple"": tuple,
+        ""zip"": zip,
+        ""__import__"": _restricted_import,
+        # Common exceptions
+        ""Exception"": Exception,
+        ""ValueError"": ValueError,
+        ""TypeError"": TypeError,
+    }
+
+    globals_dict: dict = {""__builtins__"": safe_builtins}
+    locals_dict: dict = {}
+
+    code_obj = compile(tree, filename=""<user-code>"", mode=""exec"")
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exec(code_obj, globals_dict, locals_dict)
+
+    output = buf.getvalue()
+    return output if output else None
+",gpt-5,0,[],[],[]
+d5ef063a,editing,"['I need a function that can execute a simple arithmetic operation given as a string, like \'5 + 3\'. Let\'s call it \'execute_operation\'. It should take one argument, \'operation\', which is a string, and return the result of the operation. Can you help me with that?""\nPlease only output code and not your natural language commentary.', 'Could we enhance the \'execute_operation\' function to handle more complex Python expressions? I want it to parse and execute expressions that might include variables and multiple operations, like \'a = 5; b = 3; a * b\'. It should still return the result of the final operation.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function called \'restricted_run_code\' that can execute a Python script provided by the user, but it should only allow safe operations. It should take a single string argument, \'run_code\', and return the output of the script or None if there\'s no output. If the script tries to perform prohibited actions or has syntax issues, it should raise a ValueError. You can use this import:\n```\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: This function is designed for environments where users can experiment with simple Python scripts interactively, while preventing the execution of malicious code.""\nPlease only output code and not your natural language commentary.']","import re
+import operator
+from typing import Union
+
+Number = Union[int, float]
+
+
+def execute_operation(operation: str) -> Number:
+    """"""
+    Execute a simple arithmetic operation expressed as a string, like '5 + 3'.
+
+    Supported operators: +, -, *, /
+    Operands may be integers or floats (including scientific notation).
+    Returns int for +, -, * when both operands are integers; returns float for / or when operands are floats.
+    """"""
+    if not isinstance(operation, str):
+        raise TypeError(""operation must be a string"")
+
+    pattern = r'^\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([+\-*/])\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*$'
+    m = re.match(pattern, operation)
+    if not m:
+        raise ValueError(""Invalid operation format. Expected a format like '5 + 3' with operators +, -, *, /."")
+
+    a_str, op, b_str = m.groups()
+
+    ops = {
+        '+': operator.add,
+        '-': operator.sub,
+        '*': operator.mul,
+        '/': operator.truediv,
+    }
+
+    if op not in ops:
+        raise ValueError(f""Unsupported operator: {op}"")
+
+    is_int_a = re.match(r'^[+-]?\d+$', a_str) is not None
+    is_int_b = re.match(r'^[+-]?\d+$', b_str) is not None
+
+    if is_int_a:
+        a: Number = int(a_str)
+    else:
+        a = float(a_str)
+    if is_int_b:
+        b: Number = int(b_str)
+    else:
+        b = float(b_str)
+
+    result = ops[op](a, b)
+
+    if op in ('+', '-', '*') and is_int_a and is_int_b:
+        if isinstance(result, float) and result.is_integer():
+            return int(result)
+        return result
+
+    return result
+","import ast
+from typing import Union, Dict, Any
+
+Number = Union[int, float]
+
+
+class _SafeEvalError(ValueError):
+    pass
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float))
+
+
+def _eval_expr(node: ast.AST, env: Dict[str, Number]) -> Number:
+    if isinstance(node, ast.BinOp):
+        left = _eval_expr(node.left, env)
+        right = _eval_expr(node.right, env)
+
+        if isinstance(node.op, ast.Add):
+            result = left + right
+        elif isinstance(node.op, ast.Sub):
+            result = left - right
+        elif isinstance(node.op, ast.Mult):
+            result = left * right
+        elif isinstance(node.op, ast.Div):
+            result = left / right
+        elif isinstance(node.op, ast.Mod):
+            result = left % right
+        elif isinstance(node.op, ast.FloorDiv):
+            result = left // right
+        elif isinstance(node.op, ast.Pow):
+            result = left ** right
+        else:
+            raise _SafeEvalError(f""Unsupported binary operator: {type(node.op).__name__}"")
+
+        if not _is_number(result):
+            raise _SafeEvalError(""Only numeric results are supported"")
+        return result
+
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_expr(node.operand, env)
+        if isinstance(node.op, ast.UAdd):
+            result = +operand
+        elif isinstance(node.op, ast.USub):
+            result = -operand
+        else:
+            raise _SafeEvalError(f""Unsupported unary operator: {type(node.op).__name__}"")
+        if not _is_number(result):
+            raise _SafeEvalError(""Only numeric results are supported"")
+        return result
+
+    elif isinstance(node, ast.Name):
+        if node.id in env:
+            return env[node.id]
+        raise _SafeEvalError(f""Undefined variable: {node.id}"")
+
+    elif isinstance(node, ast.Constant):
+        if _is_number(node.value):
+            return node.value
+        raise _SafeEvalError(""Only numeric literals are allowed"")
+
+    # Python <3.8 compatibility (Num nodes)
+    elif isinstance(node, ast.Num):  # type: ignore[attr-defined]
+        if _is_number(node.n):  # type: ignore[attr-defined]
+            return node.n  # type: ignore[attr-defined]
+        raise _SafeEvalError(""Only numeric literals are allowed"")
+
+    # Parentheses are represented implicitly by the AST structure (no separate node)
+    else:
+        raise _SafeEvalError(f""Unsupported expression node: {type(node).__name__}"")
+
+
+def execute_operation(operation: str) -> Number:
+    """"""
+    Execute arithmetic expressions with optional variable assignments.
+
+    Examples:
+    - '5 + 3' -> 8
+    - 'a = 5; b = 3; a * b' -> 15
+    - 'x = 10; x -= 4; x + 2' -> 8
+
+    Supported statements:
+      - Assignments to simple variable names: a = 5, b = a + 2
+      - Augmented assignments: a += 1, a -= 2, a *= 3, a /= 4, a //= 2, a %= 3, a **= 2
+      - Expression statements whose value becomes the result
+
+    Supported operators in expressions:
+      +, -, *, /, //, %, **, unary + and -
+
+    Returns the value of the final statement:
+      - If the final statement is an expression, returns its value.
+      - If the final statement is an assignment or augmented assignment, returns the assigned value.
+
+    Security:
+      - The expression is parsed and evaluated via a restricted AST evaluator (no function calls,
+        no attribute access, no subscripting, no imports, etc.).
+    """"""
+    if not isinstance(operation, str):
+        raise TypeError(""operation must be a string"")
+
+    try:
+        tree = ast.parse(operation, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+    env: Dict[str, Number] = {}
+    last_value: Number | None = None
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            # Support multiple targets: a = b = 5 (value evaluated once)
+            value = _eval_expr(stmt.value, env)
+            # Only allow simple Name targets
+            targets = stmt.targets
+            if not targets:
+                raise _SafeEvalError(""Invalid assignment"")
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    env[t.id] = value
+                else:
+                    raise _SafeEvalError(""Only simple variable names can be assigned to"")
+            last_value = value
+
+        elif isinstance(stmt, ast.AugAssign):
+            # target op= value
+            if not isinstance(stmt.target, ast.Name):
+                raise _SafeEvalError(""Only simple variable names can be assigned to"")
+            var = stmt.target.id
+            if var not in env:
+                raise _SafeEvalError(f""Undefined variable: {var}"")
+            left = env[var]
+            right = _eval_expr(stmt.value, env)
+
+            op = stmt.op
+            if isinstance(op, ast.Add):
+                new_val = left + right
+            elif isinstance(op, ast.Sub):
+                new_val = left - right
+            elif isinstance(op, ast.Mult):
+                new_val = left * right
+            elif isinstance(op, ast.Div):
+                new_val = left / right
+            elif isinstance(op, ast.FloorDiv):
+                new_val = left // right
+            elif isinstance(op, ast.Mod):
+                new_val = left % right
+            elif isinstance(op, ast.Pow):
+                new_val = left ** right
+            else:
+                raise _SafeEvalError(f""Unsupported augmented assignment operator: {type(op).__name__}"")
+
+            if not _is_number(new_val):
+                raise _SafeEvalError(""Only numeric results are supported"")
+            env[var] = new_val
+            last_value = new_val
+
+        elif isinstance(stmt, ast.Expr):
+            last_value = _eval_expr(stmt.value, env)
+
+        else:
+            raise _SafeEvalError(f""Unsupported statement: {type(stmt).__name__}"")
+
+    if last_value is None:
+        raise ValueError(""No evaluable expression found"")
+
+    return last_value
+","import ast
+from typing import Union, Dict, Any
+
+Number = Union[int, float]
+
+
+class _SafeEvalError(ValueError):
+    pass
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float))
+
+
+def _eval_expr(node: ast.AST, env: Dict[str, Number]) -> Number:
+    if isinstance(node, ast.BinOp):
+        left = _eval_expr(node.left, env)
+        right = _eval_expr(node.right, env)
+
+        if isinstance(node.op, ast.Add):
+            result = left + right
+        elif isinstance(node.op, ast.Sub):
+            result = left - right
+        elif isinstance(node.op, ast.Mult):
+            result = left * right
+        elif isinstance(node.op, ast.Div):
+            result = left / right
+        elif isinstance(node.op, ast.Mod):
+            result = left % right
+        elif isinstance(node.op, ast.FloorDiv):
+            result = left // right
+        elif isinstance(node.op, ast.Pow):
+            result = left ** right
+        else:
+            raise _SafeEvalError(f""Unsupported binary operator: {type(node.op).__name__}"")
+
+        if not _is_number(result):
+            raise _SafeEvalError(""Only numeric results are supported"")
+        return result
+
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_expr(node.operand, env)
+        if isinstance(node.op, ast.UAdd):
+            result = +operand
+        elif isinstance(node.op, ast.USub):
+            result = -operand
+        else:
+            raise _SafeEvalError(f""Unsupported unary operator: {type(node.op).__name__}"")
+        if not _is_number(result):
+            raise _SafeEvalError(""Only numeric results are supported"")
+        return result
+
+    elif isinstance(node, ast.Name):
+        if node.id in env:
+            return env[node.id]
+        raise _SafeEvalError(f""Undefined variable: {node.id}"")
+
+    elif isinstance(node, ast.Constant):
+        if _is_number(node.value):
+            return node.value
+        raise _SafeEvalError(""Only numeric literals are allowed"")
+
+    # Python <3.8 compatibility (Num nodes)
+    elif isinstance(node, ast.Num):  # type: ignore[attr-defined]
+        if _is_number(node.n):  # type: ignore[attr-defined]
+            return node.n  # type: ignore[attr-defined]
+        raise _SafeEvalError(""Only numeric literals are allowed"")
+
+    # Parentheses are represented implicitly by the AST structure (no separate node)
+    else:
+        raise _SafeEvalError(f""Unsupported expression node: {type(node).__name__}"")
+
+
+def execute_operation(operation: str) -> Number:
+    """"""
+    Execute arithmetic expressions with optional variable assignments.
+
+    Examples:
+    - '5 + 3' -> 8
+    - 'a = 5; b = 3; a * b' -> 15
+    - 'x = 10; x -= 4; x + 2' -> 8
+
+    Supported statements:
+      - Assignments to simple variable names: a = 5, b = a + 2
+      - Augmented assignments: a += 1, a -= 2, a *= 3, a /= 4, a //= 2, a %= 3, a **= 2
+      - Expression statements whose value becomes the result
+
+    Supported operators in expressions:
+      +, -, *, /, //, %, **, unary + and -
+
+    Returns the value of the final statement:
+      - If the final statement is an expression, returns its value.
+      - If the final statement is an assignment or augmented assignment, returns the assigned value.
+
+    Security:
+      - The expression is parsed and evaluated via a restricted AST evaluator (no function calls,
+        no attribute access, no subscripting, no imports, etc.).
+    """"""
+    if not isinstance(operation, str):
+        raise TypeError(""operation must be a string"")
+
+    try:
+        tree = ast.parse(operation, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+    env: Dict[str, Number] = {}
+    last_value: Number | None = None
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            # Support multiple targets: a = b = 5 (value evaluated once)
+            value = _eval_expr(stmt.value, env)
+            # Only allow simple Name targets
+            targets = stmt.targets
+            if not targets:
+                raise _SafeEvalError(""Invalid assignment"")
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    env[t.id] = value
+                else:
+                    raise _SafeEvalError(""Only simple variable names can be assigned to"")
+            last_value = value
+
+        elif isinstance(stmt, ast.AugAssign):
+            # target op= value
+            if not isinstance(stmt.target, ast.Name):
+                raise _SafeEvalError(""Only simple variable names can be assigned to"")
+            var = stmt.target.id
+            if var not in env:
+                raise _SafeEvalError(f""Undefined variable: {var}"")
+            left = env[var]
+            right = _eval_expr(stmt.value, env)
+
+            op = stmt.op
+            if isinstance(op, ast.Add):
+                new_val = left + right
+            elif isinstance(op, ast.Sub):
+                new_val = left - right
+            elif isinstance(op, ast.Mult):
+                new_val = left * right
+            elif isinstance(op, ast.Div):
+                new_val = left / right
+            elif isinstance(op, ast.FloorDiv):
+                new_val = left // right
+            elif isinstance(op, ast.Mod):
+                new_val = left % right
+            elif isinstance(op, ast.Pow):
+                new_val = left ** right
+            else:
+                raise _SafeEvalError(f""Unsupported augmented assignment operator: {type(op).__name__}"")
+
+            if not _is_number(new_val):
+                raise _SafeEvalError(""Only numeric results are supported"")
+            env[var] = new_val
+            last_value = new_val
+
+        elif isinstance(stmt, ast.Expr):
+            last_value = _eval_expr(stmt.value, env)
+
+        else:
+            raise _SafeEvalError(f""Unsupported statement: {type(stmt).__name__}"")
+
+    if last_value is None:
+        raise ValueError(""No evaluable expression found"")
+
+    return last_value
+
+
+def restricted_run_code(run_code: str):
+    """"""
+    Execute a restricted, safe subset of Python statements.
+
+    - Allowed statements:
+        * Assignments to simple variable names: a = 5, b = a + 2
+        * Augmented assignments: a += 1, a -= 2, a *= 3, a /= 4, a //= 2, a %= 3, a **= 2
+        * Expression statements:
+            - print(...) calls with only safe expressions as arguments
+            - bare arithmetic expressions (evaluated for validation, no output)
+
+    - Allowed expression elements:
+        * Numeric literals
+        * Names referencing previously assigned numeric values
+        * Binary ops: +, -, *, /, //, %, **
+        * Unary ops: +, -
+        * Parentheses (implicit via AST)
+
+    - print keyword args supported:
+        * sep and end must be string literals
+
+    Returns:
+        * The captured stdout text as a single string if any print occurred, else None.
+
+    Raises:
+        * ValueError on syntax errors, prohibited actions, or evaluation errors.
+    """"""
+    if not isinstance(run_code, str):
+        raise TypeError(""run_code must be a string"")
+
+    try:
+        tree = ast.parse(run_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid syntax: {e}"") from None
+
+    env: Dict[str, Number] = {}
+    output_parts: list[str] = []
+
+    def _eval_print_arg(node: ast.AST) -> str:
+        # Allow string literals directly, otherwise evaluate as numeric expression
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        # For names and other expressions, reuse numeric evaluator
+        val = _eval_expr(node, env)
+        return str(val)
+
+    try:
+        for stmt in tree.body:
+            if isinstance(stmt, ast.Assign):
+                value = _eval_expr(stmt.value, env)
+                if not stmt.targets:
+                    raise ValueError(""Invalid assignment"")
+                for t in stmt.targets:
+                    if isinstance(t, ast.Name):
+                        env[t.id] = value
+                    else:
+                        raise ValueError(""Only simple variable names can be assigned to"")
+
+            elif isinstance(stmt, ast.AugAssign):
+                if not isinstance(stmt.target, ast.Name):
+                    raise ValueError(""Only simple variable names can be assigned to"")
+                var = stmt.target.id
+                if var not in env:
+                    raise ValueError(f""Undefined variable: {var}"")
+                left = env[var]
+                right = _eval_expr(stmt.value, env)
+
+                op = stmt.op
+                if isinstance(op, ast.Add):
+                    new_val = left + right
+                elif isinstance(op, ast.Sub):
+                    new_val = left - right
+                elif isinstance(op, ast.Mult):
+                    new_val = left * right
+                elif isinstance(op, ast.Div):
+                    new_val = left / right
+                elif isinstance(op, ast.FloorDiv):
+                    new_val = left // right
+                elif isinstance(op, ast.Mod):
+                    new_val = left % right
+                elif isinstance(op, ast.Pow):
+                    new_val = left ** right
+                else:
+                    raise ValueError(f""Unsupported augmented assignment operator: {type(op).__name__}"")
+
+                if not _is_number(new_val):
+                    raise ValueError(""Only numeric results are supported"")
+                env[var] = new_val
+
+            elif isinstance(stmt, ast.Expr):
+                expr_node = stmt.value
+                if isinstance(expr_node, ast.Call):
+                    # Only allow print(...)
+                    if not isinstance(expr_node.func, ast.Name) or expr_node.func.id != ""print"":
+                        raise ValueError(""Only 'print' calls are allowed"")
+                    # Only allow sep and end keyword args as string literals
+                    sep = "" ""
+                    end = ""\n""
+                    for kw in expr_node.keywords or []:
+                        if kw.arg == ""sep"":
+                            if not isinstance(kw.value, ast.Constant) or not isinstance(kw.value.value, str):
+                                raise ValueError(""print sep must be a string literal"")
+                            sep = kw.value.value
+                        elif kw.arg == ""end"":
+                            if not isinstance(kw.value, ast.Constant) or not isinstance(kw.value.value, str):
+                                raise ValueError(""print end must be a string literal"")
+                            end = kw.value.value
+                        else:
+                            raise ValueError(""Only 'sep' and 'end' are allowed as print keyword arguments"")
+                    parts = [_eval_print_arg(arg) for arg in expr_node.args]
+                    output_parts.append(sep.join(parts) + end)
+                else:
+                    # Evaluate bare expressions to ensure safety but ignore their values (no output)
+                    _ = _eval_expr(expr_node, env)
+            else:
+                raise ValueError(f""Unsupported statement: {type(stmt).__name__}"")
+    except _SafeEvalError as e:
+        raise ValueError(str(e)) from None
+    except ZeroDivisionError as e:
+        raise ValueError(str(e)) from None
+
+    output = """".join(output_parts)
+    return output if output else None
+",gpt-5,0,[],[],[]
+d5ef063a,refactor,"[""Develop a function called 'restricted_run_code' that will execute a Python script specified by the user, but should limit the script to operations considered safe. The function's name should be restricted_run_code. The function should take 1 argument, i.e., - run_code: a string containing the user's Python script. The function should return The output of the script (if applicable), or None. The function should raise - a ValueError should be raised if the script attempts prohibited actions or has syntax issues. The following setup code will be provided to you:\n```\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: This function is designed for environments where users can experiment with simple Python scripts interactively, while preventing the execution of malicious code.\n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this to improve maintainability by extracting the script validation and execution logic into separate pure functions. This will help in organizing the code better while keeping the main restricted_run_code function's signature unchanged.\nPlease only output code and not your natural language commentary."", 'Could you add logging support to track all script execution attempts and their outcomes? This will help in monitoring the usage and identifying any potential issues. Ensure that the logs are clear and provide useful information about each execution attempt.\nPlease only output code and not your natural language commentary.']","import ast
+import io
+import contextlib
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    PROHIBITED_NAMES = {
+        ""__import__"",
+        ""open"",
+        ""eval"",
+        ""exec"",
+        ""compile"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""vars"",
+        ""globals"",
+        ""locals"",
+        ""input"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""super"",
+        ""memoryview"",
+        ""bytearray"",
+        ""bytes"",
+    }
+
+    def visit_Import(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_ImportFrom(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_Global(self, node):
+        raise ValueError(""Global statement is not allowed."")
+
+    def visit_Nonlocal(self, node):
+        raise ValueError(""Nonlocal statement is not allowed."")
+
+    def visit_ClassDef(self, node):
+        # Prevent class creation which relies on __build_class__ and metaclass tricks
+        raise ValueError(""Class definitions are not allowed."")
+
+    def visit_Attribute(self, node):
+        # Block access to double-underscore attributes like __class__, __dict__, etc.
+        if isinstance(node.attr, str) and node.attr.startswith(""__""):
+            raise ValueError(""Access to dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        # Block direct usage of dangerous builtins by name
+        if node.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Use of '{node.id}' is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        # Block calling dangerous functions via direct name or attribute
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Calling '{func.id}' is not allowed."")
+        if isinstance(func, ast.Attribute):
+            if isinstance(func.attr, str) and func.attr.startswith(""__""):
+                raise ValueError(""Calling dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+
+def restricted_run_code(run_code):
+    """"""
+    Execute a user-provided Python script under restricted conditions.
+
+    Args:
+        run_code (str): The user's Python script.
+
+    Returns:
+        str | None: Captured stdout from the script if any was produced; otherwise None.
+
+    Raises:
+        ValueError: If the script contains prohibited actions, has syntax issues,
+                    or encounters runtime errors during execution.
+    """"""
+    if not isinstance(run_code, str):
+        raise ValueError(""Script must be a string."")
+
+    try:
+        tree = ast.parse(run_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error: {e.msg}"") from None
+
+    # Static safety checks
+    _SafetyChecker().visit(tree)
+
+    # Prepare a minimal safe builtins environment
+    SAFE_BUILTINS = {
+        # Simple types and constructors
+        ""bool"": bool,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        # Safe utilities
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""enumerate"": enumerate,
+        ""len"": len,
+        ""max"": max,
+        ""min"": min,
+        ""range"": range,
+        ""round"": round,
+        ""sorted"": sorted,
+        ""sum"": sum,
+        ""zip"": zip,
+        ""print"": print,
+        ""repr"": repr,
+    }
+
+    safe_globals = {
+        ""__builtins__"": SAFE_BUILTINS
+    }
+
+    # Capture stdout
+    stdout_buffer = io.StringIO()
+    code_obj = compile(tree, ""<user_code>"", ""exec"")
+
+    try:
+        with contextlib.redirect_stdout(stdout_buffer):
+            exec(code_obj, safe_globals, None)
+    except Exception as e:
+        # Normalize all runtime errors to ValueError as per requirements
+        raise ValueError(f""Runtime error: {e}"") from None
+
+    output = stdout_buffer.getvalue()
+    return output if output != """" else None
+","import ast
+import io
+import contextlib
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    PROHIBITED_NAMES = {
+        ""__import__"",
+        ""open"",
+        ""eval"",
+        ""exec"",
+        ""compile"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""vars"",
+        ""globals"",
+        ""locals"",
+        ""input"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""super"",
+        ""memoryview"",
+        ""bytearray"",
+        ""bytes"",
+    }
+
+    def visit_Import(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_ImportFrom(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_Global(self, node):
+        raise ValueError(""Global statement is not allowed."")
+
+    def visit_Nonlocal(self, node):
+        raise ValueError(""Nonlocal statement is not allowed."")
+
+    def visit_ClassDef(self, node):
+        # Prevent class creation which relies on __build_class__ and metaclass tricks
+        raise ValueError(""Class definitions are not allowed."")
+
+    def visit_Attribute(self, node):
+        # Block access to double-underscore attributes like __class__, __dict__, etc.
+        if isinstance(node.attr, str) and node.attr.startswith(""__""):
+            raise ValueError(""Access to dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        # Block direct usage of dangerous builtins by name
+        if node.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Use of '{node.id}' is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        # Block calling dangerous functions via direct name or attribute
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Calling '{func.id}' is not allowed."")
+        if isinstance(func, ast.Attribute):
+            if isinstance(func.attr, str) and func.attr.startswith(""__""):
+                raise ValueError(""Calling dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+
+def _get_safe_builtins():
+    """"""
+    Return a fresh mapping of allowed builtins for executing user code.
+    """"""
+    return {
+        # Simple types and constructors
+        ""bool"": bool,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        # Safe utilities
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""enumerate"": enumerate,
+        ""len"": len,
+        ""max"": max,
+        ""min"": min,
+        ""range"": range,
+        ""round"": round,
+        ""sorted"": sorted,
+        ""sum"": sum,
+        ""zip"": zip,
+        ""print"": print,
+        ""repr"": repr,
+    }
+
+
+def _validate_script(run_code):
+    """"""
+    Parse and statically validate the provided script.
+
+    Returns:
+        ast.AST: The parsed AST if validation passes.
+
+    Raises:
+        ValueError: If input type is invalid, parsing fails, or prohibited actions are detected.
+    """"""
+    if not isinstance(run_code, str):
+        raise ValueError(""Script must be a string."")
+
+    try:
+        tree = ast.parse(run_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error: {e.msg}"") from None
+
+    _SafetyChecker().visit(tree)
+    return tree
+
+
+def _execute_validated_ast(tree, builtins_map=None):
+    """"""
+    Execute a pre-validated AST with restricted builtins and capture stdout.
+
+    Args:
+        tree (ast.AST): Pre-validated AST to execute.
+        builtins_map (dict | None): Custom builtins to use; defaults to a safe set.
+
+    Returns:
+        str | None: Captured stdout if any output was produced; otherwise None.
+
+    Raises:
+        ValueError: If a runtime error occurs during execution.
+    """"""
+    if builtins_map is None:
+        builtins_map = _get_safe_builtins()
+
+    safe_globals = {""__builtins__"": builtins_map}
+
+    stdout_buffer = io.StringIO()
+    code_obj = compile(tree, ""<user_code>"", ""exec"")
+
+    try:
+        with contextlib.redirect_stdout(stdout_buffer):
+            exec(code_obj, safe_globals, safe_globals)
+    except Exception as e:
+        raise ValueError(f""Runtime error: {e}"") from None
+
+    output = stdout_buffer.getvalue()
+    return output if output != """" else None
+
+
+def restricted_run_code(run_code):
+    """"""
+    Execute a user-provided Python script under restricted conditions.
+
+    Args:
+        run_code (str): The user's Python script.
+
+    Returns:
+        str | None: Captured stdout from the script if any was produced; otherwise None.
+
+    Raises:
+        ValueError: If the script contains prohibited actions, has syntax issues,
+                    or encounters runtime errors during execution.
+    """"""
+    tree = _validate_script(run_code)
+    return _execute_validated_ast(tree)
+","import ast
+import io
+import contextlib
+import logging
+import uuid
+import hashlib
+
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    PROHIBITED_NAMES = {
+        ""__import__"",
+        ""open"",
+        ""eval"",
+        ""exec"",
+        ""compile"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""vars"",
+        ""globals"",
+        ""locals"",
+        ""input"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""super"",
+        ""memoryview"",
+        ""bytearray"",
+        ""bytes"",
+    }
+
+    def visit_Import(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_ImportFrom(self, node):
+        raise ValueError(""Import statements are not allowed."")
+
+    def visit_Global(self, node):
+        raise ValueError(""Global statement is not allowed."")
+
+    def visit_Nonlocal(self, node):
+        raise ValueError(""Nonlocal statement is not allowed."")
+
+    def visit_ClassDef(self, node):
+        # Prevent class creation which relies on __build_class__ and metaclass tricks
+        raise ValueError(""Class definitions are not allowed."")
+
+    def visit_Attribute(self, node):
+        # Block access to double-underscore attributes like __class__, __dict__, etc.
+        if isinstance(node.attr, str) and node.attr.startswith(""__""):
+            raise ValueError(""Access to dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        # Block direct usage of dangerous builtins by name
+        if node.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Use of '{node.id}' is not allowed."")
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        # Block calling dangerous functions via direct name or attribute
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in self.PROHIBITED_NAMES:
+            raise ValueError(f""Calling '{func.id}' is not allowed."")
+        if isinstance(func, ast.Attribute):
+            if isinstance(func.attr, str) and func.attr.startswith(""__""):
+                raise ValueError(""Calling dunder attributes is not allowed."")
+        self.generic_visit(node)
+
+
+def _get_safe_builtins():
+    """"""
+    Return a fresh mapping of allowed builtins for executing user code.
+    """"""
+    return {
+        # Simple types and constructors
+        ""bool"": bool,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        # Safe utilities
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""enumerate"": enumerate,
+        ""len"": len,
+        ""max"": max,
+        ""min"": min,
+        ""range"": range,
+        ""round"": round,
+        ""sorted"": sorted,
+        ""sum"": sum,
+        ""zip"": zip,
+        ""print"": print,
+        ""repr"": repr,
+    }
+
+
+def _validate_script(run_code):
+    """"""
+    Parse and statically validate the provided script.
+
+    Returns:
+        ast.AST: The parsed AST if validation passes.
+
+    Raises:
+        ValueError: If input type is invalid, parsing fails, or prohibited actions are detected.
+    """"""
+    if not isinstance(run_code, str):
+        raise ValueError(""Script must be a string."")
+
+    try:
+        tree = ast.parse(run_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error: {e.msg}"") from None
+
+    _SafetyChecker().visit(tree)
+    return tree
+
+
+def _execute_validated_ast(tree, builtins_map=None):
+    """"""
+    Execute a pre-validated AST with restricted builtins and capture stdout.
+
+    Args:
+        tree (ast.AST): Pre-validated AST to execute.
+        builtins_map (dict | None): Custom builtins to use; defaults to a safe set.
+
+    Returns:
+        str | None: Captured stdout if any output was produced; otherwise None.
+
+    Raises:
+        ValueError: If a runtime error occurs during execution.
+    """"""
+    if builtins_map is None:
+        builtins_map = _get_safe_builtins()
+
+    safe_globals = {""__builtins__"": builtins_map}
+
+    stdout_buffer = io.StringIO()
+    code_obj = compile(tree, ""<user_code>"", ""exec"")
+
+    try:
+        with contextlib.redirect_stdout(stdout_buffer):
+            exec(code_obj, safe_globals, safe_globals)
+    except Exception as e:
+        raise ValueError(f""Runtime error: {e}"") from None
+
+    output = stdout_buffer.getvalue()
+    return output if output != """" else None
+
+
+def _summarize_script(run_code, preview=False, preview_limit=120):
+    """"""
+    Produce a non-sensitive summary of the provided script for logging.
+    """"""
+    length = len(run_code) if isinstance(run_code, str) else -1
+    try:
+        sha256 = hashlib.sha256(run_code.encode(""utf-8"", ""replace"")).hexdigest()
+    except Exception:
+        sha256 = ""unavailable""
+
+    summary = {""length"": length, ""sha256"": sha256}
+
+    if preview and isinstance(run_code, str):
+        snippet = "" "".join(run_code.split())
+        if len(snippet) > preview_limit:
+            snippet = snippet[: preview_limit - 3] + ""...""
+        summary[""preview""] = snippet
+
+    return summary
+
+
+def restricted_run_code(run_code):
+    """"""
+    Execute a user-provided Python script under restricted conditions.
+
+    Args:
+        run_code (str): The user's Python script.
+
+    Returns:
+        str | None: Captured stdout from the script if any was produced; otherwise None.
+
+    Raises:
+        ValueError: If the script contains prohibited actions, has syntax issues,
+                    or encounters runtime errors during execution.
+    """"""
+    attempt_id = uuid.uuid4().hex[:12]
+    meta = _summarize_script(run_code)
+    logger.info(
+        ""Attempt %s started: length=%d, sha256=%s"",
+        attempt_id,
+        meta.get(""length"", -1),
+        meta.get(""sha256"", ""unavailable""),
+    )
+    debug_meta = _summarize_script(run_code, preview=True)
+    if ""preview"" in debug_meta:
+        logger.debug(""Attempt %s script preview: %s"", attempt_id, debug_meta[""preview""])
+
+    try:
+        tree = _validate_script(run_code)
+    except ValueError as e:
+        logger.warning(""Attempt %s failed during validation: %s"", attempt_id, e)
+        raise
+
+    logger.debug(""Attempt %s validation passed"", attempt_id)
+
+    try:
+        output = _execute_validated_ast(tree)
+    except ValueError as e:
+        logger.error(""Attempt %s failed during execution: %s"", attempt_id, e)
+        raise
+
+    out_len = 0 if output is None else len(output)
+    logger.info(""Attempt %s succeeded: output_len=%d"", attempt_id, out_len)
+
+    if output:
+        out_preview = "" "".join(output.split())
+        if len(out_preview) > 120:
+            out_preview = out_preview[:117] + ""...""
+        logger.debug(""Attempt %s output preview: %s"", attempt_id, out_preview)
+
+    return output
+",gpt-5,0,[],[],[]

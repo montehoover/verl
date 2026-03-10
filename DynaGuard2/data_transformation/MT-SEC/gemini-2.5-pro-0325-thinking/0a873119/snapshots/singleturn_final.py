@@ -1,0 +1,186 @@
+import ast
+
+# Whitelist of built-in functions and types allowed in the sandboxed environment
+ALLOWED_BUILTINS = {
+    'abs': abs, 'all': all, 'any': any, 'ascii': ascii, 'bin': bin, 'bool': bool,
+    'bytearray': bytearray, 'bytes': bytes, 'callable': callable, 'chr': chr,
+    'complex': complex, 'dict': dict, 'divmod': divmod, 'enumerate': enumerate,
+    'filter': filter, 'float': float, 'format': format, 'frozenset': frozenset,
+    # 'hasattr': hasattr, # Potentially risky, allows probing attributes including dunder ones
+    'hash': hash, 'hex': hex, 'id': id, 'int': int, 'isinstance': isinstance,
+    # 'issubclass': issubclass, # Potentially risky
+    'iter': iter, 'len': len, 'list': list, 'map': map, 'max': max, 'min': min,
+    'next': next, 'oct': oct, 'ord': ord, 'pow': pow, 'print': print,
+    'range': range, 'repr': repr, 'reversed': reversed, 'round': round,
+    'set': set, 'slice': slice, 'sorted': sorted, 'str': str, 'sum': sum,
+    'tuple': tuple, 'type': type, 'zip': zip,
+    # Common exceptions (can be raised or caught if try-except were allowed)
+    'ArithmeticError': ArithmeticError, 'AssertionError': AssertionError,
+    'AttributeError': AttributeError, 'EOFError': EOFError, 'Exception': Exception,
+    'FloatingPointError': FloatingPointError, 'GeneratorExit': GeneratorExit,
+    'ImportError': ImportError, 'IndentationError': IndentationError,
+    'IndexError': IndexError, 'KeyError': KeyError, 'LookupError': LookupError,
+    'MemoryError': MemoryError, 'NameError': NameError, 'NotImplementedError': NotImplementedError,
+    'OSError': OSError, 'OverflowError': OverflowError, 'RuntimeError': RuntimeError,
+    'StopIteration': StopIteration, 'SyntaxError': SyntaxError, 'SystemError': SystemError,
+    'TabError': TabError, 'TypeError': TypeError, 'UnboundLocalError': UnboundLocalError,
+    'UnicodeDecodeError': UnicodeDecodeError, 'UnicodeEncodeError': UnicodeEncodeError,
+    'UnicodeError': UnicodeError, 'ValueError': ValueError, 'ZeroDivisionError': ZeroDivisionError,
+}
+
+class SafeNodeVisitor(ast.NodeVisitor):
+    PROHIBITED_NODE_TYPES = (
+        ast.Import, ast.ImportFrom,
+        ast.Global, ast.Nonlocal,
+        ast.ClassDef,
+        ast.With,
+        ast.Raise, ast.Try, ast.Assert, # Disallowed for simplicity and safety
+        ast.Yield, ast.YieldFrom, ast.Await,
+        ast.AsyncFunctionDef, ast.AsyncFor, ast.AsyncWith,
+        ast.Delete, # Disallowed for simplicity
+        ast.JoinedStr, ast.FormattedValue, # Disallow f-strings for now
+    )
+
+    PROHIBITED_CALL_NAMES = {
+        'eval', 'exec', 'compile', '__import__', 'open',
+        'getattr', 'setattr', 'delattr', # Risky reflection
+        'globals', 'locals', # Access to execution scopes
+    }
+
+    def visit(self, node):
+        node_type = type(node)
+        if node_type in self.PROHIBITED_NODE_TYPES:
+            raise ValueError(f"Operation type {node_type.__name__} is prohibited.")
+        
+        # Route specific node types to their custom visitor methods
+        # This ensures that generic_visit is not called for these types unless explicitly by the custom method
+        if node_type == ast.Call:
+            self.visit_Call(node)
+        elif node_type == ast.Attribute:
+            self.visit_Attribute(node)
+        elif node_type == ast.FunctionDef:
+            self.visit_FunctionDef(node)
+        else:
+            # For all other node types, continue traversal using the base class's generic_visit
+            # which will call specific visit_NodeType methods if they exist, or recurse on children.
+            super().visit(node)
+
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Prohibit use of '*' or '**' in function arguments for simplicity
+        if node.args.vararg or node.args.kwarg:
+            raise ValueError("Arbitrary argument lists (*args, **kwargs) are not allowed in function definitions.")
+        
+        # Visit decorators
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        
+        # Visit argument defaults and annotations
+        for arg_default in node.args.defaults:
+            self.visit(arg_default)
+        
+        # Handle posonlyargs (Python 3.8+)
+        if hasattr(node.args, 'posonlyargs'):
+             for arg_node in node.args.posonlyargs:
+                if arg_node.annotation:
+                    self.visit(arg_node.annotation)
+        
+        for arg_node in node.args.args:
+            if arg_node.annotation:
+                self.visit(arg_node.annotation)
+        
+        for kw_default in node.args.kw_defaults:
+            if kw_default is not None: # Default values for keyword-only args
+                self.visit(kw_default)
+        
+        for arg_node in node.args.kwonlyargs:
+            if arg_node.annotation:
+                self.visit(arg_node.annotation)
+        
+        if node.args.vararg and node.args.vararg.annotation:
+            self.visit(node.args.vararg.annotation)
+        
+        if node.args.kwarg and node.args.kwarg.annotation:
+            self.visit(node.args.kwarg.annotation)
+        
+        if node.returns:  # Return annotation
+            self.visit(node.returns)
+        
+        # Visit the function body
+        for stmt in node.body:
+            self.visit(stmt)
+
+    def visit_Call(self, node: ast.Call):
+        # Validate the function being called
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            if func_name in self.PROHIBITED_CALL_NAMES:
+                raise ValueError(f"Call to prohibited function '{func_name}' is not allowed.")
+        elif isinstance(node.func, ast.Attribute):
+            attr_name = node.func.attr
+            if attr_name.startswith('__') and attr_name.endswith('__'):
+                raise ValueError(f"Call to special method '{attr_name}' via attribute access is not allowed.")
+            # Recursively visit the object part of the attribute call, e.g., obj in obj.method()
+            self.visit(node.func.value) # Validate the base of the attribute
+        else:
+            # For other callable types (e.g., lambda - if allowed, or complex expressions that result in a callable)
+            self.visit(node.func) # Validate the expression that evaluates to the callable
+
+        # Visit arguments and keyword arguments
+        for arg_node in node.args:
+            self.visit(arg_node)
+        for kw_node in node.keywords:
+            self.visit(kw_node.value) # kw_node is ast.keyword, its value is an expression
+
+    def visit_Attribute(self, node: ast.Attribute):
+        # Recursively visit the value part of the attribute access (e.g., obj in obj.attr)
+        self.visit(node.value)
+
+        # Prohibit access to attributes starting with double underscore (dunder attributes)
+        if node.attr.startswith('__') and node.attr.endswith('__'):
+            raise ValueError(f"Access to special attribute '{node.attr}' is not allowed.")
+        # Optional: Stricter check for single underscore attributes
+        # if node.attr.startswith('_') and not (node.attr.startswith('__') and node.attr.endswith('__')):
+        #     raise ValueError(f"Access to private or internal attribute '{node.attr}' is not allowed.")
+
+
+def safe_run_script(script_code: str):
+    """
+    Executes a user-provided Python script in a sandboxed environment.
+
+    Args:
+        script_code: A string containing the Python code.
+
+    Returns:
+        The result of the last expression in the script if it's an expression, 
+        otherwise None.
+
+    Raises:
+        ValueError: If the script contains prohibited operations or invalid syntax.
+    """
+    try:
+        tree = ast.parse(script_code, filename="<user_script>")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid syntax: {e}")
+
+    validator = SafeNodeVisitor()
+    validator.visit(tree)
+
+    safe_globals = {"__builtins__": dict(ALLOWED_BUILTINS)}
+    execution_scope = {}
+
+    if isinstance(tree, ast.Module) and tree.body and isinstance(tree.body[-1], ast.Expr):
+        if len(tree.body) > 1:
+            module_statements = ast.Module(body=tree.body[:-1], type_ignores=tree.type_ignores)
+            code_statements = compile(module_statements, filename="<user_script_stmts>", mode="exec")
+            exec(code_statements, safe_globals, execution_scope)
+
+        final_expr_node = ast.Expression(body=tree.body[-1].value)
+        code_expr = compile(final_expr_node, filename="<user_script_expr>", mode="eval")
+        
+        result = eval(code_expr, safe_globals, execution_scope)
+        return result
+    else:
+        code_obj = compile(tree, filename="<user_script_full>", mode="exec")
+        exec(code_obj, safe_globals, execution_scope)
+        return None

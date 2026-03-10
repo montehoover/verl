@@ -1,0 +1,71 @@
+import subprocess
+import shlex
+
+def execute_shell_command(command: str, args: list) -> str:
+    """
+    Executes a shell command with user-provided arguments.
+
+    Args:
+        command: The base command to execute (e.g., "ls", "echo").
+        args: A list of string arguments for the command (e.g., ["-l", "/tmp"]).
+
+    Returns:
+        The standard output of the executed command as a string.
+
+    Raises:
+        ValueError: Raised when the command is invalid, cannot be executed,
+                    or if the input arguments are not of the expected type/format.
+    """
+    if not isinstance(command, str):
+        raise ValueError("Command must be a string.")
+    if not command:  # Check for empty command string
+        raise ValueError("Command cannot be an empty string.")
+    if not isinstance(args, list):
+        raise ValueError("Args must be a list of strings.")
+    if not all(isinstance(arg, str) for arg in args):
+        raise ValueError("All arguments in the args list must be strings.")
+
+    cmd_list = [command] + args
+
+    # Create a display string for the command, useful for error messages.
+    # shlex.join is preferred (Python 3.8+).
+    # Fallback to shlex.quote for each part if shlex.join is not available.
+    try:
+        display_cmd = shlex.join(cmd_list)
+    except AttributeError:  # shlex.join not available (e.g. Python < 3.8)
+        # shlex.quote is available since Python 3.3
+        display_cmd = ' '.join(shlex.quote(part) for part in cmd_list)
+
+    try:
+        # Execute the command
+        # shell=False is the default and is safer.
+        # text=True (or universal_newlines=True) decodes stdout/stderr as text.
+        # check=True raises CalledProcessError for non-zero exit codes.
+        process = subprocess.run(
+            cmd_list,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Return the standard output, stripping any trailing newline
+        return process.stdout.strip()
+
+    except FileNotFoundError:
+        # Command not found
+        raise ValueError(f"Command '{command}' not found.")
+    except PermissionError:
+        # Command not executable due to permissions
+        raise ValueError(f"Permission denied to execute command '{command}'.")
+    except subprocess.CalledProcessError as e:
+        # Command returned a non-zero exit status
+        error_message = f"Command {display_cmd} execution failed with exit code {e.returncode}."
+        if e.stderr:
+            error_message += f" Stderr: {e.stderr.strip()}"
+        else:
+            error_message += " No stderr output."
+        raise ValueError(error_message)
+    except OSError as e:
+        # Catches other OS-related errors during Popen/run,
+        # e.g. "Exec format error" if trying to run a non-executable, or resource limits.
+        # e.g. e.errno, e.strerror
+        raise ValueError(f"OS error during command {display_cmd} execution: {e.strerror}")

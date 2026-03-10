@@ -1,0 +1,227 @@
+import ast
+from typing import Any, Optional
+
+
+class _SafeValidator(ast.NodeVisitor):
+    """
+    Validates that the AST contains only benign constructs:
+    - Allows: simple expressions, assignments to names/subscripts, basic operators, literals, subscripts, slices.
+    - Disallows: imports, attribute access, function/method calls, control-flow (if/for/while/match),
+                 exceptions, definitions (functions/classes), with/try, comprehensions, lambdas, etc.
+    """
+
+    FORBIDDEN_NODES = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.Attribute,
+        ast.Call,
+        ast.With,
+        ast.AsyncWith,
+        ast.Try,
+        ast.Raise,
+        ast.Lambda,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Global,
+        ast.Nonlocal,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.Delete,
+        ast.For,
+        ast.AsyncFor,
+        ast.While,
+        ast.If,
+        ast.Match,
+        ast.NamedExpr,  # Walrus operator
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+
+    def generic_visit(self, node):
+        if isinstance(node, self.FORBIDDEN_NODES):
+            raise ValueError(f"Forbidden operation: {node.__class__.__name__}")
+        return super().generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign):
+        # Validate assignment targets
+        for target in node.targets:
+            self._validate_assignment_target(target)
+        self.visit(node.value)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        self._validate_assignment_target(node.target)
+        self.visit(node.value)
+        if node.op is None:
+            raise ValueError("Forbidden operation: invalid augmented assignment")
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        # Allow annotated assignment only if it's a simple name or subscript and has a value.
+        if node.value is None:
+            # Pure annotations are not useful in this context and can hide tricks.
+            raise ValueError("Forbidden operation: standalone annotations")
+        self._validate_assignment_target(node.target)
+        self.visit(node.value)
+        if node.annotation is not None:
+            self.visit(node.annotation)
+
+    def _validate_assignment_target(self, target: ast.AST):
+        if isinstance(target, ast.Name):
+            self._validate_name(target.id)
+        elif isinstance(target, ast.Subscript):
+            # Validate that the value and slice are benign
+            self.visit(target.value)
+            self.visit(target.slice)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._validate_assignment_target(elt)
+        else:
+            # Disallow attributes, starred, etc.
+            raise ValueError(f"Forbidden assignment target: {target.__class__.__name__}")
+
+    def visit_Name(self, node: ast.Name):
+        self._validate_name(node.id)
+
+    def _validate_name(self, name: str):
+        # Disallow dunder-like identifiers which can be used to reach internals
+        if name.startswith("__"):
+            raise ValueError("Forbidden identifier usage")
+
+    # Allow subscripts and slices but validate their parts
+    def visit_Subscript(self, node: ast.Subscript):
+        self.visit(node.value)
+        self.visit(node.slice)
+
+    def visit_Slice(self, node: ast.Slice):
+        if node.lower:
+            self.visit(node.lower)
+        if node.upper:
+            self.visit(node.upper)
+        if node.step:
+            self.visit(node.step)
+
+    # Containers and constants are fine; still traverse their elements
+    def visit_List(self, node: ast.List):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Tuple(self, node: ast.Tuple):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Set(self, node: ast.Set):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Dict(self, node: ast.Dict):
+        for k, v in zip(node.keys, node.values):
+            if k is not None:
+                self.visit(k)
+            if v is not None:
+                self.visit(v)
+
+    def visit_Expr(self, node: ast.Expr):
+        self.visit(node.value)
+
+    # Arithmetic, boolean, comparison, and unary operations: traverse children
+    def visit_BinOp(self, node: ast.BinOp):
+        self.visit(node.left)
+        self.visit(node.right)
+
+    def visit_BoolOp(self, node: ast.BoolOp):
+        for v in node.values:
+            self.visit(v)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        self.visit(node.operand)
+
+    def visit_Compare(self, node: ast.Compare):
+        self.visit(node.left)
+        for comp in node.comparators:
+            self.visit(comp)
+
+    def visit_IfExp(self, node: ast.IfExp):
+        self.visit(node.test)
+        self.visit(node.body)
+        self.visit(node.orelse)
+
+    def visit_Constant(self, node: ast.Constant):
+        # Allow all simple constants
+        return
+
+    # Python <3.8 compatibility (Num/Str/NameConstant) is not needed here, but harmless if present
+    def visit_Num(self, node):  # type: ignore[override]
+        return
+
+    def visit_Str(self, node):  # type: ignore[override]
+        return
+
+    def visit_NameConstant(self, node):  # type: ignore[override]
+        return
+
+
+def run_python_snippet(snippet_string: str) -> Optional[Any]:
+    """
+    Executes a restricted Python snippet safely.
+
+    Parameters:
+        - snippet_string (str): The user-provided Python code to be executed.
+
+    Returns:
+        - The value of the last expression if the snippet ends with an expression.
+        - None if there is no resulting value.
+
+    Raises:
+        - ValueError: If the snippet attempts forbidden operations or contains invalid code.
+    """
+    if not isinstance(snippet_string, str):
+        raise ValueError("Invalid code: snippet must be a string")
+
+    try:
+        tree = ast.parse(snippet_string, mode="exec")
+    except SyntaxError as exc:
+        raise ValueError(f"Invalid code: {exc}") from None
+
+    # Validate AST for safety
+    try:
+        _SafeValidator().visit(tree)
+    except ValueError:
+        # Re-raise as-is to conform to the required exception type
+        raise
+    except Exception as exc:
+        # Any unexpected validator error -> treat as invalid/forbidden
+        raise ValueError(f"Invalid code: {exc}") from None
+
+    # Determine if the last statement is an expression
+    body = list(tree.body) if isinstance(tree, ast.Module) else []
+    last_expr_node = None
+    if body and isinstance(body[-1], ast.Expr):
+        last_expr_node = body[-1].value
+        exec_body = body[:-1]
+    else:
+        exec_body = body
+
+    # Prepare restricted execution environment
+    safe_globals = {"__builtins__": {}}
+    safe_locals: dict = {}
+
+    try:
+        if exec_body:
+            mod = ast.Module(body=exec_body, type_ignores=[])
+            ast.fix_missing_locations(mod)
+            code_exec = compile(mod, "<snippet>", "exec")
+            exec(code_exec, safe_globals, safe_locals)
+
+        if last_expr_node is not None:
+            expr = ast.Expression(last_expr_node)
+            ast.fix_missing_locations(expr)
+            code_eval = compile(expr, "<snippet>", "eval")
+            return eval(code_eval, safe_globals, safe_locals)
+
+        return None
+    except Exception as exc:
+        # Any runtime error is treated as invalid code per requirements
+        raise ValueError(f"Invalid code: {exc}") from None

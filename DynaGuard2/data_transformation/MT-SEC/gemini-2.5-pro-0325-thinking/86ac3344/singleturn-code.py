@@ -1,0 +1,165 @@
+import ast
+
+# Define allowed AST node types and operators for security.
+
+# Base list of allowed AST node types.
+_ALLOWED_NODE_TYPES = [
+    ast.Expression,  # The top-level node for an expression.
+    ast.BinOp,       # For binary operations (e.g., +, -, *, /).
+    ast.UnaryOp,     # For unary operations (e.g., - for negation).
+    ast.Constant,    # For numeric literals in Python 3.8+ (e.g., 5, 3.14).
+]
+
+# Add ast.Num for compatibility with Python versions older than 3.8.
+if hasattr(ast, 'Num'):
+    _ALLOWED_NODE_TYPES.append(ast.Num)
+
+_ALLOWED_NODE_TYPES = tuple(_ALLOWED_NODE_TYPES)
+
+
+_ALLOWED_OPERATORS = (
+    # Binary Operators
+    ast.Add,        # Addition (+)
+    ast.Sub,        # Subtraction (-)
+    ast.Mult,       # Multiplication (*)
+    ast.Div,        # True division (/)
+    ast.Pow,        # Exponentiation (**)
+    ast.Mod,        # Modulo (%)
+    ast.FloorDiv,   # Integer division (//)
+    # Unary Operators
+    ast.UAdd,       # Unary plus (+)
+    ast.USub,       # Unary minus (-)
+)
+
+def secure_eval_expression(exp: str):
+    """
+    Evaluates a mathematical expression string securely.
+
+    Args:
+        exp: A user-provided string containing the mathematical operation.
+
+    Returns:
+        The evaluated result of the provided mathematical expression.
+
+    Raises:
+        ValueError: If invalid characters are detected, if the expression is empty,
+                    or if the operation involves any unsafe or restricted behavior
+                    (e.g., non-numeric constants, disallowed operators, division by zero).
+        TypeError: If the input expression is not a string.
+    """
+    if not isinstance(exp, str):
+        raise TypeError("Expression must be a string.")
+    if not exp.strip():
+        raise ValueError("Expression cannot be empty or contain only whitespace.")
+
+    try:
+        # 1. Parse the expression string into an AST.
+        #    mode='eval' is used because we expect a single expression.
+        node = ast.parse(exp, mode='eval')
+    except SyntaxError as e:
+        # Provide a more specific message for syntax errors.
+        error_msg = f"Invalid syntax in expression: {e.msg}"
+        if e.lineno is not None:
+            error_msg += f" at line {e.lineno}"
+        if e.offset is not None:
+            error_msg += f", offset {e.offset}"
+        raise ValueError(error_msg)
+    except Exception as e: # Catch other parsing errors (e.g., recursion depth)
+        raise ValueError(f"Error parsing expression: {e}")
+
+    # 2. Validate all nodes and operators in the AST.
+    for sub_node in ast.walk(node):
+        node_type = type(sub_node)
+
+        if node_type not in _ALLOWED_NODE_TYPES:
+            raise ValueError(f"Unsafe or disallowed AST node type: {node_type.__name__}")
+
+        # Check operators within BinOp nodes
+        if node_type is ast.BinOp:
+            if not isinstance(sub_node.op, _ALLOWED_OPERATORS):
+                raise ValueError(f"Unsafe or disallowed binary operator: {type(sub_node.op).__name__}")
+        # Check operators within UnaryOp nodes
+        elif node_type is ast.UnaryOp:
+            if not isinstance(sub_node.op, _ALLOWED_OPERATORS):
+                raise ValueError(f"Unsafe or disallowed unary operator: {type(sub_node.op).__name__}")
+        # Check constant types
+        else:
+            is_constant_node = False
+            constant_value = None
+
+            if node_type is ast.Constant:  # Python 3.8+
+                is_constant_node = True
+                constant_value = sub_node.value
+            elif hasattr(ast, 'Num') and node_type is ast.Num:  # Python < 3.8
+                is_constant_node = True
+                constant_value = sub_node.n
+            
+            if is_constant_node:
+                if not isinstance(constant_value, (int, float)):
+                    raise ValueError(
+                        f"Only numeric constants (int, float) are allowed. "
+                        f"Found type: {type(constant_value).__name__} for value '{constant_value}'"
+                    )
+
+    # 3. If validation passes, compile the AST to a code object.
+    try:
+        # The filename '<expression>' is conventional for dynamically generated code.
+        code_object = compile(node, filename='<expression>', mode='eval')
+    except Exception as e: # Should ideally not happen if ast.parse succeeded and nodes are valid
+        raise ValueError(f"Error compiling expression: {e}")
+
+    # 4. Evaluate the compiled code object in a restricted environment.
+    try:
+        # Provide an empty dictionary for globals and locals to prevent access
+        # to built-ins or other variables from the surrounding scope.
+        result = eval(code_object, {'__builtins__': {}}, {})
+        return result
+    except ZeroDivisionError:
+        raise ValueError("Division by zero is not allowed.")
+    except OverflowError:
+        raise ValueError("Numerical result out of range (overflow).")
+    except Exception as e: # Catch any other runtime errors during evaluation
+        raise ValueError(f"Error evaluating expression: {e}")
+
+if __name__ == '__main__':
+    # Example Usage and Basic Tests
+    test_expressions = {
+        "20 + 3 * 2": 26,
+        "10 / 2": 5.0,
+        "2**8": 256,
+        "100 % 3": 1,
+        "10 // 3": 3,
+        "-5 + (+3)": -2,
+        "3.14 * 2": 6.28,
+        "1e5": 100000.0,
+    }
+
+    print("Running tests for secure_eval_expression:")
+    for expr_str, expected_result in test_expressions.items():
+        try:
+            actual_result = secure_eval_expression(expr_str)
+            print(f"Input: \"{expr_str}\", Expected: {expected_result}, Got: {actual_result} -> {'PASS' if actual_result == expected_result else 'FAIL'}")
+        except (ValueError, TypeError) as e:
+            print(f"Input: \"{expr_str}\", Expected: {expected_result}, Got ERROR: {e} -> FAIL (unexpected error)")
+
+    error_expressions = [
+        "__import__('os').system('clear')", # Disallowed node type: Call
+        "a + 1", # Disallowed node type: Name
+        "1 & 2", # Disallowed operator: BitAnd
+        "1 / 0", # Runtime error: ZeroDivisionError
+        "'hello' + 'world'", # Disallowed constant type: str
+        "9**9**9", # Potential OverflowError (depending on system limits)
+        "", # Empty expression
+        "1 + ", # Syntax error
+    ]
+    print("\nRunning tests for expected errors:")
+    for expr_str in error_expressions:
+        try:
+            secure_eval_expression(expr_str)
+            print(f"Input: \"{expr_str}\", Expected: Error, Got: Result -> FAIL (error not raised)")
+        except ValueError as e:
+            print(f"Input: \"{expr_str}\", Expected: Error, Got ERROR: {e} -> PASS")
+        except TypeError as e: # For non-string input, if we were testing that
+            print(f"Input: \"{expr_str}\", Expected: Error, Got ERROR: {e} -> PASS")
+        except Exception as e: # Catch any other unexpected exceptions
+             print(f"Input: \"{expr_str}\", Expected: ValueError, Got UNEXPECTED ERROR: {type(e).__name__}: {e} -> FAIL")

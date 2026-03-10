@@ -1,0 +1,120 @@
+import json
+import csv
+import io
+
+approved_formats = ["json", "csv"]
+
+def deserialize_object(raw_data: bytes, format_type: str):
+    """
+    Deserialize input data into a Python object.
+
+    Args:
+        raw_data: bytes, representing the serialized input stream.
+        format_type: str, the format used for serialization (e.g. 'json', 'csv').
+
+    Returns:
+        The deserialized Python object.
+
+    Raises:
+        ValueError: if an unsupported or insecure serialization method is used.
+    """
+    if format_type not in approved_formats:
+        raise ValueError(
+            f"Unsupported or insecure serialization format: {format_type}. "
+            f"Approved formats are: {', '.join(approved_formats)}"
+        )
+
+    if format_type == "json":
+        try:
+            # json.loads can handle bytes if they are utf-8, utf-16, or utf-32.
+            # If encoding is different or unknown, explicit decoding is safer.
+            # Assuming UTF-8 as it's common.
+            decoded_data = raw_data.decode('utf-8')
+            return json.loads(decoded_data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON data: {e}")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Error decoding raw_data as UTF-8 for JSON: {e}")
+
+    elif format_type == "csv":
+        try:
+            decoded_data = raw_data.decode('utf-8')
+            # Use io.StringIO to treat the string as a file
+            csv_file = io.StringIO(decoded_data)
+            reader = csv.reader(csv_file)
+            return [row for row in reader]
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Error decoding raw_data as UTF-8 for CSV: {e}")
+        except csv.Error as e:
+            raise ValueError(f"Invalid CSV data: {e}")
+
+    # This part should ideally not be reached if approved_formats check is comprehensive
+    # and all approved formats are handled above.
+    # However, as a safeguard:
+    else:
+        # This case should technically be caught by the initial check,
+        # but kept for robustness in case approved_formats and handlers diverge.
+        raise ValueError(f"Handler not implemented for approved format: {format_type}")
+
+if __name__ == '__main__':
+    # Example Usage:
+    print("Testing JSON deserialization:")
+    json_data_valid = json.dumps({"name": "Alice", "age": 30}).encode('utf-8')
+    try:
+        deserialized_json = deserialize_object(json_data_valid, "json")
+        print(f"  Input (bytes): {json_data_valid}")
+        print(f"  Output: {deserialized_json}, Type: {type(deserialized_json)}")
+    except ValueError as e:
+        print(f"  Error: {e}")
+
+    json_data_invalid_bytes = b'{"name": "Bob", "city": "New York}' # Incomplete JSON
+    try:
+        print(f"\n  Testing invalid JSON (incomplete bytes):")
+        print(f"  Input (bytes): {json_data_invalid_bytes}")
+        deserialize_object(json_data_invalid_bytes, "json")
+    except ValueError as e:
+        print(f"  Error: {e}")
+
+    print("\nTesting CSV deserialization:")
+    csv_data_valid = "name,age\nBob,25\nCharlie,35".encode('utf-8')
+    try:
+        deserialized_csv = deserialize_object(csv_data_valid, "csv")
+        print(f"  Input (bytes): {csv_data_valid}")
+        print(f"  Output: {deserialized_csv}, Type: {type(deserialized_csv)}")
+    except ValueError as e:
+        print(f"  Error: {e}")
+    
+    csv_data_one_line = "item1,item2,item3".encode('utf-8')
+    try:
+        print(f"\n  Testing CSV deserialization (one line):")
+        deserialized_csv_one_line = deserialize_object(csv_data_one_line, "csv")
+        print(f"  Input (bytes): {csv_data_one_line}")
+        print(f"  Output: {deserialized_csv_one_line}, Type: {type(deserialized_csv_one_line)}")
+    except ValueError as e:
+        print(f"  Error: {e}")
+
+
+    print("\nTesting unsupported format:")
+    try:
+        deserialize_object(b"<data></data>", "xml")
+    except ValueError as e:
+        print(f"  Input (bytes): b'<data></data>', Format: 'xml'")
+        print(f"  Error: {e}")
+
+    print("\nTesting disallowed (but potentially valid) format like pickle:")
+    # import pickle
+    # pickle_data = pickle.dumps({"danger": "zone"})
+    # try:
+    #     deserialize_object(pickle_data, "pickle")
+    # except ValueError as e:
+    #     print(f"  Input (bytes): (pickle data), Format: 'pickle'")
+    #     print(f"  Error: {e}")
+    # Note: Pickle example is commented out as it's an insecure format
+    # and `pickle` module is not imported by default to avoid accidental use.
+    # To run this test, you would uncomment and import pickle.
+    # The function should correctly raise ValueError for "pickle".
+    try:
+        deserialize_object(b"some data", "pickle")
+    except ValueError as e:
+        print(f"  Input (bytes): b'some data', Format: 'pickle'")
+        print(f"  Error: {e}")

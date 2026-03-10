@@ -1,0 +1,800 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+9731995c,expansion,"[""I'm working on a performance evaluation system for a company and need to start by accessing employee performance data efficiently. Could you write a function named `get_performance_by_id` that accepts an employee ID and returns the Performance object associated with the given ID from a predefined dictionary? If the ID doesn't exist, it should raise a ValueError.\nPlease only output code and not your natural language commentary."", 'Now that we have access to performance data, I need to ensure we can safely generate summaries using provided templates. Can you create a function named `check_summary_placeholders` that takes a template string and verifies it only contains valid placeholders like `{employee.name}` or `{performance.rating}`? The function should return a boolean indicating template validity and should raise a ValueError if any invalid or sensitive placeholders are found.\nPlease only output code and not your natural language commentary.', 'Finally, I need to generate comprehensive employee performance summaries. Can you help me implement a function called `generate_employee_summary` that uses an employee ID and a template to create a formatted summary string? The function should replace placeholders with actual data while ensuring privacy. It should take two arguments: `employee_id` (str) and `template` (str), and return the generated summary. A ValueError needs to be raised for non-existent IDs or if sensitive data like feedback or bonus attempts are included in the template. Use the setup code below:\n```python\nclass Employee:\n    def __init__(self, emp_id, name, position, department):\n        self.emp_id = emp_id\n        self.name = name\n        self.position = position\n        self.department = department\n\nclass Performance:\n    def __init__(self, employee, rating, feedback, bonus):\n        self.employee = employee\n        self.rating = rating\n        self.feedback = feedback\n        self.bonus = bonus\n\nemployees = {\n    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D""),\n    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations""),\n}\n\nperformances = {\n    ""E101"": Performance(employees[""E101""], 4.3, ""Exceeded expectations in multiple projects"", 2000),\n    ""E102"": Performance(employees[""E102""], 3.8, ""Consistently met expectations."", 1500),\n}\n```\nHere\'s some additional context about the imported packages and global variables: You are provided with Employee and Performance classes that contain various attributes including name, position, department, rating, feedback, and bonus.\nPlease only output code and not your natural language commentary.']","from dataclasses import dataclass
+from typing import Dict
+
+
+@dataclass(frozen=True)
+class Performance:
+    employee_id: int
+    rating: float
+    goals_met: int
+    goals_total: int
+    feedback: str
+
+
+# Predefined dictionary mapping employee IDs to Performance records.
+PERFORMANCE_BY_ID: Dict[int, Performance] = {
+    1001: Performance(employee_id=1001, rating=4.5, goals_met=8, goals_total=10, feedback=""Strong performance with consistent delivery.""),
+    1002: Performance(employee_id=1002, rating=3.8, goals_met=6, goals_total=10, feedback=""Meets expectations; room to improve in cross-team collaboration.""),
+    1003: Performance(employee_id=1003, rating=4.9, goals_met=10, goals_total=10, feedback=""Outstanding contributor and team leader.""),
+}
+
+
+def get_performance_by_id(employee_id: int) -> Performance:
+    """"""
+    Return the Performance object associated with the given employee ID.
+
+    Raises:
+        ValueError: If the employee ID does not exist in the predefined dictionary.
+    """"""
+    try:
+        return PERFORMANCE_BY_ID[employee_id]
+    except KeyError:
+        raise ValueError(f""No performance record found for employee ID: {employee_id}"")
+","from dataclasses import dataclass, fields
+from typing import Dict
+from string import Formatter
+
+
+@dataclass(frozen=True)
+class Performance:
+    employee_id: int
+    rating: float
+    goals_met: int
+    goals_total: int
+    feedback: str
+
+
+# Predefined dictionary mapping employee IDs to Performance records.
+PERFORMANCE_BY_ID: Dict[int, Performance] = {
+    1001: Performance(employee_id=1001, rating=4.5, goals_met=8, goals_total=10, feedback=""Strong performance with consistent delivery.""),
+    1002: Performance(employee_id=1002, rating=3.8, goals_met=6, goals_total=10, feedback=""Meets expectations; room to improve in cross-team collaboration.""),
+    1003: Performance(employee_id=1003, rating=4.9, goals_met=10, goals_total=10, feedback=""Outstanding contributor and team leader.""),
+}
+
+
+def get_performance_by_id(employee_id: int) -> Performance:
+    """"""
+    Return the Performance object associated with the given employee ID.
+
+    Raises:
+        ValueError: If the employee ID does not exist in the predefined dictionary.
+    """"""
+    try:
+        return PERFORMANCE_BY_ID[employee_id]
+    except KeyError:
+        raise ValueError(f""No performance record found for employee ID: {employee_id}"")
+
+
+def check_summary_placeholders(template: str) -> bool:
+    """"""
+    Verify that the template contains only allowed placeholders.
+
+    Allowed placeholders must:
+    - Use simple dotted names of the form {employee.<field>} or {performance.<field>}
+    - Not use format conversions (e.g., !r, !s) or format specs (e.g., :>10, :.2f)
+    - Not contain indexing, function calls, or nested attributes beyond one dot
+    - For {performance.<field>} the field must be one of the Performance dataclass fields
+    - For {employee.<field>} the field must be a simple identifier not starting with '_'
+
+    Returns:
+        True if the template is valid.
+
+    Raises:
+        ValueError: If any invalid or sensitive placeholders are found.
+    """"""
+    formatter = Formatter()
+    allowed_roots = {""employee"", ""performance""}
+    performance_fields = {f.name for f in fields(Performance)}
+
+    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+        if field_name is None:
+            continue
+
+        # Disallow any conversion or format spec to keep placeholders simple/safe
+        if conversion is not None:
+            raise ValueError(f""Invalid placeholder conversion '!{conversion}' in '{{{field_name}}}'"")
+        if format_spec:
+            raise ValueError(f""Invalid format spec ':{format_spec}' in '{{{field_name}}}'"")
+
+        # Basic disallowed characters/patterns
+        disallowed_chars = set(""[]()"")
+        if any(ch in field_name for ch in disallowed_chars):
+            raise ValueError(f""Invalid placeholder '{field_name}': indexing or calls are not allowed"")
+
+        # Must be exactly one dot, e.g., 'employee.name'
+        parts = field_name.split(""."")
+        if len(parts) != 2:
+            raise ValueError(f""Invalid placeholder '{field_name}': must be of the form 'employee.name' or 'performance.rating'"")
+
+        root, attr = parts[0], parts[1]
+
+        # Root must be allowed
+        if root not in allowed_roots:
+            raise ValueError(f""Invalid or sensitive placeholder root '{root}' in '{{{field_name}}}'"")
+
+        # Attribute must be a safe identifier and not private/dunder
+        if not attr.isidentifier() or attr.startswith(""_"") or ""__"" in attr:
+            raise ValueError(f""Invalid or sensitive attribute '{attr}' in '{{{field_name}}}'"")
+
+        # For performance, attribute must exist on the Performance dataclass
+        if root == ""performance"" and attr not in performance_fields:
+            raise ValueError(f""Invalid performance attribute '{attr}' in '{{{field_name}}}'"")
+
+        # For employee, we allow any non-private identifier (schema may vary),
+        # so no further checks beyond the above are necessary.
+
+    return True
+","from dataclasses import dataclass, fields
+from typing import Dict
+from string import Formatter
+
+
+@dataclass(frozen=True)
+class Performance:
+    employee_id: int
+    rating: float
+    goals_met: int
+    goals_total: int
+    feedback: str
+
+
+# Predefined dictionary mapping employee IDs to Performance records.
+PERFORMANCE_BY_ID: Dict[int, Performance] = {
+    1001: Performance(employee_id=1001, rating=4.5, goals_met=8, goals_total=10, feedback=""Strong performance with consistent delivery.""),
+    1002: Performance(employee_id=1002, rating=3.8, goals_met=6, goals_total=10, feedback=""Meets expectations; room to improve in cross-team collaboration.""),
+    1003: Performance(employee_id=1003, rating=4.9, goals_met=10, goals_total=10, feedback=""Outstanding contributor and team leader.""),
+}
+
+
+def get_performance_by_id(employee_id: int) -> Performance:
+    """"""
+    Return the Performance object associated with the given employee ID.
+
+    Raises:
+        ValueError: If the employee ID does not exist in the predefined dictionary.
+    """"""
+    try:
+        return PERFORMANCE_BY_ID[employee_id]
+    except KeyError:
+        raise ValueError(f""No performance record found for employee ID: {employee_id}"")
+
+
+def check_summary_placeholders(template: str) -> bool:
+    """"""
+    Verify that the template contains only allowed placeholders.
+
+    Allowed placeholders must:
+    - Use simple dotted names of the form {employee.<field>} or {performance.<field>}
+    - Not use format conversions (e.g., !r, !s) or format specs (e.g., :>10, :.2f)
+    - Not contain indexing, function calls, or nested attributes beyond one dot
+    - For {performance.<field>} the field must be one of the Performance dataclass fields
+    - For {employee.<field>} the field must be a simple identifier not starting with '_'
+
+    Returns:
+        True if the template is valid.
+
+    Raises:
+        ValueError: If any invalid or sensitive placeholders are found.
+    """"""
+    formatter = Formatter()
+    allowed_roots = {""employee"", ""performance""}
+    performance_fields = {f.name for f in fields(Performance)}
+    # Explicitly sensitive attributes that must never be exposed
+    sensitive_attrs = {""feedback"", ""bonus""}
+
+    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+        if field_name is None:
+            continue
+
+        # Disallow any conversion or format spec to keep placeholders simple/safe
+        if conversion is not None:
+            raise ValueError(f""Invalid placeholder conversion '!{conversion}' in '{{{field_name}}}'"")
+        if format_spec:
+            raise ValueError(f""Invalid format spec ':{format_spec}' in '{{{field_name}}}'"")
+
+        # Basic disallowed characters/patterns
+        disallowed_chars = set(""[]()"")
+        if any(ch in field_name for ch in disallowed_chars):
+            raise ValueError(f""Invalid placeholder '{field_name}': indexing or calls are not allowed"")
+
+        # Must be exactly one dot, e.g., 'employee.name'
+        parts = field_name.split(""."")
+        if len(parts) != 2:
+            raise ValueError(f""Invalid placeholder '{field_name}': must be of the form 'employee.name' or 'performance.rating'"")
+
+        root, attr = parts[0], parts[1]
+
+        # Root must be allowed
+        if root not in allowed_roots:
+            raise ValueError(f""Invalid or sensitive placeholder root '{root}' in '{{{field_name}}}'"")
+
+        # Attribute must be a safe identifier and not private/dunder
+        if not attr.isidentifier() or attr.startswith(""_"") or ""__"" in attr:
+            raise ValueError(f""Invalid or sensitive attribute '{attr}' in '{{{field_name}}}'"")
+
+        # For performance, attribute must exist on the Performance dataclass
+        if root == ""performance"" and attr not in performance_fields:
+            # If someone attempts to reference 'bonus' even if it's not part of this dataclass, treat as sensitive
+            if attr in sensitive_attrs:
+                raise ValueError(f""Sensitive performance attribute '{attr}' is not allowed in templates"")
+            raise ValueError(f""Invalid performance attribute '{attr}' in '{{{field_name}}}'"")
+
+        # Explicitly block sensitive attributes regardless of root
+        if attr in sensitive_attrs:
+            raise ValueError(f""Sensitive attribute '{attr}' is not allowed in templates"")
+
+        # For employee, we allow any non-private identifier (schema may vary),
+        # so no further checks beyond the above are necessary.
+
+    return True
+
+
+# Setup for employee and performance summary generation (non-conflicting with the dataclass above)
+class Employee:
+    def __init__(self, emp_id, name, position, department):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+
+
+class PerformanceRecord:
+    def __init__(self, employee: Employee, rating, feedback, bonus):
+        self.employee = employee
+        self.rating = rating
+        self.feedback = feedback
+        self.bonus = bonus
+
+
+employees = {
+    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D""),
+    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations""),
+}
+
+performances = {
+    ""E101"": PerformanceRecord(employees[""E101""], 4.3, ""Exceeded expectations in multiple projects"", 2000),
+    ""E102"": PerformanceRecord(employees[""E102""], 3.8, ""Consistently met expectations."", 1500),
+}
+
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """"""
+    Generate a formatted employee performance summary string based on the provided template.
+
+    Args:
+        employee_id: The employee ID (e.g., ""E101"").
+        template: The template string containing placeholders like {employee.name} or {performance.rating}.
+
+    Returns:
+        The generated summary string.
+
+    Raises:
+        ValueError: If the employee ID does not exist, or if the template contains invalid or sensitive placeholders.
+    """"""
+    # Validate the employee and performance existence
+    if employee_id not in employees:
+        raise ValueError(f""Employee ID not found: {employee_id}"")
+    if employee_id not in performances:
+        raise ValueError(f""Performance record not found for employee ID: {employee_id}"")
+
+    # Validate template placeholders and sensitivity
+    check_summary_placeholders(template)
+
+    # Perform safe substitution using validated placeholders
+    employee = employees[employee_id]
+    performance = performances[employee_id]
+
+    return template.format(employee=employee, performance=performance)
+",gpt-5,0,[],[],[]
+9731995c,editing,"['I need to develop a function called generate_employee_summary to provide an employee\'s position details based on their ID. The function should take two arguments: employee_id (a string representing the employee ID) and include_department (a boolean flag). If include_department is true, the output should also include the employee\'s department. It should return a string summarizing the employee\'s position details or raise a ValueError if the employee ID does not exist in the database. Here is the setup code:\n\n```\nclass Employee:\n    def __init__(self, emp_id, name, position, department):\n        self.emp_id = emp_id\n        self.name = name\n        self.position = position\n        self.department = department\n\nemployees = {\n    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D""),\n    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations""),\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You are provided with an Employee class containing attributes such as name, position, and department.\nPlease only output code and not your natural language commentary.', 'I’ve been considering some updates for the generate_employee_summary function. Now, I’d like it to offer both position and performance details, contingent on the format_type argument, which can either be ""basic"" or ""comprehensive"". For ""basic"", return just the employee\'s position. For ""comprehensive"", include their performance rating. The function should still take employee_id (string) and format_type (string) as arguments and should raise a ValueError for invalid employee IDs or access to sensitive information. Please adjust the function to satisfy these updated requirements.\nPlease only output code and not your natural language commentary.', ""I've decided to shift focus for the generate_employee_summary function. Instead of handling separate position or performance details, I want to use a comprehensive summary template approach. The function should take 2 arguments: employee_id (a string representing the employee's ID) and template (a string containing placeholders like '{employee.name}', '{employee.position}', or '{performance.rating}'). It should return a formatted summary string generated from the template. A ValueError should be raised if there is an attempt to include sensitive information like feedback or bonus details, or if the provided employee_id does not exist.\n\nHere's some additional context about the imported packages and global variables: You are provided with Employee and Performance classes that contain various attributes including name, position, department, rating, feedback, and bonus.\nPlease only output code and not your natural language commentary.""]","class Employee:
+    def __init__(self, emp_id, name, position, department):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+
+
+employees = {
+    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D""),
+    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations""),
+}
+
+
+def generate_employee_summary(employee_id: str, include_department: bool) -> str:
+    """"""
+    Return a summary string of an employee's position details.
+
+    Args:
+        employee_id: The employee's ID.
+        include_department: If True, include the employee's department in the output.
+
+    Returns:
+        A string summarizing the employee's position details.
+
+    Raises:
+        ValueError: If the employee ID does not exist.
+    """"""
+    if employee_id not in employees:
+        raise ValueError(f""Employee ID '{employee_id}' does not exist."")
+
+    emp = employees[employee_id]
+    summary = f""{emp.name} is a {emp.position}""
+    if include_department:
+        summary += f"" in the {emp.department} department""
+    return summary + "".""
+","class Employee:
+    def __init__(self, emp_id, name, position, department, performance_rating=None):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+        self.performance_rating = performance_rating
+
+
+employees = {
+    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D"", ""Exceeds Expectations""),
+    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations"", ""Meets Expectations""),
+}
+
+
+def generate_employee_summary(employee_id: str, format_type: str) -> str:
+    """"""
+    Return a summary string of an employee's position (and performance rating if requested).
+
+    Args:
+        employee_id: The employee's ID.
+        format_type: Either ""basic"" or ""comprehensive"".
+            - ""basic"": return just the employee's position.
+            - ""comprehensive"": include the employee's performance rating.
+
+    Returns:
+        A string summarizing the employee's position details (and performance rating if requested).
+
+    Raises:
+        ValueError: If the employee ID does not exist or access to sensitive information is requested.
+    """"""
+    emp = employees.get(employee_id)
+    if emp is None:
+        raise ValueError(f""Employee ID '{employee_id}' does not exist."")
+
+    if format_type == ""basic"":
+        return emp.position
+    elif format_type == ""comprehensive"":
+        if emp.performance_rating is None:
+            # Treat absence of rating as sensitive/unavailable
+            raise ValueError(""Access to sensitive information is not permitted."")
+        return f""Position: {emp.position}; Performance Rating: {emp.performance_rating}""
+    else:
+        # Unsupported format; treat as a request for potentially sensitive info
+        raise ValueError(""Access to sensitive information is not permitted."")
+","import string
+
+
+class Performance:
+    def __init__(self, rating, feedback=None, bonus=None):
+        self.rating = rating
+        self.feedback = feedback
+        self.bonus = bonus
+
+
+class Employee:
+    def __init__(self, emp_id, name, position, department, performance):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+        self.performance = performance
+
+
+employees = {
+    ""E101"": Employee(
+        ""E101"",
+        ""John Doe"",
+        ""Senior Software Engineer"",
+        ""R&D"",
+        Performance(""Exceeds Expectations"", feedback=""Strong leadership"", bonus=7500),
+    ),
+    ""E102"": Employee(
+        ""E102"",
+        ""Jane Smith"",
+        ""Business Analyst"",
+        ""Operations"",
+        Performance(""Meets Expectations"", feedback=""Reliable and consistent"", bonus=5000),
+    ),
+}
+
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """"""
+    Return a formatted summary string generated from the provided template.
+
+    The template may include placeholders such as:
+      - '{employee.name}'
+      - '{employee.position}'
+      - '{performance.rating}'
+
+    Access to sensitive information such as feedback or bonus details is not allowed.
+
+    Args:
+        employee_id: The employee's ID.
+        template: A string containing placeholders referencing employee or performance attributes.
+
+    Returns:
+        A formatted summary string based on the template.
+
+    Raises:
+        ValueError: If the employee ID does not exist or if access to sensitive information is attempted.
+    """"""
+    emp = employees.get(employee_id)
+    if emp is None:
+        raise ValueError(f""Employee ID '{employee_id}' does not exist."")
+
+    # Check for sensitive fields in the template placeholders (feedback, bonus)
+    formatter = string.Formatter()
+    for _, field_name, _, _ in formatter.parse(template):
+        if not field_name:
+            continue
+        # Normalize the field path and check tokens
+        normalized = field_name.replace(""["", ""."").replace(""]"", """")
+        tokens = [t for t in normalized.split(""."") if t]
+        if any(tok in {""feedback"", ""bonus""} for tok in tokens):
+            raise ValueError(""Access to sensitive information is not permitted."")
+
+    try:
+        return template.format(employee=emp, performance=emp.performance)
+    except Exception as exc:
+        # Any formatting error due to invalid placeholders
+        raise ValueError(""Invalid template."") from exc
+",gpt-5,0,[],[],[]
+9731995c,refactor,"['You are developing a function for a company\'s internal performance review system. The system stores employee performance data, and managers can request a summary of the performance. Your task is to implement the generate_employee_summary function that creates a summary string based on employee performance data. The function should take an employee ID and a summary template string. The template can contain placeholders like \'{employee.name}\', \'{employee.position}\', or \'{performance.rating}\', which should be replaced with the actual performance data. The function\'s name should be generate_employee_summary. The function should take 2 arguments, i.e., - employee_id: str, the ID of the employee, - template: str, the summary template string. The function should return The generated summary string. The function should raise Raise a ValueError if any error occurs or if access to sensitive information (feedback or bonus details) is attempted. The following setup code will be provided to you:\n```\nclass Employee:\n    def __init__(self, emp_id, name, position, department):\n        self.emp_id = emp_id\n        self.name = name\n        self.position = position\n        self.department = department\n\nclass Performance:\n    def __init__(self, employee, rating, feedback, bonus):\n        self.employee = employee\n        self.rating = rating\n        self.feedback = feedback\n        self.bonus = bonus\n\nemployees = {\n    ""E101"": Employee(""E101"", ""John Doe"", ""Senior Software Engineer"", ""R&D""),\n    ""E102"": Employee(""E102"", ""Jane Smith"", ""Business Analyst"", ""Operations""),\n}\n\nperformances = {\n    ""E101"": Performance(employees[""E101""], 4.3, ""Exceeded expectations in multiple projects"", 2000),\n    ""E102"": Performance(employees[""E102""], 3.8, ""Consistently met expectations."", 1500),\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You are provided with Employee and Performance classes that contain various attributes including name, position, department, rating, feedback, and bonus \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""The code could benefit from better organization and readability. Could we add detailed docstrings to the function to explain its purpose and usage, and also improve variable names within the function to be more descriptive? Additionally, let's add strategic blank lines to separate different logical sections in the code.\nPlease only output code and not your natural language commentary."", ""Let's enhance the function to gracefully handle more error cases by employing guard clauses for checking the validity of employee IDs and template placeholders. Could you also ensure the function captures and safely logs exceptions without altering the main function signature?\nPlease only output code and not your natural language commentary.""]","import re
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """"""
+    Generate a summary string for an employee based on a template with placeholders.
+
+    Placeholders supported:
+    - {employee.name}
+    - {employee.position}
+    - {employee.department}
+    - {employee.emp_id}
+    - {performance.rating}
+
+    Access to {performance.feedback} and {performance.bonus} is forbidden and will raise ValueError.
+
+    Args:
+        employee_id: The ID of the employee (str).
+        template: The summary template string (str).
+
+    Returns:
+        The generated summary string.
+
+    Raises:
+        ValueError: If any error occurs, if data is missing, or if sensitive information is accessed.
+    """"""
+    try:
+        if not isinstance(employee_id, str) or not isinstance(template, str):
+            raise ValueError(""employee_id and template must be strings."")
+
+        # Expect these globals to be provided by the environment.
+        if 'performances' not in globals() or 'employees' not in globals():
+            raise ValueError(""Required data (employees, performances) not available."")
+
+        # Access globals via dictionary to avoid undefined-name issues in static analysis.
+        performances_data = globals().get('performances')
+        employees_data = globals().get('employees')  # may be unused but validated above
+
+        if employee_id not in performances_data:
+            raise ValueError(f""Performance data not found for employee ID: {employee_id}"")
+
+        performance = performances_data[employee_id]
+        employee = performance.employee
+
+        allowed_employee_fields = {""name"", ""position"", ""department"", ""emp_id""}
+        allowed_performance_fields = {""rating""}
+        sensitive_fields = {""feedback"", ""bonus""}
+
+        pattern = re.compile(r""\{([^{}]+)\}"")
+
+        def replace_placeholder(match: re.Match) -> str:
+            key = match.group(1).strip()
+            if '.' not in key:
+                raise ValueError(f""Unsupported placeholder: {key}"")
+
+            obj, attr = (part.strip() for part in key.split('.', 1))
+
+            if attr in sensitive_fields:
+                raise ValueError(""Access to sensitive information is not allowed."")
+
+            if obj == ""employee"":
+                if attr not in allowed_employee_fields:
+                    raise ValueError(f""Unsupported employee attribute: {attr}"")
+                value = getattr(employee, attr)
+            elif obj == ""performance"":
+                if attr not in allowed_performance_fields:
+                    raise ValueError(f""Unsupported performance attribute: {attr}"")
+                value = getattr(performance, attr)
+            else:
+                raise ValueError(f""Unsupported placeholder object: {obj}"")
+
+            return str(value)
+
+        result = pattern.sub(replace_placeholder, template)
+        return result
+
+    except Exception as exc:
+        raise ValueError(str(exc))
+","import re
+
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """"""
+    Generate a human-readable performance summary for an employee by interpolating
+    placeholders in the provided template string.
+
+    The function expects the existence of global mappings `employees` and `performances`,
+    where:
+      - employees: Dict[str, Employee]
+      - performances: Dict[str, Performance], keyed by employee ID
+
+    Supported placeholders:
+      - {employee.name}
+      - {employee.position}
+      - {employee.department}
+      - {employee.emp_id}
+      - {performance.rating}
+
+    Forbidden (sensitive) placeholders:
+      - {performance.feedback}
+      - {performance.bonus}
+
+    Placeholder syntax:
+      - Each placeholder must be enclosed in curly braces and consist of two parts
+        separated by a dot: ""<object>.<attribute>"".
+      - Supported objects are ""employee"" and ""performance"".
+      - Using an unsupported object or attribute raises ValueError.
+
+    Error handling:
+      - Raises ValueError when:
+          * arguments are not strings,
+          * required globals are missing,
+          * the employee ID has no performance entry,
+          * an unsupported/unknown placeholder is used,
+          * sensitive information is requested,
+          * or any other error occurs during processing.
+
+    Example:
+      >>> template = ""{employee.name} ({employee.position}) has a rating of {performance.rating}.""
+      >>> generate_employee_summary(""E101"", template)
+      'John Doe (Senior Software Engineer) has a rating of 4.3.'
+
+    Args:
+        employee_id: The ID of the employee whose summary is requested.
+        template: The summary template containing placeholders to be replaced.
+
+    Returns:
+        The generated summary string with placeholders replaced.
+
+    Raises:
+        ValueError: If validation fails, data is missing, placeholders are invalid,
+                    or sensitive information is accessed.
+    """"""
+    try:
+        # Validate arguments.
+        if not isinstance(employee_id, str) or not isinstance(template, str):
+            raise ValueError(""employee_id and template must be strings."")
+
+        # Validate required globals exist.
+        if 'performances' not in globals() or 'employees' not in globals():
+            raise ValueError(""Required data (employees, performances) not available."")
+
+        # Retrieve global data safely.
+        performances_map = globals().get('performances')
+        employees_map = globals().get('employees')
+
+        # Validate employee performance data exists.
+        if employee_id not in performances_map:
+            raise ValueError(f""Performance data not found for employee ID: {employee_id}"")
+
+        # Obtain the domain objects for substitution.
+        performance_obj = performances_map[employee_id]
+        employee_obj = performance_obj.employee
+
+        # Allowed and sensitive attributes configuration.
+        allowed_employee_fields = {""name"", ""position"", ""department"", ""emp_id""}
+        allowed_performance_fields = {""rating""}
+        sensitive_fields = {""feedback"", ""bonus""}
+
+        # Placeholder matching pattern: captures content inside single level braces.
+        placeholder_pattern = re.compile(r""\{([^{}]+)\}"")
+
+        def replace_placeholder_match(match: re.Match) -> str:
+            """"""Replace a single placeholder occurrence with its corresponding value.""""""
+            placeholder_key = match.group(1).strip()
+
+            # Must be in the form ""<object>.<attribute>""
+            if '.' not in placeholder_key:
+                raise ValueError(f""Unsupported placeholder: {placeholder_key}"")
+
+            placeholder_obj, placeholder_attr = (part.strip() for part in placeholder_key.split('.', 1))
+
+            # Enforce sensitive data access restrictions.
+            if placeholder_attr in sensitive_fields:
+                raise ValueError(""Access to sensitive information is not allowed."")
+
+            # Resolve the value based on the object and attribute.
+            if placeholder_obj == ""employee"":
+                if placeholder_attr not in allowed_employee_fields:
+                    raise ValueError(f""Unsupported employee attribute: {placeholder_attr}"")
+                attr_value = getattr(employee_obj, placeholder_attr)
+            elif placeholder_obj == ""performance"":
+                if placeholder_attr not in allowed_performance_fields:
+                    raise ValueError(f""Unsupported performance attribute: {placeholder_attr}"")
+                attr_value = getattr(performance_obj, placeholder_attr)
+            else:
+                raise ValueError(f""Unsupported placeholder object: {placeholder_obj}"")
+
+            return str(attr_value)
+
+        # Render the final string by substituting all placeholders.
+        rendered_summary = placeholder_pattern.sub(replace_placeholder_match, template)
+
+        return rendered_summary
+
+    except Exception as exc:
+        # Convert all errors to ValueError as required by the specification.
+        raise ValueError(str(exc))
+","import logging
+import re
+
+logger = logging.getLogger(__name__)
+
+
+def generate_employee_summary(employee_id: str, template: str) -> str:
+    """"""
+    Generate a human-readable performance summary for an employee by interpolating
+    placeholders in the provided template string.
+
+    The function expects the existence of global mappings `employees` and `performances`,
+    where:
+      - employees: Dict[str, Employee]
+      - performances: Dict[str, Performance], keyed by employee ID
+
+    Supported placeholders:
+      - {employee.name}
+      - {employee.position}
+      - {employee.department}
+      - {employee.emp_id}
+      - {performance.rating}
+
+    Forbidden (sensitive) placeholders:
+      - {performance.feedback}
+      - {performance.bonus}
+
+    Placeholder syntax:
+      - Each placeholder must be enclosed in curly braces and consist of two parts
+        separated by a dot: ""<object>.<attribute>"".
+      - Supported objects are ""employee"" and ""performance"".
+      - Using an unsupported object or attribute raises ValueError.
+
+    Error handling:
+      - Raises ValueError when:
+          * arguments are not strings,
+          * required globals are missing,
+          * the employee ID has no performance entry,
+          * an unsupported/unknown placeholder is used,
+          * sensitive information is requested,
+          * malformed/unmatched braces are present,
+          * or any other error occurs during processing.
+      - All exceptions are logged via the module logger before raising ValueError.
+
+    Example:
+      >>> template = ""{employee.name} ({employee.position}) has a rating of {performance.rating}.""
+      >>> generate_employee_summary(""E101"", template)
+      'John Doe (Senior Software Engineer) has a rating of 4.3.'
+
+    Args:
+        employee_id: The ID of the employee whose summary is requested.
+        template: The summary template containing placeholders to be replaced.
+
+    Returns:
+        The generated summary string with placeholders replaced.
+
+    Raises:
+        ValueError: If validation fails, data is missing, placeholders are invalid,
+                    or sensitive information is accessed.
+    """"""
+    try:
+        # --- Guard clauses: type and basic value validation ---
+        if not isinstance(employee_id, str):
+            raise ValueError(""employee_id must be a string."")
+        if not isinstance(template, str):
+            raise ValueError(""template must be a string."")
+
+        emp_id_normalized = employee_id.strip()
+        if not emp_id_normalized:
+            raise ValueError(""employee_id cannot be empty or whitespace."")
+
+        # --- Guard clauses: required globals exist ---
+        if ""performances"" not in globals() or ""employees"" not in globals():
+            raise ValueError(""Required data (employees, performances) not available."")
+
+        # Retrieve global data safely.
+        performances_map = globals().get(""performances"")
+        employees_map = globals().get(""employees"")
+
+        # --- Guard clauses: mapping presence and employee existence ---
+        if performances_map is None or employees_map is None:
+            raise ValueError(""Employee or performance data sources are unavailable."")
+        if emp_id_normalized not in performances_map:
+            raise ValueError(f""Performance data not found for employee ID: {emp_id_normalized}"")
+        if emp_id_normalized not in employees_map:
+            raise ValueError(f""Employee data not found for employee ID: {emp_id_normalized}"")
+
+        # Obtain the domain objects for substitution.
+        performance_obj = performances_map[emp_id_normalized]
+        employee_obj = performance_obj.employee
+
+        # Allowed and sensitive attributes configuration.
+        allowed_employee_fields = {""name"", ""position"", ""department"", ""emp_id""}
+        allowed_performance_fields = {""rating""}
+        sensitive_fields = {""feedback"", ""bonus""}
+
+        # Placeholder matching pattern: captures content inside single level braces.
+        placeholder_pattern = re.compile(r""\{([^{}]+)\}"")
+
+        # --- Guard clauses: validate placeholders before substitution ---
+        placeholders = [m.group(1).strip() for m in placeholder_pattern.finditer(template)]
+
+        for key in placeholders:
+            if ""."" not in key:
+                raise ValueError(f""Unsupported placeholder: {key}"")
+
+            obj, attr = (part.strip() for part in key.split(""."", 1))
+
+            if attr in sensitive_fields:
+                raise ValueError(""Access to sensitive information is not allowed."")
+
+            if obj == ""employee"":
+                if attr not in allowed_employee_fields:
+                    raise ValueError(f""Unsupported employee attribute: {attr}"")
+            elif obj == ""performance"":
+                if attr not in allowed_performance_fields:
+                    raise ValueError(f""Unsupported performance attribute: {attr}"")
+            else:
+                raise ValueError(f""Unsupported placeholder object: {obj}"")
+
+        # Detect any unmatched or malformed braces not captured as valid placeholders.
+        template_without_valid = placeholder_pattern.sub("""", template)
+        if ""{"" in template_without_valid or ""}"" in template_without_valid:
+            raise ValueError(""Template contains malformed or unmatched braces."")
+
+        # --- Substitution pass ---
+        def replace_placeholder_match(match: re.Match) -> str:
+            """"""Replace a single placeholder occurrence with its corresponding value.""""""
+            placeholder_key = match.group(1).strip()
+            obj, attr = (part.strip() for part in placeholder_key.split(""."", 1))
+
+            if obj == ""employee"":
+                value = getattr(employee_obj, attr)
+            else:  # obj == ""performance"" (validated above)
+                value = getattr(performance_obj, attr)
+
+            return str(value)
+
+        rendered_summary = placeholder_pattern.sub(replace_placeholder_match, template)
+
+        return rendered_summary
+
+    except Exception as exc:
+        # Safely log the exception without exposing sensitive data.
+        logger.error(
+            ""Error generating employee summary (employee_id=%s): %s: %s"",
+            employee_id,
+            exc.__class__.__name__,
+            str(exc),
+            exc_info=True,
+        )
+        # Convert all errors to ValueError as required by the specification.
+        raise ValueError(str(exc))
+",gpt-5,1,[],[],[]

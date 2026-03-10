@@ -1,0 +1,71 @@
+from string import Formatter
+
+class User:
+    def __init__(self, name, email, address, credit_card):
+        self.name = name
+        self.email = email
+        self.address = address
+        self.credit_card = credit_card
+
+class Purchase:  # Corresponds to "Order" in the problem description's context
+    def __init__(self, id, client, items, total, payment_method):
+        self.id = id
+        self.client = client  # This is the User object
+        self.items = items
+        self.total = total
+        self.payment_method = payment_method
+
+purchases = {
+    "ORD002": Purchase("ORD002",
+                       User("John Smith", "john.smith@example.com", "456 Park Ave, Metropolis, USA", "9876-5432-1098-7654"),
+                       ["Item A", "Item B"],
+                       150.50,
+                       "Credit Card")
+}
+
+def create_user_receipt(order_id: str, template: str) -> str:
+    """
+    Generates a receipt for a given order ID using a template string.
+
+    Args:
+        order_id: The unique identifier for the order.
+        template: The pattern string used for generating the receipt.
+                  Placeholders like '{customer.name}' and '{order.total}' are supported.
+
+    Returns:
+        The formatted receipt string.
+
+    Raises:
+        ValueError: If the order ID is invalid or if the template attempts
+                    to access restricted customer data (e.g., email, address, credit_card).
+        AttributeError, KeyError: If the template contains other malformed placeholders
+                                  (e.g., referencing non-existent attributes on customer/order objects).
+    """
+    if order_id not in purchases:
+        raise ValueError(f"Invalid order ID: {order_id}")
+
+    purchase_instance = purchases[order_id]
+    customer_instance = purchase_instance.client
+
+    # Define restricted customer attributes. Accessing these via the template is forbidden.
+    restricted_customer_attributes = {"email", "address", "credit_card"}
+
+    # Parse the template to check for attempts to access restricted data.
+    fmt = Formatter()
+    for _, field_name, _, _ in fmt.parse(template):
+        if field_name:
+            # field_name could be 'customer.name', 'order.total', 'customer.email', etc.
+            # We are interested in fields like 'customer.restricted_attr'.
+            if '.' in field_name:
+                obj_name, attr_name = field_name.split('.', 1)
+                
+                # Check for restricted customer attributes
+                if obj_name == "customer" and attr_name in restricted_customer_attributes:
+                    raise ValueError(f"Attempt to access restricted customer data: customer.{attr_name}")
+
+    # If no restricted fields are found, proceed with formatting.
+    # The template string uses {order...} and {customer...}
+    # We pass the purchase_instance as 'order' and customer_instance as 'customer'.
+    # Errors like AttributeError (for non-existent attributes) or KeyError (for bad keys)
+    # will propagate if they are not related to restricted data access.
+    return template.format(order=purchase_instance, customer=customer_instance)

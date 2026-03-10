@@ -1,0 +1,33 @@
+import re
+from typing import Pattern, Optional
+
+# Precompile the email validation regex pattern
+EMAIL_REGEX: Pattern[str] = re.compile(
+    r"^(?=.{1,254}$)(?=.{1,64}@)"
+    r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$"
+)
+
+def is_valid_email(email: str) -> bool:
+    """
+    Validate an email address format using a regular expression.
+
+    Args:
+        email: The email address string to validate.
+
+    Returns:
+        True if the email is correctly formatted, False otherwise.
+    """
+    if not isinstance(email, str):
+        return False
+    return EMAIL_REGEX.match(email) is not None
+
+def get_email_username(email: str) -> Optional[str]:
+    """
+    Extract the username part (before the '@') from a valid email address.
+    Returns None if the email is not valid.
+    """
+    if not is_valid_email(email):
+        return None
+    match = re.match(r"^([^@]+)@", email)
+    return match.group(1) if match else None

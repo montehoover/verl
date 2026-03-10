@@ -1,0 +1,208 @@
+import ast
+import math
+
+# --- Start of configuration for safe evaluation ---
+
+# Allowed mathematical constants and functions for eval
+# This dictionary maps names that can be used in the expression string
+# to their actual Python implementations.
+_ALLOWED_NAMES = {
+    # Constants from math module
+    "e": math.e,
+    "pi": math.pi,
+    "tau": math.tau,  # Available in Python 3.2+
+    "inf": math.inf,  # Available in Python 3.5+
+    "nan": math.nan,  # Available in Python 3.5+
+
+    # Safe built-in functions
+    "abs": abs,
+    "round": round,
+    "min": min,
+    "max": max,
+
+    # Functions from math module (common subset, widely available)
+    # Trigonometric functions
+    "acos": math.acos, "asin": math.asin, "atan": math.atan, "atan2": math.atan2,
+    "cos": math.cos, "sin": math.sin, "tan": math.tan,
+    "degrees": math.degrees, "radians": math.radians,
+
+    # Hyperbolic functions
+    "acosh": math.acosh, "asinh": math.asinh, "atanh": math.atanh,
+    "cosh": math.cosh, "sinh": math.sinh, "tanh": math.tanh,
+
+    # Power and logarithmic functions
+    "exp": math.exp, "expm1": math.expm1, "log": math.log, "log1p": math.log1p,
+    "log2": math.log2, "log10": math.log10, "pow": math.pow, "sqrt": math.sqrt,
+
+    # Number-theoretic and representation functions
+    "ceil": math.ceil, "copysign": math.copysign, "fabs": math.fabs,
+    "factorial": math.factorial, "floor": math.floor, "fmod": math.fmod,
+    "frexp": math.frexp, "fsum": math.fsum, "gcd": math.gcd, # gcd in math since 3.5
+    "isclose": math.isclose, "isfinite": math.isfinite, "isinf": math.isinf,
+    "isnan": math.isnan, "ldexp": math.ldexp, "modf": math.modf,
+    "remainder": math.remainder, "trunc": math.trunc,
+
+    # Combinatorics (Python 3.8+)
+    # "perm": math.perm, "comb": math.comb,
+
+    # Other useful functions
+    "gamma": math.gamma, "lgamma": math.lgamma, "erf": math.erf, "erfc": math.erfc,
+    "hypot": math.hypot,
+    # "dist": math.dist, # Python 3.8+
+    # "isqrt": math.isqrt, # Python 3.8+
+}
+
+# Python 3.8+ specific functions - add them if available
+if hasattr(math, 'perm'):
+    _ALLOWED_NAMES['perm'] = math.perm
+if hasattr(math, 'comb'):
+    _ALLOWED_NAMES['comb'] = math.comb
+if hasattr(math, 'dist'):
+    _ALLOWED_NAMES['dist'] = math.dist
+if hasattr(math, 'isqrt'):
+    _ALLOWED_NAMES['isqrt'] = math.isqrt
+
+
+# Globals dictionary for eval: only __builtins__ (emptied) and _ALLOWED_NAMES
+_EVAL_GLOBALS = {"__builtins__": {}, **_ALLOWED_NAMES}
+
+# Locals dictionary for eval: empty
+_EVAL_LOCALS = {}
+
+# Whitelist of AST node types allowed in the expression.
+# This is crucial for preventing access to attributes, subscriptions, etc.
+_ALLOWED_NODE_TYPES = (
+    ast.Expression,  # The root node of an expression.
+    ast.Call,        # A function call.
+    ast.Name,        # A variable name or function name.
+    ast.Load,        # Context for loading a name.
+    ast.BinOp,       # Binary operations (e.g., +, -, *, /).
+    ast.UnaryOp,     # Unary operations (e.g., -, not).
+    ast.Compare,     # Comparison operations (e.g., <, >, ==).
+    ast.BoolOp,      # Boolean operations (and, or).
+    ast.Constant,    # Literals like numbers, strings, True, False, None (Python 3.8+).
+    ast.List,        # List literals (e.g., [1, 2, 3]).
+    ast.Tuple,       # Tuple literals (e.g., (1, 2, 3)).
+)
+
+# For compatibility with Python versions older than 3.8,
+# ast.Num, ast.Str, ast.Bytes, ast.NameConstant, ast.Ellipsis were used for literals.
+# Add them if ast.Constant is not sufficient or if targeting older versions.
+if hasattr(ast, 'Num'):  # For numeric literals in Python < 3.8
+    _ALLOWED_NODE_TYPES = _ALLOWED_NODE_TYPES + (ast.Num,)
+if hasattr(ast, 'NameConstant'):  # For True, False, None in Python < 3.8
+    _ALLOWED_NODE_TYPES = _ALLOWED_NODE_TYPES + (ast.NameConstant,)
+# Note: ast.Str for string literals (Python < 3.8) is implicitly covered if ast.Constant
+# is handled, but strings in math expressions might be undesirable.
+# Current setup allows string constants if they appear.
+
+# --- End of configuration ---
+
+
+def math_expression_safety_check(math_input: str) -> str:
+    """
+    Safely evaluates a Python mathematical expression provided as a string input.
+
+    Args:
+        math_input: A string containing a Python mathematical expression
+                    to be processed and evaluated.
+
+    Returns:
+        A string representing the result of the safe evaluation, or
+        'Unsafe Code Detected!' if any dangerous content is found within
+        the input or if the evaluation fails.
+    """
+    if not isinstance(math_input, str):
+        # Input must be a string.
+        return "Unsafe Code Detected!"
+
+    if not math_input.strip():
+        # Empty or whitespace-only input is not a valid expression.
+        return "Unsafe Code Detected!"
+
+    try:
+        # Step 1: Parse the input string into an Abstract Syntax Tree (AST).
+        # 'eval' mode ensures it's a single expression.
+        tree = ast.parse(math_input, mode='eval')
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+        # SyntaxError: Invalid Python syntax.
+        # ValueError: e.g., null bytes in input.
+        # TypeError: If math_input is not a string (already checked, but as a safeguard).
+        # MemoryError/RecursionError: For extremely complex/nested inputs during parsing.
+        return "Unsafe Code Detected!"
+
+    # Step 2: Validate all nodes in the AST.
+    # Walk through the AST and check if all node types are in our whitelist.
+    # This prevents use of disallowed constructs like attribute access (obj.attr),
+    # subscripting (obj[index]), lambda functions, comprehensions, etc.
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_NODE_TYPES):
+            # Encountered a disallowed AST node type.
+            return "Unsafe Code Detected!"
+        
+        # Additional check for ast.Call nodes:
+        # Ensure the function being called is a simple name (ast.Name),
+        # not a more complex expression that might evaluate to a function.
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                # e.g., prevents (lambda x: x)(1) or (some_array[0])(1)
+                return "Unsafe Code Detected!"
+                # The name itself (node.func.id) will be checked by eval's NameError
+                # if it's not in _ALLOWED_NAMES.
+
+    try:
+        # Step 3: Compile the (already parsed and validated) AST or the original string.
+        # Compiling the string is fine; it will undergo similar parsing internally.
+        # This step can also catch certain errors, though ast.parse is primary.
+        code = compile(math_input, "<string>", "eval")
+    except (SyntaxError, ValueError, TypeError, MemoryError, OverflowError):
+        # OverflowError can occur if an expression involves extremely large numbers
+        # even at compile time (e.g. parsing '1e1000').
+        return "Unsafe Code Detected!"
+
+    try:
+        # Step 4: Evaluate the compiled code in a restricted environment.
+        # _EVAL_GLOBALS provides the safe functions/constants.
+        # _EVAL_LOCALS is empty, providing no additional local scope.
+        result = eval(code, _EVAL_GLOBALS, _EVAL_LOCALS)
+
+        # Ensure the result is of a type that makes sense for math (number/boolean)
+        # This is an optional extra check; str() will work on most types.
+        if not isinstance(result, (int, float, bool, complex)):
+            # If functions could return other types (e.g. lists from a hypothetical
+            # 'vector' function), this check might need adjustment or removal.
+            # For standard math, results are typically numeric or boolean.
+            # Complex numbers are also valid mathematical results.
+            pass # Allow complex numbers as well. str(complex_num) is fine.
+
+        return str(result)
+    except Exception:
+        # Catch any other exception during evaluation:
+        # - NameError: Unknown variable or function (not in _ALLOWED_NAMES).
+        # - TypeError: Operation on incompatible types (e.g., math.sqrt("text")).
+        # - ZeroDivisionError: Division by zero.
+        # - OverflowError: Result too large to represent.
+        # - MemoryError: Operation consumes too much memory.
+        # - And any other runtime errors from the allowed functions.
+        return "Unsafe Code Detected!"
+
+# Example Usage (not part of the function to be submitted, but for testing):
+if __name__ == '__main__':
+    # Define complex strings outside f-string expressions for compatibility
+    # with older f-string parsers that might struggle with nested quotes or backslashes.
+    unsafe_expr_for_import_os = '__import__("os").system("echo unsafe")'
+    unsafe_expr_for_open_file = 'open("/etc/passwd").read()'
+
+    print(f"'7 + 6 * 3' -> {math_expression_safety_check('7 + 6 * 3')}") # Expected: 25
+    print(f"'sqrt(16) + pi' -> {math_expression_safety_check('sqrt(16) + pi')}") # Expected: ~7.14159
+    print(f"'__import__(\"os\").system(\"echo unsafe\")' -> {math_expression_safety_check(unsafe_expr_for_import_os)}") # Expected: Unsafe Code Detected!
+    print(f"'e.__class__' -> {math_expression_safety_check('e.__class__')}") # Expected: Unsafe Code Detected! (due to ast.Attribute being disallowed by node type check)
+    print(f"'open(\"/etc/passwd\").read()' -> {math_expression_safety_check(unsafe_expr_for_open_file)}") # Expected: Unsafe Code Detected!
+    print(f"'1/0' -> {math_expression_safety_check('1/0')}") # Expected: Unsafe Code Detected!
+    print(f"'factorial(99999)' -> {math_expression_safety_check('factorial(99999)')}") # Expected: Unsafe Code Detected! (OverflowError or timeout)
+    print(f"'(lambda x: x+1)(5)' -> {math_expression_safety_check('(lambda x: x+1)(5)')}") # Expected: Unsafe Code Detected!
+    print(f"'[1,2,3][0]' -> {math_expression_safety_check('[1,2,3][0]')}") # Expected: Unsafe Code Detected!
+    print(f"'fsum([1, 2, pi])' -> {math_expression_safety_check('fsum([1, 2, pi])')}") # Expected: ~6.14159...
+    print(f"'' -> {math_expression_safety_check('')}") # Expected: Unsafe Code Detected!
+    print(f"'   ' -> {math_expression_safety_check('   ')}") # Expected: Unsafe Code Detected!
+    print(f"'pow(2,10000)' -> {math_expression_safety_check('pow(2,10000)')}") # Expected: Unsafe Code Detected! (OverflowError)

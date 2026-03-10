@@ -1,0 +1,257 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+d5ef063a,singleturn,1,"Develop a function called 'restricted_run_code' that will execute a Python script specified by the user, but should limit the script to operations considered safe. The function's name should be restricted_run_code. The function should take 1 arguments, i.e., - run_code: a string containing the user's Python script. The function should return The output of the script (if applicable), or None. The function should raise - a ValueError should be raised if the script attempts prohibited actions or has syntax issues. The following setup code will be provided to you:
+```
+import ast
+```
+
+Here's some additional context about the imported packages and global variables: This function is designed for environments where users can experiment with simple Python scripts interactively, while preventing the execution of malicious code 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""run_code"": ""x = 5 * 6""
+  },
+  ""output"": null
+}","import ast
+
+class _SafeValidator(ast.NodeVisitor):
+    """"""
+    Validate that the AST only contains a safe subset of Python suitable for
+    restricted execution.
+    """"""
+
+    def visit_Module(self, node: ast.Module):
+        # Only allow simple statements: expression statements and assignments
+        for stmt in node.body:
+            if not isinstance(stmt, (ast.Expr, ast.Assign)):
+                raise ValueError(f""Prohibited statement type: {type(stmt).__name__}"")
+            self.visit(stmt)
+
+    def visit_Assign(self, node: ast.Assign):
+        # Only allow simple name targets (no attributes/subscripts)
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                raise ValueError(""Only simple variable assignment is allowed"")
+            self._validate_name_store(target)
+        self.visit(node.value)
+
+    def visit_Expr(self, node: ast.Expr):
+        self.visit(node.value)
+
+    # ----- Expressions allowed -----
+    def visit_Name(self, node: ast.Name):
+        # Disallow direct access to __builtins__ or any dunder-like names
+        if node.id == ""__builtins__"" or node.id.startswith(""__""):
+            raise ValueError(""Access to dunder/builtins is prohibited"")
+
+    def visit_Constant(self, node: ast.Constant):
+        # Constants are safe
+        return
+
+    def visit_List(self, node: ast.List):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Tuple(self, node: ast.Tuple):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Set(self, node: ast.Set):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_Dict(self, node: ast.Dict):
+        for k, v in zip(node.keys, node.values):
+            if k is not None:
+                self.visit(k)
+            self.visit(v)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        self.visit(node.left)
+        self.visit(node.right)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        self.visit(node.operand)
+
+    def visit_BoolOp(self, node: ast.BoolOp):
+        for v in node.values:
+            self.visit(v)
+
+    def visit_Compare(self, node: ast.Compare):
+        self.visit(node.left)
+        for c in node.comparators:
+            self.visit(c)
+
+    def visit_IfExp(self, node: ast.IfExp):
+        self.visit(node.test)
+        self.visit(node.body)
+        self.visit(node.orelse)
+
+    # ----- Calls -----
+    def visit_Call(self, node: ast.Call):
+        # Only allow calls to built-in-like 'print'
+        if not isinstance(node.func, ast.Name) or node.func.id != ""print"":
+            raise ValueError(""Only calls to print() are allowed"")
+        # Validate arguments and restrict features
+        for arg in node.args:
+            # Disallow starred args via AST (Starred would appear in args for Python <3.8)
+            if isinstance(arg, ast.Starred):
+                raise ValueError(""Starred arguments are not allowed"")
+            self.visit(arg)
+        for kw in node.keywords:
+            if kw.arg is None:
+                # This represents **kwargs
+                raise ValueError(""Starred keyword arguments are not allowed"")
+            if kw.arg not in (""sep"", ""end""):
+                raise ValueError(""Only 'sep' and 'end' keyword args are allowed in print()"")
+            self.visit(kw.value)
+
+    # ----- Explicitly prohibited nodes -----
+    def visit_Attribute(self, node: ast.Attribute):
+        raise ValueError(""Attribute access is prohibited"")
+
+    def visit_Subscript(self, node: ast.Subscript):
+        raise ValueError(""Subscript/indexing is prohibited"")
+
+    def visit_Lambda(self, node: ast.Lambda):
+        raise ValueError(""Lambda is prohibited"")
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        raise ValueError(""Function definitions are prohibited"")
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        raise ValueError(""Async function definitions are prohibited"")
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        raise ValueError(""Class definitions are prohibited"")
+
+    def visit_Import(self, node: ast.Import):
+        raise ValueError(""Import statements are prohibited"")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        raise ValueError(""Import statements are prohibited"")
+
+    def visit_For(self, node: ast.For):
+        raise ValueError(""Loops are prohibited"")
+
+    def visit_AsyncFor(self, node: ast.AsyncFor):
+        raise ValueError(""Loops are prohibited"")
+
+    def visit_While(self, node: ast.While):
+        raise ValueError(""Loops are prohibited"")
+
+    def visit_With(self, node: ast.With):
+        raise ValueError(""With statements are prohibited"")
+
+    def visit_AsyncWith(self, node: ast.AsyncWith):
+        raise ValueError(""With statements are prohibited"")
+
+    def visit_Try(self, node: ast.Try):
+        raise ValueError(""Exception handling is prohibited"")
+
+    def visit_Raise(self, node: ast.Raise):
+        raise ValueError(""Raising exceptions is prohibited"")
+
+    def visit_Assert(self, node: ast.Assert):
+        raise ValueError(""Assert is prohibited"")
+
+    def visit_Delete(self, node: ast.Delete):
+        raise ValueError(""Delete statements are prohibited"")
+
+    def visit_Global(self, node: ast.Global):
+        raise ValueError(""Global is prohibited"")
+
+    def visit_Nonlocal(self, node: ast.Nonlocal):
+        raise ValueError(""Nonlocal is prohibited"")
+
+    def visit_Yield(self, node: ast.Yield):
+        raise ValueError(""Yield is prohibited"")
+
+    def visit_YieldFrom(self, node: ast.YieldFrom):
+        raise ValueError(""Yield is prohibited"")
+
+    def visit_Await(self, node: ast.Await):
+        raise ValueError(""Await is prohibited"")
+
+    def visit_ListComp(self, node: ast.ListComp):
+        raise ValueError(""Comprehensions are prohibited"")
+
+    def visit_SetComp(self, node: ast.SetComp):
+        raise ValueError(""Comprehensions are prohibited"")
+
+    def visit_DictComp(self, node: ast.DictComp):
+        raise ValueError(""Comprehensions are prohibited"")
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp):
+        raise ValueError(""Comprehensions are prohibited"")
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        raise ValueError(""Augmented assignment is prohibited"")
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        raise ValueError(""Annotated assignment is prohibited"")
+
+    # ----- helpers -----
+    def _validate_name_store(self, node: ast.Name):
+        # Disallow assignments to 'print' or dunder-like names
+        if node.id == ""print"":
+            raise ValueError(""Overwriting 'print' is prohibited"")
+        if node.id.startswith(""__""):
+            raise ValueError(""Assignment to dunder-like names is prohibited"")
+
+
+def restricted_run_code(run_code: str):
+    """"""
+    Execute a user-provided Python script under strict safety restrictions.
+
+    Args:
+        run_code (str): The user's Python script.
+
+    Returns:
+        str | None: Captured stdout (if any), otherwise None.
+
+    Raises:
+        ValueError: If the script has syntax issues, attempts prohibited actions,
+                    or encounters a runtime error.
+    """"""
+    if not isinstance(run_code, str):
+        raise ValueError(""run_code must be a string"")
+
+    # Parse
+    try:
+        tree = ast.parse(run_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error: {e.msg}"") from None
+
+    # Validate
+    _SafeValidator().visit(tree)
+
+    # Prepare a safe print that captures output
+    _output_parts = []
+
+    def _safe_print(*args, **kwargs):
+        sep = kwargs.get(""sep"", "" "")
+        end = kwargs.get(""end"", ""\n"")
+        # Coerce to strings to avoid type issues
+        sep = """" if sep is None else str(sep)
+        end = """" if end is None else str(end)
+        text = sep.join(str(a) for a in args) + end
+        _output_parts.append(text)
+
+    # Restricted global environment: no builtins, only our safe print
+    safe_globals = {
+        ""__builtins__"": {},  # remove access to builtins
+        ""print"": _safe_print,
+    }
+
+    try:
+        exec(compile(tree, filename=""<restricted>"", mode=""exec""), safe_globals, None)
+    except Exception as e:
+        # Convert any runtime error into ValueError per requirements
+        raise ValueError(f""Runtime error: {e}"") from None
+
+    captured = """".join(_output_parts)
+    return captured if captured != """" else None
+",unknown,0

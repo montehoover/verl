@@ -1,0 +1,161 @@
+import ast
+
+# Assuming 'import ast' is already present as per problem description.
+
+class SafeNodeVisitor(ast.NodeVisitor):
+    """
+    A node visitor that checks for forbidden Python constructs.
+    It's used to statically analyze the AST of the user-provided code.
+    """
+    # Define sets of forbidden AST node types, function call names, and attribute names.
+    # These lists should be carefully curated based on security needs.
+    FORBIDDEN_NODE_TYPES = (
+        ast.Import,         # Forbids 'import foo'
+        ast.ImportFrom,     # Forbids 'from foo import bar'
+        # ast.Exec is a Python 2 construct; 'exec(...)' in Python 3 is a function call.
+        # ast.parse() on Python 3 for code like "exec 'print 1'" would raise a SyntaxError.
+    )
+    FORBIDDEN_CALL_NAMES = {
+        # Intrinsically risky built-in functions
+        'eval', 'exec', 'compile', 'open', 'input', '__import__',
+        'globals', 'locals', 'dir', 'help', 'breakpoint',
+        # Functions that allow modifying object attributes in potentially unsafe ways
+        'getattr', 'setattr', 'delattr',
+        # Function that exposes local variables dictionary
+        'vars',
+    }
+    FORBIDDEN_ATTRIBUTE_NAMES = {
+        # Attributes that grant access to sensitive internals or allow unsafe operations
+        '__builtins__', '__class__', '__code__', '__dict__', '__globals__',
+        '__import__', '__subclasses__',
+        # Frame and generator internal attributes
+        'gi_code', 'gi_frame', 'f_builtins', 'f_code', 'f_globals', 'f_locals',
+        # Common dangerous method names (if an object with them is somehow obtained)
+        # These are illustrative; primary defense is disallowing imports and risky builtins.
+        'system', 'popen', 'spawn', # os/subprocess related
+        'read', 'write', 'connect', 'send', 'recv', # file/socket related
+        'execute', # e.g., database cursors
+    }
+
+    def visit(self, node):
+        """Called for any node."""
+        node_type = type(node)
+        if node_type in self.FORBIDDEN_NODE_TYPES:
+            raise ValueError(f"Forbidden AST node type: {node_type.__name__}")
+        super().visit(node) # Continue traversal
+
+    def visit_Call(self, node):
+        """Called for function calls."""
+        # Check if the function being called is an ast.Name (e.g., func())
+        if isinstance(node.func, ast.Name):
+            if node.func.id in self.FORBIDDEN_CALL_NAMES:
+                raise ValueError(f"Forbidden function call: {node.func.id}()")
+        # Check if it's an attribute call (e.g., obj.method())
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr in self.FORBIDDEN_ATTRIBUTE_NAMES:
+                raise ValueError(f"Forbidden method call: .{node.func.attr}()")
+        self.generic_visit(node) # Visit arguments, etc.
+
+    def visit_Attribute(self, node):
+        """Called for attribute access (e.g., obj.attr)."""
+        if node.attr in self.FORBIDDEN_ATTRIBUTE_NAMES:
+            raise ValueError(f"Forbidden attribute access: .{node.attr}")
+        self.generic_visit(node) # Visit the value part of the attribute
+
+# Define a whitelist of allowed built-in function and constant names
+_ALLOWED_BUILTINS_NAMES = [
+    'abs', 'all', 'any', 'ascii', 'bin', 'bool', 'bytearray', 'bytes',
+    'callable', 'chr', 'complex', 'dict', 'divmod', 'enumerate', 'filter',
+    'float', 'format', 'frozenset', 'hash', 'hex', 'id', 'int',
+    'isinstance', 'issubclass', 'iter', 'len', 'list', 'map', 'max', 'min',
+    'next', 'object', 'oct', 'ord', 'pow', 'print', 'range', 'repr',
+    'reversed', 'round', 'set', 'slice', 'sorted', 'str', 'sum', 'super',
+    'tuple', 'type', 'zip', 'None', 'True', 'False',
+]
+
+# Create the dictionary of safe builtins to provide to the executed code
+_safe_builtins_dict = {}
+# Access __builtins__ via globals() for robustness, as direct __builtins__
+# might behave differently depending on execution context (e.g. module vs. exec).
+_b = globals().get('__builtins__')
+if isinstance(_b, dict): # If __builtins__ is a dictionary
+    for name in _ALLOWED_BUILTINS_NAMES:
+        if name in _b:
+            _safe_builtins_dict[name] = _b[name]
+elif hasattr(_b, '__dict__'): # If __builtins__ is a module
+    for name in _ALLOWED_BUILTINS_NAMES:
+        if hasattr(_b, name):
+            _safe_builtins_dict[name] = getattr(_b, name)
+# If _b is None or some other unexpected type, _safe_builtins_dict will remain empty.
+# This is a safe default, though it would make most code unusable.
+# A more robust solution might ensure essential builtins are present.
+
+def execute_python_code(snippet_code: str):
+    """
+    Executes a string of Python code safely after an AST check.
+
+    Args:
+        snippet_code: The user-provided Python code to be executed.
+
+    Returns:
+        The resulting value if the code's last statement is an expression,
+        or None otherwise.
+
+    Raises:
+        ValueError: If the snippet attempts forbidden operations, contains invalid syntax,
+                    or an error occurs during execution.
+    """
+    try:
+        # Parse the code string into an Abstract Syntax Tree (AST)
+        # mode='exec' allows parsing a sequence of statements, not just a single expression.
+        tree = ast.parse(snippet_code, mode='exec')
+    except SyntaxError as e:
+        raise ValueError(f"Invalid Python syntax: {e}")
+
+    # Statically analyze the AST for forbidden constructs
+    visitor = SafeNodeVisitor()
+    try:
+        visitor.visit(tree)
+    except ValueError:
+        # Re-raise the ValueError from the visitor (e.g., "Forbidden function call")
+        raise
+
+    # Prepare a restricted environment for executing the code
+    # The code will only have access to these globals, including our curated __builtins__.
+    restricted_globals = {"__builtins__": _safe_builtins_dict}
+    # Each execution gets its own, empty local scope.
+    user_locals = {}
+
+    try:
+        # If the AST body is not empty and its last statement is an ast.Expr,
+        # it means the code ends with an expression whose value we might want to return.
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            # Isolate the last expression statement node.
+            last_expr_statement_node = tree.body.pop()
+            
+            # Execute all statements before the final expression, if any.
+            # These statements will modify user_locals.
+            if tree.body:
+                # Create a new module AST for these statements.
+                module_statements = ast.Module(body=tree.body, type_ignores=[])
+                code_obj_statements = compile(module_statements, '<string>', 'exec')
+                exec(code_obj_statements, restricted_globals, user_locals)
+            
+            # Now, compile and evaluate the final expression.
+            # ast.Expression is a wrapper suitable for 'eval' mode, using the .value of ast.Expr.
+            last_expr_eval_node = ast.Expression(body=last_expr_statement_node.value)
+            code_obj_expr = compile(last_expr_eval_node, '<string>', 'eval')
+            # Evaluate using the same restricted globals and the (potentially modified) user_locals.
+            result = eval(code_obj_expr, restricted_globals, user_locals)
+            return result
+        else:
+            # The code is empty, or does not end with an expression (e.g., ends with an assignment).
+            # Execute the entire tree as statements; there's no single expression value to return.
+            code_obj = compile(tree, '<string>', 'exec')
+            exec(code_obj, restricted_globals, user_locals)
+            return None # As per example: "x = 2 + 3" -> None
+    except Exception as e:
+        # Catch runtime errors from the user's code (e.g., ZeroDivisionError, NameError)
+        # and other potential issues during compile/exec/eval.
+        # Re-raise as ValueError to signal an issue with the snippet's execution.
+        raise ValueError(f"Error during code execution: {type(e).__name__}: {e}")

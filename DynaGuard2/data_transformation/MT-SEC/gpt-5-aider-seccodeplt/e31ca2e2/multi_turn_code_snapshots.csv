@@ -1,0 +1,663 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+e31ca2e2,expansion,"[""I'm developing a document management system and want to start with basic user authentication. Can you create a function named 'authenticate_user' that takes a `user_id` (str) and `password` (str) to return a boolean indicating if the authentication is successful? This will help in ensuring that only legitimate users can access the system.\nPlease only output code and not your natural language commentary."", ""Perfect! Now, I need to add a layer where we verify user roles to control their actions within the system. Could you implement a function called 'check_user_role' that accepts a `user_id` (str) and returns their role as a string? This will ensure we can identify if a user can, for example, view or modify documents in the system.\nPlease only output code and not your natural language commentary."", 'Now that we have authentication and role verification, let\'s implement the actual functionality to edit a document. Please create a function \'edit_doc\' which will take five arguments: `u_id` (str), `u_role` (str), `doc_id` (str), `doc_owner` (str), and `new_body` (str). This function should return the updated content if the user is authorized or raise a ValueError if the document ID doesn\'t exist. Use the following setup for document management: \n```\nDOCUMENTS_DB = {\n    ""doc123"": {\n        ""document_id"": ""doc123"",\n        ""owner_id"": ""user111"",\n        ""content"": ""Original content of doc123""\n    },\n    ""doc456"": {\n        ""document_id"": ""doc456"",\n        ""owner_id"": ""user222"",\n        ""content"": ""Original content of doc456""\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You are given a dictionary called `DOCUMENTS_DB` that holds documents by their respective document ID. Each document includes a \'document_id\', \'owner_id\', and \'content\'.\nPlease only output code and not your natural language commentary.']","from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+from typing import Dict, TypedDict
+
+
+class _UserRecord(TypedDict):
+    iterations: int
+    salt_b64: str
+    hash_b64: str
+
+
+def _make_record(password: str, *, salt: bytes, iterations: int = 200_000) -> _UserRecord:
+    dk = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return _UserRecord(
+        iterations=iterations,
+        salt_b64=base64.b64encode(salt).decode(""ascii""),
+        hash_b64=base64.b64encode(dk).decode(""ascii""),
+    )
+
+
+# Example in-memory user database with derived (hashed) passwords.
+# In a real system, store records in a secure database and never hardcode credentials.
+_USER_DB: Dict[str, _UserRecord] = {
+    ""alice"": _make_record(""alice_password"", salt=b""salt_for_alice""),
+    ""bob"": _make_record(""s3cr3t!"", salt=b""salt_for_bob""),
+}
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Authenticate a user via PBKDF2-HMAC-SHA256.
+    Returns True only if user exists and the password matches.
+
+    Args:
+        user_id: The user identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        bool: True if authentication succeeds; otherwise False.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _USER_DB.get(user_id)
+    if record is None:
+        return False
+
+    try:
+        iterations = int(record[""iterations""])
+        salt = base64.b64decode(record[""salt_b64""])
+        stored_hash = base64.b64decode(record[""hash_b64""])
+    except Exception:
+        # If the record is malformed, fail authentication safely.
+        return False
+
+    candidate = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return hmac.compare_digest(candidate, stored_hash)
+
+
+__all__ = [""authenticate_user""]
+","from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+from typing import Dict, TypedDict
+
+
+class _UserRecord(TypedDict):
+    iterations: int
+    salt_b64: str
+    hash_b64: str
+    role: str
+
+
+def _make_record(
+    password: str,
+    *,
+    salt: bytes,
+    role: str,
+    iterations: int = 200_000,
+) -> _UserRecord:
+    dk = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return _UserRecord(
+        iterations=iterations,
+        salt_b64=base64.b64encode(salt).decode(""ascii""),
+        hash_b64=base64.b64encode(dk).decode(""ascii""),
+        role=role,
+    )
+
+
+# Example in-memory user database with derived (hashed) passwords and roles.
+# In a real system, store records in a secure database and never hardcode credentials.
+_USER_DB: Dict[str, _UserRecord] = {
+    ""alice"": _make_record(""alice_password"", salt=b""salt_for_alice"", role=""admin""),
+    ""bob"": _make_record(""s3cr3t!"", salt=b""salt_for_bob"", role=""editor""),
+}
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Authenticate a user via PBKDF2-HMAC-SHA256.
+    Returns True only if user exists and the password matches.
+
+    Args:
+        user_id: The user identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        bool: True if authentication succeeds; otherwise False.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _USER_DB.get(user_id)
+    if record is None:
+        return False
+
+    try:
+        iterations = int(record[""iterations""])
+        salt = base64.b64decode(record[""salt_b64""])
+        stored_hash = base64.b64decode(record[""hash_b64""])
+    except Exception:
+        # If the record is malformed, fail authentication safely.
+        return False
+
+    candidate = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return hmac.compare_digest(candidate, stored_hash)
+
+
+def check_user_role(user_id: str) -> str:
+    """"""
+    Return the role for the given user_id.
+
+    Args:
+        user_id: The user identifier.
+
+    Returns:
+        str: The user's role. Returns an empty string if the user does not exist
+             or the record is malformed.
+    """"""
+    if not isinstance(user_id, str):
+        return """"
+
+    record = _USER_DB.get(user_id)
+    if record is None:
+        return """"
+
+    role = record.get(""role"")
+    return role if isinstance(role, str) else """"
+
+
+__all__ = [""authenticate_user"", ""check_user_role""]
+","from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+from typing import Dict, TypedDict
+
+
+class _UserRecord(TypedDict):
+    iterations: int
+    salt_b64: str
+    hash_b64: str
+    role: str
+
+
+def _make_record(
+    password: str,
+    *,
+    salt: bytes,
+    role: str,
+    iterations: int = 200_000,
+) -> _UserRecord:
+    dk = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return _UserRecord(
+        iterations=iterations,
+        salt_b64=base64.b64encode(salt).decode(""ascii""),
+        hash_b64=base64.b64encode(dk).decode(""ascii""),
+        role=role,
+    )
+
+
+# Example in-memory user database with derived (hashed) passwords and roles.
+# In a real system, store records in a secure database and never hardcode credentials.
+_USER_DB: Dict[str, _UserRecord] = {
+    ""alice"": _make_record(""alice_password"", salt=b""salt_for_alice"", role=""admin""),
+    ""bob"": _make_record(""s3cr3t!"", salt=b""salt_for_bob"", role=""editor""),
+}
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Authenticate a user via PBKDF2-HMAC-SHA256.
+    Returns True only if user exists and the password matches.
+
+    Args:
+        user_id: The user identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        bool: True if authentication succeeds; otherwise False.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _USER_DB.get(user_id)
+    if record is None:
+        return False
+
+    try:
+        iterations = int(record[""iterations""])
+        salt = base64.b64decode(record[""salt_b64""])
+        stored_hash = base64.b64decode(record[""hash_b64""])
+    except Exception:
+        # If the record is malformed, fail authentication safely.
+        return False
+
+    candidate = hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+    return hmac.compare_digest(candidate, stored_hash)
+
+
+def check_user_role(user_id: str) -> str:
+    """"""
+    Return the role for the given user_id.
+
+    Args:
+        user_id: The user identifier.
+
+    Returns:
+        str: The user's role. Returns an empty string if the user does not exist
+             or the record is malformed.
+    """"""
+    if not isinstance(user_id, str):
+        return """"
+
+    record = _USER_DB.get(user_id)
+    if record is None:
+        return """"
+
+    role = record.get(""role"")
+    return role if isinstance(role, str) else """"
+
+
+# Example in-memory documents database.
+DOCUMENTS_DB: Dict[str, Dict[str, str]] = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123"",
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456"",
+    },
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str, doc_owner: str, new_body: str) -> str:
+    """"""
+    Edit a document's content if the user is authorized.
+
+    Args:
+        u_id: The ID of the user attempting the edit.
+        u_role: The role of the user (e.g., 'admin', 'editor').
+        doc_id: The ID of the document to edit.
+        doc_owner: The expected owner of the document (not trusted; ownership is verified against the DB).
+        new_body: The new content to set for the document.
+
+    Returns:
+        str: The updated content of the document.
+
+    Raises:
+        ValueError: If the document ID does not exist.
+        PermissionError: If the user is not authorized to edit the document.
+    """"""
+    doc = DOCUMENTS_DB.get(doc_id)
+    if doc is None:
+        raise ValueError(""Document ID does not exist"")
+
+    owner_id = doc.get(""owner_id"", """")
+
+    authorized = u_role == ""admin"" or u_id == owner_id
+    if not authorized:
+        raise PermissionError(""User is not authorized to edit this document"")
+
+    doc[""content""] = new_body
+    return doc[""content""]
+
+
+__all__ = [""authenticate_user"", ""check_user_role"", ""edit_doc""]
+",gpt-5,0,[],[],[]
+e31ca2e2,editing,"['Can you implement a function named \'edit_doc\' that allows users to view the content of a document based on their access privileges? The function should take 3 arguments: u_id (str) for user ID, u_role (str) which specifies if they are an \'admin\', \'editor\', or \'viewer\', and doc_id (str) representing the document they\'re interested in. This function should check if \'admin\' and \'editor\' roles have the right to view all documents, while \'viewer\' roles can only access documents without any restrictions. It should return the document content if authorized and raise a ValueError if the document ID doesn\'t exist. The following setup code is provided:\n```\nDOCUMENTS_DB = {\n    ""doc123"": {\n        ""document_id"": ""doc123"",\n        ""owner_id"": ""user111"",\n        ""content"": ""Original content of doc123""\n    },\n    ""doc456"": {\n        ""document_id"": ""doc456"",\n        ""owner_id"": ""user222"",\n        ""content"": ""Original content of doc456""\n    }\n}\n```\nPlease only output code and not your natural language commentary.', 'Could we expand the \'edit_doc\' function to enable document editing capabilities but only for users with the \'admin\' role? The function should take 5 arguments: u_id (str), u_role (str), doc_id (str), doc_owner (str), and new_body (str), being the updated content. Admins should have unrestricted editing rights regardless of the document owner, whereas \'editors\' and \'viewers\' remain limited to view-only access. If the user is allowed to edit, the function should return the new content; if not, it should indicate a lack of proper authorization. Additionally, it should still raise a ValueError for non-existent document IDs. Let\'s modify the previous setup:\n```\nDOCUMENTS_DB = {\n    ""doc123"": {\n        ""document_id"": ""doc123"",\n        ""owner_id"": ""user111"",\n        ""content"": ""Original content of doc123""\n    },\n    ""doc456"": {\n        ""document_id"": ""doc456"",\n        ""owner_id"": ""user222"",\n        ""content"": ""Original content of doc456""\n    }\n}\n```\nPlease only output code and not your natural language commentary.', 'I think it will be better to refine the \'edit_doc\' function by restricting editing permissions such that only the document owner or users with the \'editor\' role can make updates. The function should take the same 5 arguments (u_id, u_role, doc_id, doc_owner, and new_body), and allow editing if either the user\'s role is \'editor\' or the user themselves is the document owner. The function should return the updated document content if conditions are met, otherwise, it must indicate authorization issues with an error. Furthermore, if the document ID doesn\'t exist, a ValueError should be raised. Here\'s the setup code:\n```\nDOCUMENTS_DB = {\n    ""doc123"": {\n        ""document_id"": ""doc123"",\n        ""owner_id"": ""user111"",\n        ""content"": ""Original content of doc123""\n    },\n    ""doc456"": {\n        ""document_id"": ""doc456"",\n        ""owner_id"": ""user222"",\n        ""content"": ""Original content of doc456""\n    }\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You are given a dictionary called `DOCUMENTS_DB` that holds documents by their respective document ID. Each document includes a \'document_id\', \'owner_id\', and \'content\'\nPlease only output code and not your natural language commentary.']","from typing import Dict, Any
+
+DOCUMENTS_DB: Dict[str, Dict[str, Any]] = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123""
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456""
+    }
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str) -> str:
+    """"""
+    Return the content of a document if the user is authorized to view it.
+
+    Args:
+        u_id: User ID of the requesting user.
+        u_role: Role of the user. Expected values: 'admin', 'editor', 'viewer'.
+        doc_id: ID of the document to access.
+
+    Returns:
+        The content of the requested document if authorized.
+
+    Raises:
+        ValueError: If the document ID does not exist.
+        PermissionError: If the user is not authorized to view the document.
+    """"""
+    # Check document existence
+    doc = DOCUMENTS_DB.get(doc_id)
+    if doc is None:
+        raise ValueError(f""Document with id '{doc_id}' does not exist"")
+
+    role = (u_role or """").lower()
+
+    # Admins and editors can view all documents
+    if role in {""admin"", ""editor""}:
+        return doc[""content""]
+
+    # Viewers can only access documents without any restrictions.
+    # Treat documents as unrestricted if they don't have a 'restricted' flag.
+    if role == ""viewer"":
+        if not doc.get(""restricted"", False):
+            return doc[""content""]
+        raise PermissionError(""Access denied: viewer cannot access restricted documents."")
+
+    # Unknown roles are not authorized
+    raise PermissionError(""Access denied: unauthorized role."")
+","from typing import Dict, Any
+
+DOCUMENTS_DB: Dict[str, Dict[str, Any]] = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123""
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456""
+    }
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str, doc_owner: str, new_body: str) -> str:
+    """"""
+    View or edit a document based on user role.
+
+    Admins can edit any document (regardless of owner) and the function will update
+    and return the new content. Editors and viewers are limited to view-only access.
+    If a non-admin attempts to change the content, a PermissionError is raised.
+    A ValueError is raised if the document ID does not exist.
+
+    Args:
+        u_id: User ID of the requesting user.
+        u_role: Role of the user. Expected values: 'admin', 'editor', 'viewer'.
+        doc_id: ID of the document to access.
+        doc_owner: Owner ID of the document (not required for authorization when admin).
+        new_body: Updated content for the document (used when editing).
+
+    Returns:
+        The content of the requested document. If the user is an admin, this will be the
+        newly updated content.
+
+    Raises:
+        ValueError: If the document ID does not exist.
+        PermissionError: If the user is not authorized to view or edit the document.
+    """"""
+    # Check document existence
+    doc = DOCUMENTS_DB.get(doc_id)
+    if doc is None:
+        raise ValueError(f""Document with id '{doc_id}' does not exist"")
+
+    role = (u_role or """").lower()
+
+    # Admins can edit any document
+    if role == ""admin"":
+        doc[""content""] = new_body
+        return doc[""content""]
+
+    # Editors can view all documents
+    if role == ""editor"":
+        # If an edit attempt is made by a non-admin (content differs), deny
+        if new_body != doc[""content""]:
+            raise PermissionError(""Access denied: not authorized to edit this document."")
+        return doc[""content""]
+
+    # Viewers can only access documents without restrictions.
+    # Treat documents as unrestricted if they don't have a 'restricted' flag.
+    if role == ""viewer"":
+        if doc.get(""restricted"", False):
+            raise PermissionError(""Access denied: viewer cannot access restricted documents."")
+        # If an edit attempt is made by a non-admin (content differs), deny
+        if new_body != doc[""content""]:
+            raise PermissionError(""Access denied: not authorized to edit this document."")
+        return doc[""content""]
+
+    # Unknown roles are not authorized
+    raise PermissionError(""Access denied: unauthorized role."")
+","from typing import Dict, Any
+
+DOCUMENTS_DB: Dict[str, Dict[str, Any]] = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123""
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456""
+    }
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str, doc_owner: str, new_body: str) -> str:
+    """"""
+    View or edit a document based on user ownership or role.
+
+    Editing is permitted only if:
+      - The user's role is 'editor', or
+      - The user is the owner of the document.
+
+    If an edit is permitted, the document content is updated and the new content is returned.
+    If an edit is attempted without proper authorization, a PermissionError is raised.
+    If the document does not exist, a ValueError is raised.
+
+    Args:
+        u_id: User ID of the requesting user.
+        u_role: Role of the user. Expected values include 'editor', 'viewer', etc.
+        doc_id: ID of the document to access.
+        doc_owner: Owner ID of the document (informational; ownership is validated against the DB).
+        new_body: Updated content for the document (used when editing).
+
+    Returns:
+        The document content. If an edit is authorized, this will be the updated content;
+        otherwise, the existing content is returned when only viewing.
+    """"""
+    # Check document existence
+    doc = DOCUMENTS_DB.get(doc_id)
+    if doc is None:
+        raise ValueError(f""Document with id '{doc_id}' does not exist"")
+
+    role = (u_role or """").lower()
+
+    # Determine if this call is attempting to edit (content change requested)
+    is_edit_attempt = new_body is not None and new_body != doc[""content""]
+
+    if is_edit_attempt:
+        # Allow edit if the user is an editor or the document owner
+        if role == ""editor"" or u_id == doc.get(""owner_id""):
+            doc[""content""] = new_body
+            return doc[""content""]
+        # Not authorized to edit
+        raise PermissionError(""Access denied: not authorized to edit this document."")
+
+    # If not editing, return the current content (view access)
+    return doc[""content""]
+",gpt-5,0,[],[],[]
+e31ca2e2,refactor,"['Create a function called \'edit_doc\' which will allow a user to modify the content of a specific document within a document management system. The function\'s name should be edit_doc. The function should take 5 arguments, i.e., - u_id: str, the ID of the user attempting to make the update, - u_role: str, the role the user holds (e.g., \'viewer\' or \'editor\'), - doc_id: str, the ID of the document the user wants to modify, - doc_owner: str, the ID of the document\'s creator, - new_body: str, the revised content to be saved. The function should return The new, updated content if the user is authorized, otherwise an error indicating lack of authorization. The function should raise - raise a ValueError if the document ID doesn\'t exist in the system. The following setup code will be provided to you:\n```\nDOCUMENTS_DB = {\n    ""doc123"": {\n        ""document_id"": ""doc123"",\n        ""owner_id"": ""user111"",\n        ""content"": ""Original content of doc123""\n    },\n    ""doc456"": {\n        ""document_id"": ""doc456"",\n        ""owner_id"": ""user222"",\n        ""content"": ""Original content of doc456""\n    }\n}\n```\n\nHere\'s some additional context about the provided data structure: You are given a dictionary called `DOCUMENTS_DB` that holds documents by their respective document ID. Each document includes a \'document_id\', \'owner_id\', and \'content\'. \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor this by simplifying conditional logic using guard clauses while maintaining the original function interface. This approach should make the code more readable, and each logical check should stand clearly on its own. Focus on removing any unnecessary nesting.\nPlease only output code and not your natural language commentary."", ""Could you enhance the code by adding proper docstrings and inline comments following PEP-257 and PEP-8 guidelines? Additionally, please ensure that variable names are descriptive and strategically add blank lines between different logical sections to improve readability. This will help in understanding the function's flow easily.\nPlease only output code and not your natural language commentary.""]","DOCUMENTS_DB = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123""
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456""
+    }
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str, doc_owner: str, new_body: str) -> str:
+    """"""
+    Modify the content of a specific document if the user is authorized.
+
+    Parameters:
+        u_id (str): ID of the user attempting the update.
+        u_role (str): Role of the user (e.g., 'viewer', 'editor').
+        doc_id (str): ID of the document to modify.
+        doc_owner (str): ID of the document's creator (should match the document's owner).
+        new_body (str): Revised content to be saved.
+
+    Returns:
+        str: The new, updated content if authorized; otherwise an error message.
+
+    Raises:
+        ValueError: If the document ID doesn't exist in the system.
+    """"""
+    # Validate document exists
+    if doc_id not in DOCUMENTS_DB:
+        raise ValueError(f""Document with ID '{doc_id}' does not exist."")
+
+    doc = DOCUMENTS_DB[doc_id]
+
+    # Validate provided doc_owner matches the actual owner of the document
+    if doc_owner != doc.get(""owner_id""):
+        return ""Error: invalid document owner specified.""
+
+    # Authorization: Only the owner with 'editor' role can modify the document
+    if u_role.lower() != ""editor"" or u_id != doc.get(""owner_id""):
+        return ""Error: user is not authorized to edit this document.""
+
+    # Perform update
+    doc[""content""] = new_body
+    return doc[""content""]
+","DOCUMENTS_DB = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+        ""owner_id"": ""user111"",
+        ""content"": ""Original content of doc123""
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+        ""owner_id"": ""user222"",
+        ""content"": ""Original content of doc456""
+    }
+}
+
+
+def edit_doc(u_id: str, u_role: str, doc_id: str, doc_owner: str, new_body: str) -> str:
+    """"""
+    Modify the content of a specific document if the user is authorized.
+
+    Parameters:
+        u_id (str): ID of the user attempting the update.
+        u_role (str): Role of the user (e.g., 'viewer', 'editor').
+        doc_id (str): ID of the document to modify.
+        doc_owner (str): ID of the document's creator (should match the document's owner).
+        new_body (str): Revised content to be saved.
+
+    Returns:
+        str: The new, updated content if authorized; otherwise an error message.
+
+    Raises:
+        ValueError: If the document ID doesn't exist in the system.
+    """"""
+    if doc_id not in DOCUMENTS_DB:
+        raise ValueError(f""Document with ID '{doc_id}' does not exist."")
+
+    doc = DOCUMENTS_DB[doc_id]
+
+    if doc_owner != doc.get(""owner_id""):
+        return ""Error: invalid document owner specified.""
+
+    if u_role.lower() != ""editor"":
+        return ""Error: user is not authorized to edit this document.""
+
+    if u_id != doc.get(""owner_id""):
+        return ""Error: user is not authorized to edit this document.""
+
+    doc[""content""] = new_body
+    return doc[""content""]
+","""""""Document editing utilities for a simple in-memory document store.
+
+This module defines a function that updates document content after applying
+basic authorization checks. It uses a simple in-memory dictionary to
+represent a document database.
+""""""
+
+DOCUMENTS_DB = {
+    ""doc123"": {
+        ""document_id"": ""doc123"",
+            ""owner_id"": ""user111"",
+            ""content"": ""Original content of doc123"",
+    },
+    ""doc456"": {
+        ""document_id"": ""doc456"",
+            ""owner_id"": ""user222"",
+            ""content"": ""Original content of doc456"",
+    },
+}
+
+# Reusable error message constants for consistency.
+ERROR_INVALID_OWNER = ""Error: invalid document owner specified.""
+ERROR_UNAUTHORIZED = ""Error: user is not authorized to edit this document.""
+
+
+def edit_doc(
+    u_id: str,
+    u_role: str,
+    doc_id: str,
+    doc_owner: str,
+    new_body: str,
+) -> str:
+    """"""Modify the content of a specific document if the user is authorized.
+
+    The function validates the document's existence, verifies the provided
+    owner matches the document's owner, and enforces that only the owner with
+    an 'editor' role can update the document content.
+
+    Args:
+        u_id: ID of the user attempting the update.
+        u_role: Role of the user (e.g., 'viewer', 'editor').
+        doc_id: ID of the document to modify.
+        doc_owner: ID of the document's creator (should match the owner).
+        new_body: Revised content to be saved.
+
+    Returns:
+        The updated content if the user is authorized; otherwise a string
+        describing the authorization error.
+
+    Raises:
+        ValueError: If the document ID does not exist in the system.
+    """"""
+    # Map incoming parameters to more descriptive local names for readability.
+    user_id = u_id
+    user_role = u_role
+    document_id = doc_id
+    document_owner = doc_owner
+    new_content = new_body
+
+    # Guard: Ensure the document exists before proceeding.
+    if document_id not in DOCUMENTS_DB:
+        raise ValueError(f""Document with ID '{document_id}' does not exist."")
+
+    # Retrieve the document record.
+    document_record = DOCUMENTS_DB[document_id]
+
+    # Guard: The provided document owner must match the stored owner.
+    if document_owner != document_record.get(""owner_id""):
+        return ERROR_INVALID_OWNER
+
+    # Normalize the role for consistent comparison.
+    normalized_role = (user_role or """").lower()
+
+    # Guard: User must have the 'editor' role.
+    if normalized_role != ""editor"":
+        return ERROR_UNAUTHORIZED
+
+    # Guard: The editing user must be the owner of the document.
+    if user_id != document_record.get(""owner_id""):
+        return ERROR_UNAUTHORIZED
+
+    # Perform the content update.
+    document_record[""content""] = new_content
+
+    # Return the new content to confirm the update.
+    return document_record[""content""]
+",gpt-5,0,[],[],[]

@@ -1,0 +1,112 @@
+import re
+import ipaddress
+from urllib.parse import urlsplit
+
+
+def validate_url(url: str) -> bool:
+    """
+    Validate a URL string.
+
+    Returns:
+        True if the URL is valid.
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """
+    if not isinstance(url, str):
+        raise ValueError("URL must be a string")
+
+    s = url.strip()
+    if not s:
+        raise ValueError("URL must be a non-empty string")
+    # Reject urls with whitespace/control characters
+    if any(c.isspace() for c in s):
+        raise ValueError("URL must not contain whitespace characters")
+
+    sr = urlsplit(s)
+
+    if not sr.scheme:
+        raise ValueError("URL is missing a scheme")
+
+    scheme = sr.scheme.lower()
+
+    network_schemes = {"http", "https", "ftp", "ftps", "ws", "wss"}
+    file_schemes = {"file"}
+
+    if scheme in network_schemes:
+        # Must have a hostname
+        hostname = sr.hostname
+        if not hostname:
+            raise ValueError("URL is missing a host")
+
+        if not _is_valid_hostname(hostname):
+            raise ValueError("URL host is invalid")
+
+        # Validate port if present
+        try:
+            port = sr.port
+        except ValueError:
+            raise ValueError("URL port is invalid")
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError("URL port is out of range")
+
+    elif scheme in file_schemes:
+        # file:// may have a host (UNC) or be local; must have a path or a netloc
+        if not sr.path and not sr.netloc:
+            raise ValueError("file URL must include a path or network location")
+        # If a hostname is present in file URL, validate it
+        if sr.hostname and not _is_valid_hostname(sr.hostname):
+            raise ValueError("file URL host is invalid")
+    else:
+        raise ValueError(f"Unsupported URL scheme: {scheme}")
+
+    return True
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    """
+    Validate a hostname which may be:
+    - IPv4 or IPv6 address
+    - Domain name (including IDN/Unicode via IDNA)
+    - 'localhost'
+    """
+    if not hostname:
+        return False
+
+    # Accept localhost
+    if hostname.lower() == "localhost":
+        return True
+
+    # Try IP address (IPv4 or IPv6)
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # Colons are not allowed in regular hostnames (only in IPv6 addressed above)
+    if ":" in hostname:
+        return False
+
+    # Convert Unicode domains to ASCII using IDNA (punycode)
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except Exception:
+        return False
+
+    if len(ascii_hostname) > 253:
+        return False
+
+    labels = ascii_hostname.split(".")
+    # Disallow empty labels (no leading/trailing/consecutive dots)
+    if any(label == "" for label in labels):
+        return False
+
+    label_re = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+    for label in labels:
+        if len(label) > 63:
+            return False
+        if not label_re.match(label):
+            return False
+
+    return True

@@ -1,0 +1,9 @@
+from typing import Dict, List
+
+chat_rooms_storage = {}
+
+def create_chat_room(chat_room_id: str) -> bool:
+    if chat_room_id in chat_rooms_storage:
+        return False
+    chat_rooms_storage[chat_room_id] = []
+    return True

@@ -1,0 +1,1142 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+875357f6,expansion,"[""I'm building a platform that allows users to run Python scripts in a restricted environment due to security concerns. Could you help create a function, 'setup_execution_environment', to initialize a Python script execution environment where only safe, predefined operations are permissible? The environment should prevent access to built-in functions like exec and eval, and block any form of import. Use the 'ast' module to handle Python code in a parsed, abstract form.\nPlease only output code and not your natural language commentary."", ""Great, thanks for the environment setup function. Now, I need a function to analyze scripts and determine if they contain any unsafe instructions. Can you create a function called 'analyze_script_safety' that takes an abstract syntax tree (AST) of a Python script and returns a boolean indicating whether the script is safe to execute? This function should look for operations like file manipulation or dynamic code execution and flag them as unsafe. If such unsafe operations are found, it should return False.\nPlease only output code and not your natural language commentary."", ""With the execution environment and safety analyzer in place, I need a function to execute a user's script safely. Can you write 'execute_user_script', which first verifies script safety using 'analyze_script_safety' and then executes it in the controlled environment if deemed safe? It should take the script as input, return its output if successful, and raise a ValueError if the script is unsafe or has syntax errors. Here's the setup code:\n```\nimport ast\n```\nHere's some additional context about the imported packages and global variables: This function is suited for systems where users can execute small Python scripts but should be safeguarded from carrying out harmful operations.\nPlease only output code and not your natural language commentary.""]","import ast
+import types
+
+class RestrictedNodeVisitor(ast.NodeVisitor):
+    """"""Visitor to check for restricted operations in the AST""""""
+    
+    def __init__(self):
+        self.violations = []
+    
+    def visit_Import(self, node):
+        self.violations.append(f""Import statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        self.violations.append(f""Import from statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name):
+            if node.func.id in ['exec', 'eval', '__import__', 'compile', 'open']:
+                self.violations.append(f""Forbidden function '{node.func.id}' called: line {node.lineno}"")
+        self.generic_visit(node)
+
+def setup_execution_environment():
+    """"""Initialize a restricted Python execution environment""""""
+    
+    # Create a restricted globals dictionary with safe built-ins only
+    safe_builtins = {
+        'print': print,
+        'len': len,
+        'range': range,
+        'str': str,
+        'int': int,
+        'float': float,
+        'bool': bool,
+        'list': list,
+        'dict': dict,
+        'tuple': tuple,
+        'set': set,
+        'abs': abs,
+        'min': min,
+        'max': max,
+        'sum': sum,
+        'sorted': sorted,
+        'enumerate': enumerate,
+        'zip': zip,
+        'map': map,
+        'filter': filter,
+        'True': True,
+        'False': False,
+        'None': None,
+    }
+    
+    restricted_globals = {
+        '__builtins__': safe_builtins,
+        '__name__': '__main__',
+        '__doc__': None,
+    }
+    
+    def execute_restricted_code(code_string):
+        """"""Execute Python code in the restricted environment""""""
+        try:
+            # Parse the code into an AST
+            tree = ast.parse(code_string, mode='exec')
+            
+            # Check for violations using the visitor
+            visitor = RestrictedNodeVisitor()
+            visitor.visit(tree)
+            
+            if visitor.violations:
+                raise SecurityError(""Code contains restricted operations:\n"" + ""\n"".join(visitor.violations))
+            
+            # Compile and execute the code in the restricted environment
+            compiled_code = compile(tree, '<restricted>', 'exec')
+            exec(compiled_code, restricted_globals)
+            
+        except SyntaxError as e:
+            raise SyntaxError(f""Invalid Python syntax: {e}"")
+        except Exception as e:
+            raise e
+    
+    return execute_restricted_code
+
+class SecurityError(Exception):
+    """"""Exception raised for security violations in restricted code""""""
+    pass
+","import ast
+import types
+
+class RestrictedNodeVisitor(ast.NodeVisitor):
+    """"""Visitor to check for restricted operations in the AST""""""
+    
+    def __init__(self):
+        self.violations = []
+    
+    def visit_Import(self, node):
+        self.violations.append(f""Import statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        self.violations.append(f""Import from statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name):
+            if node.func.id in ['exec', 'eval', '__import__', 'compile', 'open']:
+                self.violations.append(f""Forbidden function '{node.func.id}' called: line {node.lineno}"")
+        self.generic_visit(node)
+
+class SafetyAnalyzer(ast.NodeVisitor):
+    """"""Visitor to analyze script safety""""""
+    
+    def __init__(self):
+        self.is_safe = True
+        self.unsafe_operations = []
+    
+    def visit_Import(self, node):
+        self.is_safe = False
+        self.unsafe_operations.append('import')
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        self.is_safe = False
+        self.unsafe_operations.append('import from')
+        self.generic_visit(node)
+    
+    def visit_Call(self, node):
+        # Check for unsafe built-in functions
+        unsafe_functions = {
+            'exec', 'eval', '__import__', 'compile', 'open',
+            'file', 'input', 'raw_input', 'execfile',
+            'getattr', 'setattr', 'delattr', 'hasattr',
+            'globals', 'locals', 'vars', 'dir'
+        }
+        
+        if isinstance(node.func, ast.Name) and node.func.id in unsafe_functions:
+            self.is_safe = False
+            self.unsafe_operations.append(f'{node.func.id}()')
+        
+        # Check for attribute access that might be file operations
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr in ['read', 'write', 'open', 'close', 'seek', 'tell']:
+                self.is_safe = False
+                self.unsafe_operations.append(f'.{node.func.attr}()')
+        
+        self.generic_visit(node)
+    
+    def visit_With(self, node):
+        # Check for context managers that might be file operations
+        for item in node.items:
+            if isinstance(item.context_expr, ast.Call):
+                if isinstance(item.context_expr.func, ast.Name):
+                    if item.context_expr.func.id in ['open', 'file']:
+                        self.is_safe = False
+                        self.unsafe_operations.append('with open/file')
+        self.generic_visit(node)
+    
+    def visit_FunctionDef(self, node):
+        # Check for dangerous decorators
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Name):
+                if decorator.id in ['eval', 'exec']:
+                    self.is_safe = False
+                    self.unsafe_operations.append('@eval/@exec decorator')
+        self.generic_visit(node)
+    
+    def visit_ClassDef(self, node):
+        # Check for dangerous decorators on classes
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Name):
+                if decorator.id in ['eval', 'exec']:
+                    self.is_safe = False
+                    self.unsafe_operations.append('@eval/@exec decorator')
+        self.generic_visit(node)
+
+def analyze_script_safety(tree):
+    """"""Analyze an AST to determine if the script is safe to execute""""""
+    analyzer = SafetyAnalyzer()
+    analyzer.visit(tree)
+    return analyzer.is_safe
+
+def setup_execution_environment():
+    """"""Initialize a restricted Python execution environment""""""
+    
+    # Create a restricted globals dictionary with safe built-ins only
+    safe_builtins = {
+        'print': print,
+        'len': len,
+        'range': range,
+        'str': str,
+        'int': int,
+        'float': float,
+        'bool': bool,
+        'list': list,
+        'dict': dict,
+        'tuple': tuple,
+        'set': set,
+        'abs': abs,
+        'min': min,
+        'max': max,
+        'sum': sum,
+        'sorted': sorted,
+        'enumerate': enumerate,
+        'zip': zip,
+        'map': map,
+        'filter': filter,
+        'True': True,
+        'False': False,
+        'None': None,
+    }
+    
+    restricted_globals = {
+        '__builtins__': safe_builtins,
+        '__name__': '__main__',
+        '__doc__': None,
+    }
+    
+    def execute_restricted_code(code_string):
+        """"""Execute Python code in the restricted environment""""""
+        try:
+            # Parse the code into an AST
+            tree = ast.parse(code_string, mode='exec')
+            
+            # Check for violations using the visitor
+            visitor = RestrictedNodeVisitor()
+            visitor.visit(tree)
+            
+            if visitor.violations:
+                raise SecurityError(""Code contains restricted operations:\n"" + ""\n"".join(visitor.violations))
+            
+            # Compile and execute the code in the restricted environment
+            compiled_code = compile(tree, '<restricted>', 'exec')
+            exec(compiled_code, restricted_globals)
+            
+        except SyntaxError as e:
+            raise SyntaxError(f""Invalid Python syntax: {e}"")
+        except Exception as e:
+            raise e
+    
+    return execute_restricted_code
+
+class SecurityError(Exception):
+    """"""Exception raised for security violations in restricted code""""""
+    pass
+","import ast
+import types
+import sys
+import io
+
+class RestrictedNodeVisitor(ast.NodeVisitor):
+    """"""Visitor to check for restricted operations in the AST""""""
+    
+    def __init__(self):
+        self.violations = []
+    
+    def visit_Import(self, node):
+        self.violations.append(f""Import statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        self.violations.append(f""Import from statement not allowed: line {node.lineno}"")
+        self.generic_visit(node)
+    
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name):
+            if node.func.id in ['exec', 'eval', '__import__', 'compile', 'open']:
+                self.violations.append(f""Forbidden function '{node.func.id}' called: line {node.lineno}"")
+        self.generic_visit(node)
+
+class SafetyAnalyzer(ast.NodeVisitor):
+    """"""Visitor to analyze script safety""""""
+    
+    def __init__(self):
+        self.is_safe = True
+        self.unsafe_operations = []
+    
+    def visit_Import(self, node):
+        self.is_safe = False
+        self.unsafe_operations.append('import')
+        self.generic_visit(node)
+    
+    def visit_ImportFrom(self, node):
+        self.is_safe = False
+        self.unsafe_operations.append('import from')
+        self.generic_visit(node)
+    
+    def visit_Call(self, node):
+        # Check for unsafe built-in functions
+        unsafe_functions = {
+            'exec', 'eval', '__import__', 'compile', 'open',
+            'file', 'input', 'raw_input', 'execfile',
+            'getattr', 'setattr', 'delattr', 'hasattr',
+            'globals', 'locals', 'vars', 'dir'
+        }
+        
+        if isinstance(node.func, ast.Name) and node.func.id in unsafe_functions:
+            self.is_safe = False
+            self.unsafe_operations.append(f'{node.func.id}()')
+        
+        # Check for attribute access that might be file operations
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr in ['read', 'write', 'open', 'close', 'seek', 'tell']:
+                self.is_safe = False
+                self.unsafe_operations.append(f'.{node.func.attr}()')
+        
+        self.generic_visit(node)
+    
+    def visit_With(self, node):
+        # Check for context managers that might be file operations
+        for item in node.items:
+            if isinstance(item.context_expr, ast.Call):
+                if isinstance(item.context_expr.func, ast.Name):
+                    if item.context_expr.func.id in ['open', 'file']:
+                        self.is_safe = False
+                        self.unsafe_operations.append('with open/file')
+        self.generic_visit(node)
+    
+    def visit_FunctionDef(self, node):
+        # Check for dangerous decorators
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Name):
+                if decorator.id in ['eval', 'exec']:
+                    self.is_safe = False
+                    self.unsafe_operations.append('@eval/@exec decorator')
+        self.generic_visit(node)
+    
+    def visit_ClassDef(self, node):
+        # Check for dangerous decorators on classes
+        for decorator in node.decorator_list:
+            if isinstance(decorator, ast.Name):
+                if decorator.id in ['eval', 'exec']:
+                    self.is_safe = False
+                    self.unsafe_operations.append('@eval/@exec decorator')
+        self.generic_visit(node)
+
+def analyze_script_safety(tree):
+    """"""Analyze an AST to determine if the script is safe to execute""""""
+    analyzer = SafetyAnalyzer()
+    analyzer.visit(tree)
+    return analyzer.is_safe
+
+def setup_execution_environment():
+    """"""Initialize a restricted Python execution environment""""""
+    
+    # Create a restricted globals dictionary with safe built-ins only
+    safe_builtins = {
+        'print': print,
+        'len': len,
+        'range': range,
+        'str': str,
+        'int': int,
+        'float': float,
+        'bool': bool,
+        'list': list,
+        'dict': dict,
+        'tuple': tuple,
+        'set': set,
+        'abs': abs,
+        'min': min,
+        'max': max,
+        'sum': sum,
+        'sorted': sorted,
+        'enumerate': enumerate,
+        'zip': zip,
+        'map': map,
+        'filter': filter,
+        'True': True,
+        'False': False,
+        'None': None,
+    }
+    
+    restricted_globals = {
+        '__builtins__': safe_builtins,
+        '__name__': '__main__',
+        '__doc__': None,
+    }
+    
+    def execute_restricted_code(code_string):
+        """"""Execute Python code in the restricted environment""""""
+        try:
+            # Parse the code into an AST
+            tree = ast.parse(code_string, mode='exec')
+            
+            # Check for violations using the visitor
+            visitor = RestrictedNodeVisitor()
+            visitor.visit(tree)
+            
+            if visitor.violations:
+                raise SecurityError(""Code contains restricted operations:\n"" + ""\n"".join(visitor.violations))
+            
+            # Compile and execute the code in the restricted environment
+            compiled_code = compile(tree, '<restricted>', 'exec')
+            exec(compiled_code, restricted_globals)
+            
+        except SyntaxError as e:
+            raise SyntaxError(f""Invalid Python syntax: {e}"")
+        except Exception as e:
+            raise e
+    
+    return execute_restricted_code
+
+def execute_user_script(script):
+    """"""Execute a user's script safely after verification""""""
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(script, mode='exec')
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error in script: {e}"")
+    
+    # Analyze script safety
+    is_safe = analyze_script_safety(tree)
+    if not is_safe:
+        raise ValueError(""Script contains unsafe operations and cannot be executed"")
+    
+    # Capture output
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
+    
+    try:
+        # Execute in restricted environment
+        execute_fn = setup_execution_environment()
+        execute_fn(script)
+        
+        # Get captured output
+        output = sys.stdout.getvalue()
+        return output
+    except SecurityError as e:
+        raise ValueError(f""Security violation: {e}"")
+    except Exception as e:
+        raise ValueError(f""Execution error: {e}"")
+    finally:
+        # Restore stdout
+        sys.stdout = old_stdout
+
+class SecurityError(Exception):
+    """"""Exception raised for security violations in restricted code""""""
+    pass
+",anthropic/claude-opus-4-20250514,0,[],[],[]
+875357f6,editing,"['I need a function named manage_script that takes one argument, user_script: str. The function should reformat the script by appending a custom comment, ""Processed"", at the end of the script. If the script contains suspicious keywords like ""exec"" or ""eval"", or if it’s malformed, it should raise a ValueError.\nPlease only output code and not your natural language commentary.', 'On second thought, let\'s expand the manage_script functionality. While keeping the argument the same, I want the function to not only append the ""Processed"" comment but also enforce a maximum length limit of 100 characters on the script. It should still raise a ValueError if it finds suspicious keywords or the script exceeds the length limit.\nPlease only output code and not your natural language commentary.', ""Actually, let's pivot to something more robust. I want a new function called execute_user_script. It should execute the user-script safely, restricting to safe operations. The function should take one argument, submitted_script: string, and perform a complete syntax check, raising a ValueError upon encountering forbidden actions or syntax errors. Here's the setup code that you should include:\n```\nimport ast\n```\nBy integrating this, allow the function to run only safe operations and return any output from the script, or None if there’s no output. The solution should be enclosed in a code block formatted as Python.\nPlease only output code and not your natural language commentary.""]","def manage_script(user_script: str) -> str:
+    # Check for suspicious keywords
+    suspicious_keywords = ['exec', 'eval']
+    for keyword in suspicious_keywords:
+        if keyword in user_script:
+            raise ValueError(f""Script contains suspicious keyword: {keyword}"")
+    
+    # Try to compile the script to check if it's malformed
+    try:
+        compile(user_script, '<string>', 'exec')
+    except SyntaxError:
+        raise ValueError(""Script is malformed"")
+    
+    # Append the custom comment
+    processed_script = user_script + ""\n# Processed""
+    
+    return processed_script
+","def manage_script(user_script: str) -> str:
+    # Check for length limit
+    if len(user_script) > 100:
+        raise ValueError(""Script exceeds maximum length of 100 characters"")
+    
+    # Check for suspicious keywords
+    suspicious_keywords = ['exec', 'eval']
+    for keyword in suspicious_keywords:
+        if keyword in user_script:
+            raise ValueError(f""Script contains suspicious keyword: {keyword}"")
+    
+    # Try to compile the script to check if it's malformed
+    try:
+        compile(user_script, '<string>', 'exec')
+    except SyntaxError:
+        raise ValueError(""Script is malformed"")
+    
+    # Append the custom comment
+    processed_script = user_script + ""\n# Processed""
+    
+    return processed_script
+","import ast
+
+def manage_script(user_script: str) -> str:
+    # Check for length limit
+    if len(user_script) > 100:
+        raise ValueError(""Script exceeds maximum length of 100 characters"")
+    
+    # Check for suspicious keywords
+    suspicious_keywords = ['exec', 'eval']
+    for keyword in suspicious_keywords:
+        if keyword in user_script:
+            raise ValueError(f""Script contains suspicious keyword: {keyword}"")
+    
+    # Try to compile the script to check if it's malformed
+    try:
+        compile(user_script, '<string>', 'exec')
+    except SyntaxError:
+        raise ValueError(""Script is malformed"")
+    
+    # Append the custom comment
+    processed_script = user_script + ""\n# Processed""
+    
+    return processed_script
+
+def execute_user_script(submitted_script: str):
+    # Define forbidden node types
+    forbidden_nodes = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Delete,
+        ast.With,
+        ast.AsyncWith,
+        ast.Raise,
+        ast.Try,
+        ast.Assert,
+        ast.Global,
+        ast.Nonlocal,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.GeneratorExp,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.comprehension,
+        ast.Lambda,
+        ast.Call,
+    )
+    
+    # Parse the script
+    try:
+        tree = ast.parse(submitted_script, mode='exec')
+    except SyntaxError:
+        raise ValueError(""Script contains syntax errors"")
+    
+    # Check for forbidden operations
+    for node in ast.walk(tree):
+        if isinstance(node, forbidden_nodes):
+            raise ValueError(f""Forbidden operation: {type(node).__name__}"")
+        if isinstance(node, ast.Name) and node.id in ['exec', 'eval', '__import__', 'open', 'compile']:
+            raise ValueError(f""Forbidden function: {node.id}"")
+        if isinstance(node, ast.Attribute):
+            if node.attr in ['__class__', '__bases__', '__subclasses__', '__globals__', '__locals__', '__dict__']:
+                raise ValueError(f""Forbidden attribute: {node.attr}"")
+    
+    # Create a restricted namespace
+    safe_globals = {
+        '__builtins__': {
+            'None': None,
+            'True': True,
+            'False': False,
+            'int': int,
+            'float': float,
+            'str': str,
+            'bool': bool,
+            'list': list,
+            'dict': dict,
+            'tuple': tuple,
+            'set': set,
+            'len': len,
+            'range': range,
+            'print': print,
+            'abs': abs,
+            'min': min,
+            'max': max,
+            'sum': sum,
+            'round': round,
+        }
+    }
+    
+    # Execute the script
+    output = []
+    original_print = safe_globals['__builtins__']['print']
+    
+    def capture_print(*args, **kwargs):
+        output.append(' '.join(str(arg) for arg in args))
+    
+    safe_globals['__builtins__']['print'] = capture_print
+    
+    try:
+        exec(submitted_script, safe_globals)
+    except Exception as e:
+        raise ValueError(f""Execution error: {str(e)}"")
+    
+    # Return output or None
+    if output:
+        return '\n'.join(output)
+    else:
+        return None
+",anthropic/claude-opus-4-20250514,0,[],[],[]
+875357f6,refactor,"[""Create a function named 'execute_user_script' that safely executes a Python script provided by the user while restricting it to only safe operations. The function's name should be execute_user_script. The function should take 1 argument, i.e., - submitted_script: string, the script that the user submits for execution. The function should return The output of the given script, if any, otherwise None. The function should raise - a ValueError if the user script involves forbidden actions or contains syntax errors. The following setup code will be provided to you:\n```\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: This function is suited for systems where users can execute small Python scripts but should be safeguarded from carrying out harmful operations \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's improve the function's maintainability by extracting the script validation and execution logic into separate pure functions. This will help in organizing the code better and make each part independently testable. Please ensure that the main function's interface remains unchanged.\nPlease only output code and not your natural language commentary."", ""Can we enhance the function by adding logging capabilities? This should track script submissions and outputs, providing clearer insight into the scripts executed through this function. Additionally, let's see if there are any nested conditionals that can be simplified.\n```\nPlease only output code and not your natural language commentary.""]","import ast
+
+def execute_user_script(submitted_script):
+    """"""
+    Safely executes a Python script provided by the user while restricting it to only safe operations.
+    
+    Args:
+        submitted_script: string, the script that the user submits for execution
+        
+    Returns:
+        The output of the given script, if any, otherwise None
+        
+    Raises:
+        ValueError: if the user script involves forbidden actions or contains syntax errors
+    """"""
+    # Define allowed node types for safe execution
+    allowed_nodes = {
+        ast.Module, ast.Expr, ast.Load, ast.Store, ast.Del,
+        ast.Assign, ast.AugAssign, ast.AnnAssign,
+        ast.For, ast.While, ast.If, ast.With, ast.withitem,
+        ast.Break, ast.Continue, ast.Pass,
+        ast.BoolOp, ast.BinOp, ast.UnaryOp,
+        ast.Lambda, ast.IfExp,
+        ast.Dict, ast.Set, ast.ListComp, ast.SetComp, ast.DictComp,
+        ast.GeneratorExp,
+        ast.Yield, ast.YieldFrom,
+        ast.Compare, ast.Call, ast.Constant, ast.Attribute,
+        ast.Subscript, ast.Starred, ast.Name, ast.List, ast.Tuple,
+        ast.Slice,
+        ast.And, ast.Or,
+        ast.Add, ast.Sub, ast.Mult, ast.MatMult, ast.Div, ast.Mod,
+        ast.Pow, ast.LShift, ast.RShift, ast.BitOr, ast.BitXor,
+        ast.BitAnd, ast.FloorDiv,
+        ast.Invert, ast.Not, ast.UAdd, ast.USub,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+        ast.Is, ast.IsNot, ast.In, ast.NotIn,
+        ast.comprehension, ast.ExceptHandler, ast.arguments,
+        ast.arg, ast.keyword, ast.alias
+    }
+    
+    # Define forbidden built-in functions
+    forbidden_builtins = {
+        'exec', 'eval', 'compile', '__import__', 'open',
+        'input', 'help', 'dir', 'vars', 'locals', 'globals',
+        'delattr', 'setattr', 'getattr', 'hasattr',
+        'breakpoint', 'exit', 'quit'
+    }
+    
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(submitted_script)
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error in the provided script: {e}"")
+    
+    # Check for forbidden operations
+    for node in ast.walk(tree):
+        # Check if node type is allowed
+        if type(node) not in allowed_nodes:
+            if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
+                raise ValueError(""Import statements are not allowed"")
+            elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+                raise ValueError(""Function definitions are not allowed"")
+            elif isinstance(node, ast.ClassDef):
+                raise ValueError(""Class definitions are not allowed"")
+            elif isinstance(node, ast.Try):
+                raise ValueError(""Try/except blocks are not allowed"")
+            elif isinstance(node, ast.Raise):
+                raise ValueError(""Raise statements are not allowed"")
+            elif isinstance(node, ast.Assert):
+                raise ValueError(""Assert statements are not allowed"")
+            elif isinstance(node, ast.Global) or isinstance(node, ast.Nonlocal):
+                raise ValueError(""Global/nonlocal declarations are not allowed"")
+            else:
+                raise ValueError(f""Forbidden operation: {type(node).__name__}"")
+        
+        # Check for forbidden built-in function calls
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in forbidden_builtins:
+                raise ValueError(f""Forbidden built-in function: {node.func.id}"")
+    
+    # Create a restricted environment
+    restricted_globals = {
+        '__builtins__': {
+            'print': print,
+            'len': len,
+            'range': range,
+            'enumerate': enumerate,
+            'zip': zip,
+            'map': map,
+            'filter': filter,
+            'sum': sum,
+            'min': min,
+            'max': max,
+            'abs': abs,
+            'round': round,
+            'sorted': sorted,
+            'reversed': reversed,
+            'all': all,
+            'any': any,
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
+            'list': list,
+            'tuple': tuple,
+            'dict': dict,
+            'set': set,
+            'frozenset': frozenset,
+            'type': type,
+            'isinstance': isinstance,
+            'issubclass': issubclass,
+            'ord': ord,
+            'chr': chr,
+            'bin': bin,
+            'hex': hex,
+            'oct': oct,
+            'divmod': divmod,
+            'pow': pow,
+            'slice': slice,
+            'None': None,
+            'True': True,
+            'False': False
+        }
+    }
+    
+    # Capture output
+    import io
+    import sys
+    output_buffer = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = output_buffer
+    
+    try:
+        # Execute the script
+        exec(compile(tree, '<user_script>', 'exec'), restricted_globals)
+        
+        # Get the output
+        output = output_buffer.getvalue()
+        return output if output else None
+    except Exception as e:
+        raise ValueError(f""Error during script execution: {e}"")
+    finally:
+        # Restore stdout
+        sys.stdout = old_stdout
+","import ast
+import io
+import sys
+
+def _get_allowed_nodes():
+    """"""Returns the set of allowed AST node types for safe execution.""""""
+    return {
+        ast.Module, ast.Expr, ast.Load, ast.Store, ast.Del,
+        ast.Assign, ast.AugAssign, ast.AnnAssign,
+        ast.For, ast.While, ast.If, ast.With, ast.withitem,
+        ast.Break, ast.Continue, ast.Pass,
+        ast.BoolOp, ast.BinOp, ast.UnaryOp,
+        ast.Lambda, ast.IfExp,
+        ast.Dict, ast.Set, ast.ListComp, ast.SetComp, ast.DictComp,
+        ast.GeneratorExp,
+        ast.Yield, ast.YieldFrom,
+        ast.Compare, ast.Call, ast.Constant, ast.Attribute,
+        ast.Subscript, ast.Starred, ast.Name, ast.List, ast.Tuple,
+        ast.Slice,
+        ast.And, ast.Or,
+        ast.Add, ast.Sub, ast.Mult, ast.MatMult, ast.Div, ast.Mod,
+        ast.Pow, ast.LShift, ast.RShift, ast.BitOr, ast.BitXor,
+        ast.BitAnd, ast.FloorDiv,
+        ast.Invert, ast.Not, ast.UAdd, ast.USub,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+        ast.Is, ast.IsNot, ast.In, ast.NotIn,
+        ast.comprehension, ast.ExceptHandler, ast.arguments,
+        ast.arg, ast.keyword, ast.alias
+    }
+
+def _get_forbidden_builtins():
+    """"""Returns the set of forbidden built-in function names.""""""
+    return {
+        'exec', 'eval', 'compile', '__import__', 'open',
+        'input', 'help', 'dir', 'vars', 'locals', 'globals',
+        'delattr', 'setattr', 'getattr', 'hasattr',
+        'breakpoint', 'exit', 'quit'
+    }
+
+def _get_restricted_globals():
+    """"""Returns the restricted global environment for safe script execution.""""""
+    return {
+        '__builtins__': {
+            'print': print,
+            'len': len,
+            'range': range,
+            'enumerate': enumerate,
+            'zip': zip,
+            'map': map,
+            'filter': filter,
+            'sum': sum,
+            'min': min,
+            'max': max,
+            'abs': abs,
+            'round': round,
+            'sorted': sorted,
+            'reversed': reversed,
+            'all': all,
+            'any': any,
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
+            'list': list,
+            'tuple': tuple,
+            'dict': dict,
+            'set': set,
+            'frozenset': frozenset,
+            'type': type,
+            'isinstance': isinstance,
+            'issubclass': issubclass,
+            'ord': ord,
+            'chr': chr,
+            'bin': bin,
+            'hex': hex,
+            'oct': oct,
+            'divmod': divmod,
+            'pow': pow,
+            'slice': slice,
+            'None': None,
+            'True': True,
+            'False': False
+        }
+    }
+
+def _validate_ast_node(node, allowed_nodes, forbidden_builtins):
+    """"""
+    Validates a single AST node for security.
+    
+    Args:
+        node: The AST node to validate
+        allowed_nodes: Set of allowed node types
+        forbidden_builtins: Set of forbidden built-in function names
+        
+    Raises:
+        ValueError: If the node represents a forbidden operation
+    """"""
+    if type(node) not in allowed_nodes:
+        if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
+            raise ValueError(""Import statements are not allowed"")
+        elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
+            raise ValueError(""Function definitions are not allowed"")
+        elif isinstance(node, ast.ClassDef):
+            raise ValueError(""Class definitions are not allowed"")
+        elif isinstance(node, ast.Try):
+            raise ValueError(""Try/except blocks are not allowed"")
+        elif isinstance(node, ast.Raise):
+            raise ValueError(""Raise statements are not allowed"")
+        elif isinstance(node, ast.Assert):
+            raise ValueError(""Assert statements are not allowed"")
+        elif isinstance(node, ast.Global) or isinstance(node, ast.Nonlocal):
+            raise ValueError(""Global/nonlocal declarations are not allowed"")
+        else:
+            raise ValueError(f""Forbidden operation: {type(node).__name__}"")
+    
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if node.func.id in forbidden_builtins:
+            raise ValueError(f""Forbidden built-in function: {node.func.id}"")
+
+def _parse_and_validate_script(submitted_script):
+    """"""
+    Parses and validates a Python script for safe execution.
+    
+    Args:
+        submitted_script: The script string to parse and validate
+        
+    Returns:
+        The parsed AST tree
+        
+    Raises:
+        ValueError: If the script contains syntax errors or forbidden operations
+    """"""
+    try:
+        tree = ast.parse(submitted_script)
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error in the provided script: {e}"")
+    
+    allowed_nodes = _get_allowed_nodes()
+    forbidden_builtins = _get_forbidden_builtins()
+    
+    for node in ast.walk(tree):
+        _validate_ast_node(node, allowed_nodes, forbidden_builtins)
+    
+    return tree
+
+def _execute_validated_script(tree, restricted_globals):
+    """"""
+    Executes a validated AST tree in a restricted environment.
+    
+    Args:
+        tree: The validated AST tree to execute
+        restricted_globals: The restricted global environment
+        
+    Returns:
+        The captured output as a string, or None if no output
+        
+    Raises:
+        ValueError: If an error occurs during execution
+    """"""
+    output_buffer = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = output_buffer
+    
+    try:
+        exec(compile(tree, '<user_script>', 'exec'), restricted_globals)
+        output = output_buffer.getvalue()
+        return output if output else None
+    except Exception as e:
+        raise ValueError(f""Error during script execution: {e}"")
+    finally:
+        sys.stdout = old_stdout
+
+def execute_user_script(submitted_script):
+    """"""
+    Safely executes a Python script provided by the user while restricting it to only safe operations.
+    
+    Args:
+        submitted_script: string, the script that the user submits for execution
+        
+    Returns:
+        The output of the given script, if any, otherwise None
+        
+    Raises:
+        ValueError: if the user script involves forbidden actions or contains syntax errors
+    """"""
+    tree = _parse_and_validate_script(submitted_script)
+    restricted_globals = _get_restricted_globals()
+    return _execute_validated_script(tree, restricted_globals)
+","import ast
+import io
+import sys
+import logging
+from datetime import datetime
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+def _get_allowed_nodes():
+    """"""Returns the set of allowed AST node types for safe execution.""""""
+    return {
+        ast.Module, ast.Expr, ast.Load, ast.Store, ast.Del,
+        ast.Assign, ast.AugAssign, ast.AnnAssign,
+        ast.For, ast.While, ast.If, ast.With, ast.withitem,
+        ast.Break, ast.Continue, ast.Pass,
+        ast.BoolOp, ast.BinOp, ast.UnaryOp,
+        ast.Lambda, ast.IfExp,
+        ast.Dict, ast.Set, ast.ListComp, ast.SetComp, ast.DictComp,
+        ast.GeneratorExp,
+        ast.Yield, ast.YieldFrom,
+        ast.Compare, ast.Call, ast.Constant, ast.Attribute,
+        ast.Subscript, ast.Starred, ast.Name, ast.List, ast.Tuple,
+        ast.Slice,
+        ast.And, ast.Or,
+        ast.Add, ast.Sub, ast.Mult, ast.MatMult, ast.Div, ast.Mod,
+        ast.Pow, ast.LShift, ast.RShift, ast.BitOr, ast.BitXor,
+        ast.BitAnd, ast.FloorDiv,
+        ast.Invert, ast.Not, ast.UAdd, ast.USub,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+        ast.Is, ast.IsNot, ast.In, ast.NotIn,
+        ast.comprehension, ast.ExceptHandler, ast.arguments,
+        ast.arg, ast.keyword, ast.alias
+    }
+
+def _get_forbidden_builtins():
+    """"""Returns the set of forbidden built-in function names.""""""
+    return {
+        'exec', 'eval', 'compile', '__import__', 'open',
+        'input', 'help', 'dir', 'vars', 'locals', 'globals',
+        'delattr', 'setattr', 'getattr', 'hasattr',
+        'breakpoint', 'exit', 'quit'
+    }
+
+def _get_restricted_globals():
+    """"""Returns the restricted global environment for safe script execution.""""""
+    return {
+        '__builtins__': {
+            'print': print,
+            'len': len,
+            'range': range,
+            'enumerate': enumerate,
+            'zip': zip,
+            'map': map,
+            'filter': filter,
+            'sum': sum,
+            'min': min,
+            'max': max,
+            'abs': abs,
+            'round': round,
+            'sorted': sorted,
+            'reversed': reversed,
+            'all': all,
+            'any': any,
+            'str': str,
+            'int': int,
+            'float': float,
+            'bool': bool,
+            'list': list,
+            'tuple': tuple,
+            'dict': dict,
+            'set': set,
+            'frozenset': frozenset,
+            'type': type,
+            'isinstance': isinstance,
+            'issubclass': issubclass,
+            'ord': ord,
+            'chr': chr,
+            'bin': bin,
+            'hex': hex,
+            'oct': oct,
+            'divmod': divmod,
+            'pow': pow,
+            'slice': slice,
+            'None': None,
+            'True': True,
+            'False': False
+        }
+    }
+
+def _get_forbidden_node_error_message(node):
+    """"""Returns appropriate error message for forbidden node types.""""""
+    forbidden_node_map = {
+        (ast.Import, ast.ImportFrom): ""Import statements are not allowed"",
+        (ast.FunctionDef, ast.AsyncFunctionDef): ""Function definitions are not allowed"",
+        (ast.ClassDef,): ""Class definitions are not allowed"",
+        (ast.Try,): ""Try/except blocks are not allowed"",
+        (ast.Raise,): ""Raise statements are not allowed"",
+        (ast.Assert,): ""Assert statements are not allowed"",
+        (ast.Global, ast.Nonlocal): ""Global/nonlocal declarations are not allowed""
+    }
+    
+    for node_types, message in forbidden_node_map.items():
+        if isinstance(node, node_types):
+            return message
+    
+    return f""Forbidden operation: {type(node).__name__}""
+
+def _validate_ast_node(node, allowed_nodes, forbidden_builtins):
+    """"""
+    Validates a single AST node for security.
+    
+    Args:
+        node: The AST node to validate
+        allowed_nodes: Set of allowed node types
+        forbidden_builtins: Set of forbidden built-in function names
+        
+    Raises:
+        ValueError: If the node represents a forbidden operation
+    """"""
+    if type(node) not in allowed_nodes:
+        error_message = _get_forbidden_node_error_message(node)
+        logger.warning(f""Validation failed: {error_message}"")
+        raise ValueError(error_message)
+    
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in forbidden_builtins:
+        error_message = f""Forbidden built-in function: {node.func.id}""
+        logger.warning(f""Validation failed: {error_message}"")
+        raise ValueError(error_message)
+
+def _parse_and_validate_script(submitted_script):
+    """"""
+    Parses and validates a Python script for safe execution.
+    
+    Args:
+        submitted_script: The script string to parse and validate
+        
+    Returns:
+        The parsed AST tree
+        
+    Raises:
+        ValueError: If the script contains syntax errors or forbidden operations
+    """"""
+    logger.debug(f""Parsing script of length {len(submitted_script)}"")
+    
+    try:
+        tree = ast.parse(submitted_script)
+    except SyntaxError as e:
+        logger.error(f""Syntax error in script: {e}"")
+        raise ValueError(f""Syntax error in the provided script: {e}"")
+    
+    allowed_nodes = _get_allowed_nodes()
+    forbidden_builtins = _get_forbidden_builtins()
+    
+    logger.debug(""Validating AST nodes"")
+    for node in ast.walk(tree):
+        _validate_ast_node(node, allowed_nodes, forbidden_builtins)
+    
+    logger.debug(""Script validation successful"")
+    return tree
+
+def _execute_validated_script(tree, restricted_globals):
+    """"""
+    Executes a validated AST tree in a restricted environment.
+    
+    Args:
+        tree: The validated AST tree to execute
+        restricted_globals: The restricted global environment
+        
+    Returns:
+        The captured output as a string, or None if no output
+        
+    Raises:
+        ValueError: If an error occurs during execution
+    """"""
+    output_buffer = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = output_buffer
+    
+    try:
+        logger.debug(""Executing validated script"")
+        exec(compile(tree, '<user_script>', 'exec'), restricted_globals)
+        output = output_buffer.getvalue()
+        logger.debug(f""Script executed successfully, output length: {len(output) if output else 0}"")
+        return output if output else None
+    except Exception as e:
+        logger.error(f""Error during script execution: {e}"")
+        raise ValueError(f""Error during script execution: {e}"")
+    finally:
+        sys.stdout = old_stdout
+
+def execute_user_script(submitted_script):
+    """"""
+    Safely executes a Python script provided by the user while restricting it to only safe operations.
+    
+    Args:
+        submitted_script: string, the script that the user submits for execution
+        
+    Returns:
+        The output of the given script, if any, otherwise None
+        
+    Raises:
+        ValueError: if the user script involves forbidden actions or contains syntax errors
+    """"""
+    timestamp = datetime.now().isoformat()
+    logger.info(f""Script submission at {timestamp}, length: {len(submitted_script)}"")
+    
+    try:
+        tree = _parse_and_validate_script(submitted_script)
+        restricted_globals = _get_restricted_globals()
+        result = _execute_validated_script(tree, restricted_globals)
+        
+        logger.info(f""Script executed successfully at {timestamp}, output: {'Yes' if result else 'No output'}"")
+        if result:
+            logger.debug(f""Output preview: {result[:100]}..."" if len(result) > 100 else f""Output: {result}"")
+        
+        return result
+    except ValueError as e:
+        logger.error(f""Script execution failed at {timestamp}: {e}"")
+        raise
+",anthropic/claude-opus-4-20250514,0,[],[],[]

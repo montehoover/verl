@@ -1,0 +1,112 @@
+import re
+from string import Formatter
+
+class Student:
+    def __init__(self, student_token, name, course, age, gpa, home_address, discipline_record):
+        self.student_token = student_token
+        self.name = name
+        self.course = course
+        self.age = age
+        self.gpa = gpa
+        self.home_address = home_address
+        self.discipline_record = discipline_record
+
+students = {
+    "S005": Student("S005", "Eve Smith", "Electrical Engineering", 24, 4.0, "987 Cedar St, Pineville", "None"),
+    "S006": Student("S006", "Frank Brown", "Physics", 25, 3.7, "246 Birch St, Oakton", "Warning in 2021"),
+}
+
+ALLOWED_ATTRIBUTES = {"name", "course", "age"}
+
+def compile_student_report(student_token: str, report_template: str) -> str:
+    """
+    Creates a customizable report for a student based on the provided template.
+
+    Args:
+        student_token: A unique string representing the student's identifier.
+        report_template: A format string used to create the report by embedding
+                         allowed student attributes (e.g., '{student.name}').
+
+    Returns:
+        The generated report as a formatted string.
+
+    Raises:
+        ValueError: If an unauthorized access to sensitive data is attempted,
+                    if the specified student_token does not exist, or if the
+                    template contains unresolvable placeholders.
+    """
+    if student_token not in students:
+        raise ValueError(f"Student token '{student_token}' does not exist in the system.")
+
+    student = students[student_token]
+    
+    formatter = Formatter()
+    parsed_template = formatter.parse(report_template)
+    
+    data_for_formatting = {}
+
+    for _, field_name, _, _ in parsed_template:
+        if field_name:
+            if field_name.startswith("student."):
+                attr_name = field_name[len("student."):]
+                if attr_name not in ALLOWED_ATTRIBUTES:
+                    raise ValueError(f"Unauthorized access to sensitive data: Attempt to access attribute '{attr_name}'.")
+                if not hasattr(student, attr_name):
+                    # This should ideally not be hit if ALLOWED_ATTRIBUTES are correctly defined
+                    # based on Student class attributes.
+                    raise ValueError(f"Student object does not have an attribute '{attr_name}'.")
+                data_for_formatting[field_name] = getattr(student, attr_name)
+            # If field_name does not start with "student.", it's either a non-student placeholder
+            # or a malformed one. If it's not in data_for_formatting by the end,
+            # report_template.format(**data_for_formatting) will raise a KeyError.
+
+    try:
+        return report_template.format(**data_for_formatting)
+    except KeyError as e:
+        # This catches placeholders that were not 'student.attribute' and thus not added
+        # to data_for_formatting, or if a 'student.attribute' was somehow missed (should not happen).
+        raise ValueError(f"Template contains an unresolvable placeholder: {e}") from e
+
+if __name__ == '__main__':
+    # Example Usage based on the problem description
+    try:
+        # Valid case
+        report1 = compile_student_report(
+            student_token="S005",
+            report_template="Student: {student.name}, Age: {student.age}, Course: {student.course}"
+        )
+        print(f"Report 1: {report1}")
+        # Expected: Student: Eve Smith, Age: 24, Course: Electrical Engineering
+
+        # Attempt to access sensitive data
+        try:
+            compile_student_report(
+                student_token="S005",
+                report_template="Student: {student.name}, GPA: {student.gpa}"
+            )
+        except ValueError as e:
+            print(f"Error (Sensitive Data): {e}")
+            # Expected: ValueError: Unauthorized access to sensitive data: Attempt to access attribute 'gpa'.
+
+        # Non-existent student token
+        try:
+            compile_student_report(
+                student_token="S999",
+                report_template="Student: {student.name}"
+            )
+        except ValueError as e:
+            print(f"Error (Invalid Token): {e}")
+            # Expected: ValueError: Student token 'S999' does not exist in the system.
+
+        # Template with unresolvable placeholder (not student related)
+        try:
+            compile_student_report(
+                student_token="S006",
+                report_template="Student: {student.name}, Unknown: {other_info}"
+            )
+        except ValueError as e:
+            print(f"Error (Unresolvable Placeholder): {e}")
+            # Expected: ValueError: Template contains an unresolvable placeholder: 'other_info'
+            
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")

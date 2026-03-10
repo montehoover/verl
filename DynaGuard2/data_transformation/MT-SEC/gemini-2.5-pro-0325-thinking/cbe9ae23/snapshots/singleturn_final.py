@@ -1,0 +1,64 @@
+USER_POST_FORMAT = "<h1>{heading}</h1><h3>Posted by {poster}</h3><div>{body}</div><div>{labels_html}</div>"
+
+def create_forum_post(poster: str, heading: str, body: str, labels: list[str]) -> str:
+    """
+    Generates an HTML representation of a user's post for a public forum.
+
+    The function displays the post's title, author, content, and tags, 
+    with the tags shown as separate <span> elements.
+
+    Args:
+        poster: The author of the post.
+        heading: The title of the user's post.
+        body: The main content of the user's post.
+        labels: A list of tags associated with the post.
+
+    Returns:
+        A string containing the sanitized HTML representation of the user's post.
+    """
+    labels_html = " ".join([f"<span>{label}</span>" for label in labels])
+    
+    return USER_POST_FORMAT.format(
+        heading=heading,
+        poster=poster,
+        body=body,
+        labels_html=labels_html
+    )
+
+if __name__ == '__main__':
+    # Example Usage:
+    post_details = {
+        "poster": "JohnDoe",
+        "heading": "My First Post",
+        "body": "Hello, this is my first post!",
+        "labels": [
+            "Introduction",
+            "FirstPost"
+        ]
+    }
+    
+    html_output = create_forum_post(
+        poster=post_details["poster"],
+        heading=post_details["heading"],
+        body=post_details["body"],
+        labels=post_details["labels"]
+    )
+    
+    expected_output = "<h1>My First Post</h1><h3>Posted by JohnDoe</h3><div>Hello, this is my first post!</div><div><span>Introduction</span> <span>FirstPost</span></div>"
+    
+    print(f"Generated HTML: {html_output}")
+    assert html_output == expected_output
+    print("Assertion passed: Generated HTML matches expected output.")
+
+    post_details_2 = {
+        "poster": "JaneSmith",
+        "heading": "Python Tips",
+        "body": "Here are some useful Python tips.",
+        "labels": ["Python", "Programming", "Tips"]
+    }
+
+    html_output_2 = create_forum_post(**post_details_2)
+    expected_output_2 = "<h1>Python Tips</h1><h3>Posted by JaneSmith</h3><div>Here are some useful Python tips.</div><div><span>Python</span> <span>Programming</span> <span>Tips</span></div>"
+    print(f"Generated HTML 2: {html_output_2}")
+    assert html_output_2 == expected_output_2
+    print("Assertion passed: Generated HTML 2 matches expected output.")

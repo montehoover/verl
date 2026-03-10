@@ -1,0 +1,105 @@
+import ast
+
+# Define the set of disallowed AST node types. These are nodes that could
+# potentially lead to unsafe operations or are overly complex for "straightforward"
+# math/logic expressions.
+DISALLOWED_NODES = (
+    # Attribute access (e.g., x.foo, obj.__class__)
+    ast.Attribute,
+    # Subscripting (e.g., x[0], data['key'])
+    ast.Subscript,
+    # Function calls (e.g., func(), abs()). All calls are disallowed for maximum safety.
+    # If specific safe functions were needed, ast.Call would be removed from this list,
+    # and calls would be validated against an allowlist of function names,
+    # with corresponding functions added to SAFE_GLOBALS.
+    ast.Call,
+    # Lambda expressions
+    ast.Lambda,
+    # Comprehensions and generator expressions
+    ast.ListComp,
+    ast.DictComp,
+    ast.SetComp,
+    ast.GeneratorExp,
+    # Starred expressions (e.g., *args, **kwargs)
+    ast.Starred,
+    # Yield and Await expressions (these would typically cause SyntaxError in 'eval' mode)
+    ast.Yield,
+    ast.YieldFrom,
+    ast.Await,
+    # F-strings (FormattedValue for parts like {foo}, JoinedStr for the whole f"...")
+    # F-strings can contain arbitrary expressions, so they are disallowed.
+    ast.FormattedValue,
+    ast.JoinedStr,
+    # Walrus operator (assignment expressions, e.g., (x := 1))
+    ast.NamedExpr,
+    
+    # The following are mostly statement-related node types.
+    # ast.parse(..., mode='eval') would raise a SyntaxError if these appear,
+    # but they are included defensively. ast.IfExp (ternary operator) is allowed.
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+    ast.Return, ast.Delete, ast.Assign, ast.AugAssign, ast.AnnAssign,
+    ast.For, ast.AsyncFor, ast.While, ast.If, ast.With, ast.AsyncWith,
+    ast.Raise, ast.Try, ast.Assert, ast.Import, ast.ImportFrom,
+    ast.Global, ast.Nonlocal, ast.Pass, ast.Break, ast.Continue,
+)
+
+# Define the global environment for eval.
+# "__builtins__": {} ensures that no Python built-in functions are accessible.
+# Literals like True, False, None are parsed as ast.Constant (Python 3.8+)
+# or ast.NameConstant (older versions). These AST nodes are not in DISALLOWED_NODES,
+# so their values are directly available from the AST.
+SAFE_GLOBALS = {"__builtins__": {}}
+
+def evaluate_expression_safely(input_expr: str) -> str:
+    """
+    Evaluates a user-input expression string safely.
+
+    The function parses the input string into an Abstract Syntax Tree (AST),
+    validates the AST against a list of disallowed node types to prevent
+    unsafe operations (like function calls, attribute access, etc.),
+    then compiles and evaluates the expression in a restricted environment.
+
+    Args:
+        input_expr: The string expression to evaluate.
+
+    Returns:
+        The string result of the expression if successful and deemed safe.
+        Returns 'Processing Failed!' if the input is malformed, contains
+        disallowed operations, or results in any error during evaluation.
+    """
+    try:
+        # 1. Parse the expression string into an AST.
+        #    mode='eval' ensures it's an expression, not statements.
+        #    This can raise SyntaxError for invalid Python syntax.
+        tree = ast.parse(input_expr, mode='eval')
+
+        # 2. Validate AST nodes.
+        #    Walk the tree and check if any node is of a disallowed type.
+        for node in ast.walk(tree):
+            if isinstance(node, DISALLOWED_NODES):
+                return 'Processing Failed!'
+        
+        # Note: ast.IfExp (ternary operator like 'a if b else c') is allowed
+        # as it's not in DISALLOWED_NODES and is a common logic expression.
+
+        # 3. Compile the validated AST to a code object.
+        #    This can raise ValueError or other errors for malformed ASTs
+        #    not caught by parse (though less common for 'eval' mode).
+        #    Can also raise RecursionError for too complex/nested expressions.
+        code = compile(tree, filename='<input_expression>', mode='eval')
+
+        # 4. Evaluate the compiled code object in a restricted environment.
+        #    SAFE_GLOBALS provides the global namespace for evaluation.
+        #    An empty dictionary for locals means no local variables are predefined.
+        #    This can raise various runtime errors (e.g., ZeroDivisionError,
+        #    OverflowError, MemoryError, TypeError).
+        result = eval(code, SAFE_GLOBALS, {})
+
+        # 5. Convert result to string and return.
+        return str(result)
+
+    except Exception:
+        # Catch any exception during parsing, compilation, or evaluation.
+        # This includes SyntaxError, NameError (if a var is used but not in SAFE_GLOBALS),
+        # ZeroDivisionError, OverflowError, MemoryError, RecursionError, etc.
+        return 'Processing Failed!'

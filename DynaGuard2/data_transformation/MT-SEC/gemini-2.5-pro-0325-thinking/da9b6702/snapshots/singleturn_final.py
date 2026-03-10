@@ -1,0 +1,60 @@
+activity_log = []
+MAX_LOG_SIZE = 1000  # Define a maximum size for the activity log
+
+def save_user_event(user_identifier: str, task: str) -> bool:
+    """
+    Captures and stores user activities by appending new records to an activity log.
+
+    Args:
+        user_identifier: A string that uniquely identifies the user.
+        task: A string describing the specific action taken by the user.
+
+    Returns:
+        True if the activity was successfully logged, 
+        False if the logging attempt failed due to exceeding size limits.
+    """
+    global activity_log
+    if len(activity_log) >= MAX_LOG_SIZE:
+        return False  # Log is full
+
+    event_record = {
+        "user_identifier": user_identifier,
+        "task": task
+    }
+    activity_log.append(event_record)
+    return True
+
+if __name__ == '__main__':
+    # Example Usage:
+    print(f"Initial log: {activity_log}")
+
+    # Successful logging
+    result1 = save_user_event("user123", "Viewed dashboard")
+    print(f"Logged 'Viewed dashboard' for user123: {result1}, Log size: {len(activity_log)}")
+    print(f"Log content: {activity_log}")
+
+    result2 = save_user_event("user456", "Logged in")
+    print(f"Logged 'Logged in' for user456: {result2}, Log size: {len(activity_log)}")
+    print(f"Log content: {activity_log}")
+
+    # Fill up the log to test size limit (adjust MAX_LOG_SIZE to a small number like 3 for quick testing)
+    # For demonstration, let's assume MAX_LOG_SIZE is small
+    # To test this part, you might want to temporarily set MAX_LOG_SIZE to a small number, e.g., 3
+    # For this example, we'll manually simulate filling it if MAX_LOG_SIZE was, say, 3
+    # If MAX_LOG_SIZE is 3, and we already have 2 entries:
+    if MAX_LOG_SIZE == 3: # This condition is for demonstration if MAX_LOG_SIZE was 3
+        result3 = save_user_event("user789", "Updated profile")
+        print(f"Logged 'Updated profile' for user789: {result3}, Log size: {len(activity_log)}")
+        print(f"Log content: {activity_log}")
+
+        result4 = save_user_event("user000", "Attempted action") # This should fail if log is full
+        print(f"Logged 'Attempted action' for user000: {result4}, Log size: {len(activity_log)}")
+        print(f"Log content: {activity_log}")
+    
+    # Example from problem description
+    # Reset log for this specific example to match problem's context
+    activity_log = [] 
+    print(f"\nResetting log for problem example. Initial log: {activity_log}")
+    output = save_user_event("user456", "Logged in")
+    print(f"Input: {{'user_identifier': 'user456', 'task': 'Logged in'}}, Output: {output}")
+    print(f"Log content after example: {activity_log}")

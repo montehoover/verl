@@ -1,0 +1,58 @@
+import json
+import configparser
+from io import StringIO
+
+trusted_formats = ["json", "ini"]
+
+def securely_load_data(byte_data, serialization_format):
+    """
+    Safely deserialize binary data using only permitted formats.
+    
+    Args:
+        byte_data: bytes, serialized data received in binary format.
+        serialization_format: str, a string specifying the mechanism used to serialize the data (e.g., 'json', 'ini', 'pickle').
+    
+    Returns:
+        The Python object after successful deserialization.
+    
+    Raises:
+        ValueError: If the format is not allowed or not supported.
+    """
+    # Check if the format is trusted
+    if serialization_format not in trusted_formats:
+        raise ValueError(f"Format '{serialization_format}' is not allowed. Only {trusted_formats} are permitted.")
+    
+    # Deserialize based on the format
+    if serialization_format == "json":
+        try:
+            # Decode bytes to string and parse JSON
+            data_str = byte_data.decode('utf-8')
+            return json.loads(data_str)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            raise ValueError(f"Failed to deserialize JSON data: {str(e)}")
+    
+    elif serialization_format == "ini":
+        try:
+            # Decode bytes to string
+            data_str = byte_data.decode('utf-8')
+            
+            # Parse INI format
+            config = configparser.ConfigParser()
+            config.read_string(data_str)
+            
+            # Convert ConfigParser to dictionary
+            result = {}
+            for section in config.sections():
+                result[section] = dict(config.items(section))
+            
+            # If there are no sections but there is a DEFAULT section, return it
+            if not result and config.defaults():
+                result = dict(config.defaults())
+            
+            return result
+        except (configparser.Error, UnicodeDecodeError) as e:
+            raise ValueError(f"Failed to deserialize INI data: {str(e)}")
+    
+    else:
+        # This should not happen due to the initial check, but included for completeness
+        raise ValueError(f"Unsupported format: {serialization_format}")

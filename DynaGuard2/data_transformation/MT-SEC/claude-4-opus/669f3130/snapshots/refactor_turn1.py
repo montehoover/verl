@@ -1,0 +1,25 @@
+def exec_calculation(calc_string: str) -> str:
+    try:
+        # Check for dangerous operations
+        dangerous_keywords = ['import', '__', 'exec', 'eval', 'compile', 'open', 'file', 'input', 'raw_input', 'globals', 'locals', 'vars', 'dir', 'getattr', 'setattr', 'delattr', 'hasattr', 'type', 'isinstance', 'issubclass', 'callable', 'classmethod', 'staticmethod', 'property', 'super', 'object', 'print', 'help', 'quit', 'exit', 'copyright', 'credits', 'license']
+        
+        for keyword in dangerous_keywords:
+            if keyword in calc_string.lower():
+                return 'Computation Error!'
+        
+        # Check for function calls
+        if '(' in calc_string and ')' in calc_string:
+            return 'Computation Error!'
+        
+        # Only allow numbers, basic operators, spaces, and decimal points
+        allowed_chars = '0123456789+-*/ .'
+        for char in calc_string:
+            if char not in allowed_chars:
+                return 'Computation Error!'
+        
+        # Evaluate the expression
+        result = eval(calc_string)
+        return str(result)
+        
+    except:
+        return 'Computation Error!'

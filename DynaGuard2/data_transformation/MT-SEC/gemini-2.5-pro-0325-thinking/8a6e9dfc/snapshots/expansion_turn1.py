@@ -1,0 +1,13 @@
+def check_csrf_token(headers: dict) -> bool:
+    """
+    Verifies the CSRF token from request headers.
+
+    Args:
+        headers: A dictionary representing the request headers.
+
+    Returns:
+        True if the CSRF token is valid, False otherwise.
+    """
+    expected_token = 'secure_csrf_token'
+    actual_token = headers.get('X-CSRF-Token')
+    return actual_token == expected_token

@@ -1,0 +1,198 @@
+import ast
+import logging
+from typing import Any
+
+# Configure module-level logger to write to current working directory
+LOGGER_NAME = "quizapp_evaluator"
+LOG_FILE = "quiz_evaluations.log"
+
+logger = logging.getLogger(LOGGER_NAME)
+if not logger.handlers:
+    logger.setLevel(logging.INFO)
+    handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+
+def validate_input(quiz_expr: Any) -> bool:
+    """
+    Validate the raw input before any parsing.
+    Currently ensures the input is a string.
+    """
+    return isinstance(quiz_expr, str)
+
+
+def parse_to_ast(quiz_expr: str) -> ast.AST:
+    """
+    Parse the input string into a Python AST in 'eval' mode.
+    Raises SyntaxError or ValueError on invalid input.
+    """
+    if not quiz_expr:
+        # Empty string is invalid for an expression
+        raise SyntaxError("Empty expression")
+    return ast.parse(quiz_expr, mode='eval')
+
+
+def is_safe_index(node: Any) -> bool:
+    if node is None:
+        return True
+    return is_safe_node(node)
+
+
+def is_safe_slice(node: ast.AST) -> bool:
+    # Allow simple indices, slices, or tuples of indices for multi-dim slicing
+    if isinstance(node, ast.Slice):
+        return is_safe_node(node)
+    if isinstance(node, ast.Tuple):
+        return all(is_safe_slice(elt) for elt in node.elts)
+    # In Py3.9+, indices are general expressions (e.g., Constant)
+    return is_safe_node(node)
+
+
+def is_safe_node(node: ast.AST) -> bool:
+    """
+    AST validator (whitelist-based). Returns True if the AST contains only safe nodes.
+    """
+    # Explicitly deny dangerous/unsupported nodes
+    forbidden = (
+        ast.Call,
+        ast.Attribute,
+        ast.Name,
+        ast.Lambda,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+        ast.comprehension,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.Import,
+        ast.ImportFrom,
+        ast.With,
+        ast.Try,
+        ast.While,
+        ast.For,
+        ast.If,
+        ast.Assign,
+        ast.AugAssign,
+        ast.AnnAssign,
+        ast.Delete,
+        ast.ClassDef,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.Global,
+        ast.Nonlocal,
+        ast.Raise,
+        ast.Assert,
+        ast.Starred,
+        ast.NamedExpr,  # walrus operator
+        ast.Match,      # structural pattern matching
+    )
+    if isinstance(node, forbidden):
+        return False
+
+    # Allowed root
+    if isinstance(node, ast.Expression):
+        return is_safe_node(node.body)
+
+    # Literals
+    if isinstance(node, ast.Constant):
+        # Allow simple immutable types only
+        return isinstance(node.value, (int, float, bool, str, type(None), bytes))
+
+    # Containers
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(is_safe_node(elt) for elt in node.elts)
+    if isinstance(node, ast.Dict):
+        # Disallow dict unpacking (keys can be None for **mapping)
+        if any(k is None for k in node.keys):
+            return False
+        return all(is_safe_node(k) and is_safe_node(v) for k, v in zip(node.keys, node.values))
+
+    # Arithmetic and boolean operations
+    if isinstance(node, ast.UnaryOp):
+        allowed_unary = (ast.UAdd, ast.USub, ast.Not)
+        return isinstance(node.op, allowed_unary) and is_safe_node(node.operand)
+
+    if isinstance(node, ast.BinOp):
+        # Deliberately excluding Pow and bit shifts to avoid resource abuse
+        allowed_bin = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)
+        return isinstance(node.op, allowed_bin) and is_safe_node(node.left) and is_safe_node(node.right)
+
+    if isinstance(node, ast.BoolOp):
+        allowed_bool = (ast.And, ast.Or)
+        return isinstance(node.op, allowed_bool) and all(is_safe_node(v) for v in node.values)
+
+    if isinstance(node, ast.Compare):
+        allowed_cmp = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Is, ast.IsNot)
+        if not all(isinstance(op, allowed_cmp) for op in node.ops):
+            return False
+        if not is_safe_node(node.left):
+            return False
+        return all(is_safe_node(comp) for comp in node.comparators)
+
+    if isinstance(node, ast.IfExp):  # ternary
+        return is_safe_node(node.test) and is_safe_node(node.body) and is_safe_node(node.orelse)
+
+    # Subscription and slicing
+    if isinstance(node, ast.Subscript):
+        return is_safe_node(node.value) and is_safe_slice(node.slice)
+
+    if isinstance(node, ast.Slice):
+        return is_safe_index(node.lower) and is_safe_index(node.upper) and is_safe_index(node.step)
+
+    # f-strings
+    if isinstance(node, ast.JoinedStr):
+        return all(is_safe_node(v) for v in node.values)
+    if isinstance(node, ast.FormattedValue):
+        # format_spec is either None or a JoinedStr
+        if node.format_spec is not None and not is_safe_node(node.format_spec):
+            return False
+        return is_safe_node(node.value)
+
+    # Anything else is unsafe
+    return False
+
+
+def evaluate_ast_expression(tree: ast.AST) -> Any:
+    """
+    Evaluate a pre-validated AST expression in a restricted context.
+    Raises exceptions on failure.
+    """
+    compiled = compile(tree, filename="<quiz_expr>", mode="eval")
+    return eval(compiled, {"__builtins__": {}}, {})
+
+
+def evaluate_quiz_expression(quiz_expr: str) -> str:
+    """
+    Safely evaluates a user-provided Python expression and returns the result as a string.
+    Returns 'Error!' if the input is unsafe or evaluation fails.
+    """
+    # Begin evaluation logging
+    logger.info(f"Evaluating expression: {quiz_expr!r}")
+
+    # Guard clauses for invalid/unsafe input
+    if not validate_input(quiz_expr):
+        logger.error("Invalid input: input is not a string")
+        return 'Error!'
+
+    try:
+        tree = parse_to_ast(quiz_expr)
+    except Exception as e:
+        logger.error(f"Parsing failed: {type(e).__name__}: {e}")
+        return 'Error!'
+
+    if not is_safe_node(tree):
+        logger.error("Rejected expression: unsafe AST after validation")
+        return 'Error!'
+
+    try:
+        result = evaluate_ast_expression(tree)
+        logger.info(f"Evaluation succeeded. Result: {result!r}")
+        return str(result)
+    except Exception as e:
+        logger.error(f"Evaluation failed: {type(e).__name__}: {e}")
+        return 'Error!'

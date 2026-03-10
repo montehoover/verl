@@ -1,0 +1,141 @@
+import re
+import ast
+
+# Allowed AST node types for safe evaluation
+ALLOWED_NODES = {
+    ast.Expression, ast.Num, ast.BinOp, ast.UnaryOp,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.USub, ast.UAdd,
+    ast.Constant # For Python 3.8+ where ast.Num is deprecated
+}
+
+# Allowed operators mapping
+OPERATORS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b,
+}
+
+UNARY_OPERATORS = {
+    ast.USub: lambda a: -a,
+    ast.UAdd: lambda a: +a,
+}
+
+def _eval_ast_node(node):
+    """
+    Recursively evaluates an AST node.
+    Only whitelisted node types are processed.
+    """
+    if not isinstance(node, tuple(ALLOWED_NODES)):
+        raise ValueError(f"Unsupported AST node type: {type(node).__name__}")
+
+    if isinstance(node, ast.Expression):
+        return _eval_ast_node(node.body)
+    elif isinstance(node, (ast.Num, ast.Constant)): # ast.Num for <3.8, ast.Constant for >=3.8
+        return node.n
+    elif isinstance(node, ast.BinOp):
+        left = _eval_ast_node(node.left)
+        right = _eval_ast_node(node.right)
+        op_type = type(node.op)
+        if op_type in OPERATORS:
+            if op_type == ast.Div and right == 0:
+                raise ValueError("Division by zero is not allowed.")
+            return OPERATORS[op_type](left, right)
+        else:
+            raise ValueError(f"Unsupported binary operator: {op_type.__name__}")
+    elif isinstance(node, ast.UnaryOp):
+        operand = _eval_ast_node(node.operand)
+        op_type = type(node.op)
+        if op_type in UNARY_OPERATORS:
+            return UNARY_OPERATORS[op_type](operand)
+        else:
+            raise ValueError(f"Unsupported unary operator: {op_type.__name__}")
+    else:
+        # This case should ideally be caught by the initial isinstance check,
+        # but it's here as a fallback.
+        raise ValueError(f"Unexpected AST node type during evaluation: {type(node).__name__}")
+
+
+def parse_and_calculate(expression: str):
+    """
+    Processes a mathematical expression provided by a user,
+    parsing the expression and performing the calculation.
+
+    Args:
+        expression: str, the arithmetic expression provided by the user.
+
+    Returns:
+        The result of the calculated expression.
+
+    Raises:
+        ValueError: if the input contains unsupported characters,
+                    malicious commands, or cannot be computed.
+    """
+    if not isinstance(expression, str):
+        raise ValueError("Expression must be a string.")
+
+    # Validate allowed characters (digits, operators, parentheses, whitespace)
+    # This regex allows numbers (int/float), operators +-*/, parentheses, and whitespace.
+    if not re.fullmatch(r"^[0-9\.\s\+\-\*\/\(\)]*$", expression):
+        raise ValueError("Expression contains unsupported characters.")
+
+    if not expression.strip():
+        raise ValueError("Expression cannot be empty.")
+
+    try:
+        # Parse the expression into an AST
+        # mode='eval' is used because we expect a single expression
+        parsed_ast = ast.parse(expression, mode='eval')
+        
+        # Recursively check all nodes in the parsed AST
+        for node in ast.walk(parsed_ast):
+            if not isinstance(node, tuple(ALLOWED_NODES)):
+                raise ValueError(f"Unsupported operation or construct: {type(node).__name__}")
+
+        # Evaluate the AST
+        result = _eval_ast_node(parsed_ast)
+        return result
+    except SyntaxError:
+        raise ValueError("Invalid syntax in expression.")
+    except RecursionError: # AST evaluation could hit recursion limits for deeply nested expressions
+        raise ValueError("Expression is too complex or deeply nested.")
+    except ValueError as ve: # Catch our custom ValueErrors and re-raise
+        raise ve
+    except Exception as e:
+        # Catch any other unexpected errors during parsing or evaluation
+        raise ValueError(f"Could not compute expression: {e}")
+
+if __name__ == '__main__':
+    # Example Usage:
+    test_expressions = [
+        ("3 + 5 * (2 - 1)", 8),
+        ("10 / 2", 5.0),
+        ("-5 + 2", -3),
+        ("2 * (3 + (4 * 5))", 46),
+        ("10 / 0", "ValueError"),
+        ("1 + ", "ValueError"),
+        ("1 + 'abc'", "ValueError"),
+        ("import os", "ValueError"),
+        ("__import__('os').system('echo hello')", "ValueError"),
+        ("2**3", "ValueError"), # Power operator is not explicitly allowed
+        ("3.14 * 2", 6.28)
+    ]
+
+    for expr_str, expected in test_expressions:
+        print(f"Expression: {expr_str}")
+        try:
+            result = parse_and_calculate(expr_str)
+            print(f"Result: {result}")
+            if isinstance(expected, str) and expected == "ValueError":
+                print(f"Expected ValueError, got {result}. TEST FAILED.")
+            elif result != expected:
+                 print(f"Expected {expected}, got {result}. TEST FAILED.")
+            else:
+                print("TEST PASSED.")
+        except ValueError as e:
+            print(f"Error: {e}")
+            if expected == "ValueError":
+                print("TEST PASSED (ValueError expected).")
+            else:
+                print(f"Expected {expected}, got ValueError. TEST FAILED.")
+        print("-" * 20)

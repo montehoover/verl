@@ -1,0 +1,8 @@
+import re
+
+def count_words(text_content):
+    if not text_content:
+        return 0
+    
+    words = re.findall(r'\b\w+\b', text_content)
+    return len(words)

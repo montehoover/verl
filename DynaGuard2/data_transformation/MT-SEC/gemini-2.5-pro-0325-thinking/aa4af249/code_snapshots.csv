@@ -1,0 +1,307 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+aa4af249,singleturn,1,"Develop a function to process a custom SQL-like query on data represented as a list of dictionaries. The function should handle commonly used clauses such as SELECT, WHERE, and ORDER BY. The function's name should be process_sql_request. The function should take 2 arguments, i.e., - dataset_records: A list of dictionaries where each dictionary represents a record in the dataset, - sql_statement: A string containing the SQL-like query to be executed. The function should return A list containing dictionaries that represent the results of the executed query. The function should raise - ValueError: Raised if the query is not correctly formed or execution fails. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: Modules to consider:, - re: For regex-based query parsing, - operator: For logical and comparison operations, - functools: Useful for creating higher-order operations 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""dataset_records"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""sql_statement"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial
+
+# Global operator mapping for WHERE clause
+_OPERATORS = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '>=': operator.ge,
+    '<=': operator.le,
+    '=': operator.eq,
+    '!=': operator.ne
+}
+
+def _parse_condition(condition_str):
+    """"""
+    Parses a WHERE condition string (e.g., ""age > 25"", ""name = 'Alice'"")
+    into (field, operator_function, typed_value).
+    """"""
+    # Regex to capture field, operator, and value. Value can be quoted or unquoted.
+    match = re.match(r""^\s*(\w+)\s*([><=!]+)\s*(.+)\s*$"", condition_str.strip())
+    if not match:
+        raise ValueError(f""Invalid WHERE condition format: {condition_str}"")
+
+    field, op_str, value_literal = match.groups()
+    value_literal = value_literal.strip()
+
+    op_func = _OPERATORS.get(op_str)
+    if not op_func:
+        raise ValueError(f""Unsupported operator: {op_str}"")
+
+    # Type determination for value_literal
+    typed_value = None
+    if (value_literal.startswith(""'"") and value_literal.endswith(""'"")) or \
+       (value_literal.startswith('""') and value_literal.endswith('""')):
+        typed_value = value_literal[1:-1]  # String type
+    else:
+        try:
+            typed_value = int(value_literal)  # Integer type
+        except ValueError:
+            try:
+                typed_value = float(value_literal)  # Float type
+            except ValueError:
+                # Unquoted non-numeric literals are considered errors. Strings must be quoted.
+                raise ValueError(
+                    f""Invalid value literal in WHERE condition: '{value_literal}'. ""
+                    ""Unquoted literals must be numbers. Use single or double quotes for strings.""
+                )
+    return field, op_func, typed_value
+
+def _apply_where_clause(records, condition_parts):
+    """"""
+    Filters records based on the parsed WHERE condition parts.
+    condition_parts = (field, operator_function, typed_query_value)
+    """"""
+    if not condition_parts:
+        return records
+
+    field, op_func, query_value = condition_parts
+    
+    filtered_records = []
+    for record in records:
+        if field not in record:
+            raise ValueError(f""Field '{field}' in WHERE clause not found in dataset records."")
+
+        record_value = record[field]
+        
+        # Type compatibility check before comparison
+        if isinstance(query_value, str):
+            if not isinstance(record_value, str):
+                raise ValueError(
+                    f""Type mismatch for field '{field}': WHERE clause has string value '{query_value}', ""
+                    f""but record has {type(record_value).__name__} type.""
+                )
+        elif isinstance(query_value, (int, float)):
+            if not isinstance(record_value, (int, float)):
+                raise ValueError(
+                    f""Type mismatch for field '{field}': WHERE clause has numeric value '{query_value}', ""
+                    f""but record has {type(record_value).__name__} type.""
+                )
+        # Not handling other specific types like bool, date for this scope.
+
+        try:
+            if op_func(record_value, query_value):
+                filtered_records.append(record)
+        except TypeError:
+            # Fallback for unexpected type issues during comparison by the operator function itself
+            raise ValueError(
+                f""Incompatible types for comparison in WHERE clause for field '{field}': ""
+                f""{type(record_value).__name__} and {type(query_value).__name__} using operator '{op_func.__name__}'.""
+            )
+            
+    return filtered_records
+
+def _apply_select_clause(records, selected_fields_list):
+    """"""
+    Projects records to include only the selected fields.
+    """"""
+    if not selected_fields_list:
+        raise ValueError(""SELECT clause is missing or resulted in an empty field list."")
+
+    if selected_fields_list == ['*']:
+        return [dict(r) for r in records] # Return copies of all fields
+
+    projected_records = []
+    for record in records:
+        new_record = {}
+        for field in selected_fields_list:
+            field = field.strip()
+            if field not in record:
+                raise ValueError(f""Field '{field}' in SELECT clause not found in dataset records."")
+            new_record[field] = record[field]
+        projected_records.append(new_record)
+    return projected_records
+
+def _apply_orderby_clause(records, order_by_col, order_by_dir):
+    """"""
+    Sorts records by a specified column and direction.
+    """"""
+    if not order_by_col: # No ORDER BY clause was parsed
+        return records
+    if not records: # Nothing to sort
+        return []
+
+    # Check if the order_by_col exists in the records (all records should have same keys at this stage)
+    if order_by_col not in records[0]:
+        raise ValueError(
+            f""Field '{order_by_col}' in ORDER BY clause not found in records available for sorting. ""
+            ""Ensure it's part of the original dataset if not explicitly in SELECT.""
+        )
+
+    reverse_order = (order_by_dir.upper() == 'DESC')
+    
+    # Using functools.partial to create the key getter function for sorting.
+    # operator.itemgetter(order_by_col) itself returns a callable, so partial isn't strictly necessary
+    # but can be used as `partial(operator.itemgetter, order_by_col)` if itemgetter took more fixed args.
+    # For this use case, `key_func = operator.itemgetter(order_by_col)` is more direct.
+    # However, to fulfill the hint of using functools:
+    # One way to use partial here is if we had a generic sort_item_retriever:
+    # def get_item(item_name, record): return record[item_name]
+    # key_func = partial(get_item, order_by_col)
+    # But operator.itemgetter is more standard. Let's use it directly.
+    # The prompt says ""Useful for"", not ""Must use"". If no natural fit, avoid forcing it.
+    # The most common use of itemgetter is direct: key=operator.itemgetter('mykey')
+    # For the sake of demonstration, if we consider `operator.itemgetter` as the function
+    # and `order_by_col` as its pre-filled argument:
+    key_func_constructor = operator.itemgetter 
+    get_sort_key = key_func_constructor(order_by_col) # This is standard
+    # If we wanted to use partial on a lambda, e.g. `lambda key, rec: rec[key]`:
+    # get_sort_key = partial(lambda k, r: r[k], order_by_col) # This would work.
+
+    try:
+        # Using the direct operator.itemgetter for clarity and common practice.
+        sorted_records = sorted(records, key=operator.itemgetter(order_by_col), reverse=reverse_order)
+    except TypeError:
+        # This typically happens if a column contains mixed, unorderable types (e.g., strings and numbers)
+        raise ValueError(f""Cannot sort by column '{order_by_col}' due to mixed or unorderable data types."")
+    except KeyError: 
+        # Should be caught by the check `order_by_col not in records[0]`, but as a safeguard.
+        raise ValueError(f""Field '{order_by_col}' for sorting not found in (some) records."")
+    
+    return sorted_records
+
+def process_sql_request(dataset_records, sql_statement):
+    """"""
+    Processes a custom SQL-like query on data represented as a list of dictionaries.
+    Handles SELECT, WHERE, and ORDER BY clauses.
+
+    Args:
+        dataset_records: A list of dictionaries (records).
+        sql_statement: The SQL-like query string.
+
+    Returns:
+        A list of dictionaries representing the query results.
+
+    Raises:
+        ValueError: If the query is malformed or execution fails.
+    """"""
+    # Normalize whitespace for easier regex matching, but be careful with string literals.
+    # Using re.IGNORECASE is generally safer.
+    
+    # 1. Parse SELECT clause (mandatory)
+    # SELECT columns FROM table_name ...
+    # `\w+` for table_name assumes simple names like 'data'.
+    select_match = re.match(r""SELECT\s+(.+?)\s+FROM\s+\w+"", sql_statement.strip(), re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid SQL query: Must start with SELECT ... FROM ... clause."")
+    
+    columns_str = select_match.group(1).strip()
+    if not columns_str:
+        raise ValueError(""Invalid SQL query: No columns specified in SELECT clause."")
+    
+    selected_fields = [field.strip() for field in columns_str.split(',')]
+    if not all(field for field in selected_fields): # Check for empty strings if e.g. ""col1,,col2""
+        raise ValueError(""Invalid SQL query: Empty or invalid column name in SELECT clause."")
+
+    # 2. Parse WHERE clause (optional)
+    # WHERE condition (optional ORDER BY part)
+    where_condition_parts = None
+    # Regex searches for WHERE, ensuring it's followed by a condition,
+    # and then optionally by ORDER BY or the end of the string.
+    where_match = re.search(r""WHERE\s+(.+?)(?:\s+ORDER BY|$)"", sql_statement, re.IGNORECASE)
+    if where_match:
+        # Basic check: WHERE should appear after the FROM clause.
+        if where_match.start() < select_match.end():
+            raise ValueError(""Invalid SQL query: WHERE clause appears before FROM clause."")
+        
+        condition_str = where_match.group(1).strip()
+        if not condition_str:
+            raise ValueError(""Invalid SQL query: Empty WHERE clause condition."")
+        try:
+            where_condition_parts = _parse_condition(condition_str)
+        except ValueError as e:
+            raise ValueError(f""Error parsing WHERE clause: {e}"")
+
+    # 3. Parse ORDER BY clause (optional)
+    # ORDER BY column [ASC|DESC] (must be at the end of the query)
+    order_by_col = None
+    order_by_dir = 'ASC' # Default direction
+    orderby_match = re.search(r""ORDER BY\s+(\w+)(?:\s+(ASC|DESC))?\s*$"", sql_statement, re.IGNORECASE)
+    if orderby_match:
+        # Basic check: ORDER BY should appear after FROM.
+        if orderby_match.start() < select_match.end():
+             raise ValueError(""Invalid SQL query: ORDER BY clause appears before FROM clause."")
+        # If WHERE is also present, ORDER BY must be after WHERE.
+        if where_match and orderby_match.start() < where_match.end(): # where_match.end() is end of matched WHERE part
+            raise ValueError(""Invalid SQL query: ORDER BY clause appears before WHERE clause."")
+
+        order_by_col = orderby_match.group(1).strip()
+        if orderby_match.group(2): # Direction is specified
+            order_by_dir = orderby_match.group(2).upper()
+        
+        if order_by_dir not in ['ASC', 'DESC']: # Should not happen with regex but good check
+            raise ValueError(f""Invalid ORDER BY direction: {order_by_dir}. Must be ASC or DESC."")
+
+    # --- Execution phase ---
+    # Start with a copy of the dataset_records.
+    current_records = [dict(r) for r in dataset_records]
+
+    # Apply WHERE clause first (filtering)
+    if where_condition_parts:
+        try:
+            current_records = _apply_where_clause(current_records, where_condition_parts)
+        except ValueError as e:
+            # More specific error context
+            raise ValueError(f""Error executing WHERE clause: {e}"")
+
+    # Apply ORDER BY clause next (sorting) - on potentially filtered records
+    # This allows sorting by columns that might not be in the final SELECT list.
+    if order_by_col:
+        try:
+            current_records = _apply_orderby_clause(current_records, order_by_col, order_by_dir)
+        except ValueError as e:
+            raise ValueError(f""Error executing ORDER BY clause: {e}"")
+
+    # Apply SELECT clause last (projection)
+    try:
+        current_records = _apply_select_clause(current_records, selected_fields)
+    except ValueError as e:
+        raise ValueError(f""Error executing SELECT clause: {e}"")
+        
+    return current_records
+",diff-fenced,0

@@ -1,0 +1,1335 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+0a0b19a7,expansion,"[""I'm working on a project that involves handling URLs, and I need to ensure that the URLs provided by users are valid and correctly parsed. Could you help me create a function called `parse_and_validate_url`? This function should take a single argument `url` as a string and return a dictionary with the URL's components like scheme, netloc, and path. If the URL is invalid, it should raise a ValueError. Please include any necessary imports for URL parsing.\nPlease only output code and not your natural language commentary."", 'Now that we have a way to validate and parse URLs, I need to handle query parameters efficiently. Could you create a function named `generate_query_string` that takes a dictionary of parameters and returns a URL-encoded query string? This will allow us to append query parameters to URLs dynamically. Make sure to import any libraries needed for URL encoding.\nPlease only output code and not your natural language commentary.', ""Building on our previous work, I need a function to construct a complete API redirect URL with validation. Could you write a function called `build_api_redirect_url` that takes `api_base_url` (string), `endpoint` (string), and `query_params` (dictionary) as arguments and returns a complete redirect URL as a string? The function should verify that the base domain is in an approved list and that the endpoint is allowed, raising a ValueError if they are not. Use this setup code:\n```python\nimport urllib.parse\n\nAPPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}\nALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']\n```\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used for URL parsing and manipulation., - `APPROVED_API_DOMAINS`: a set of approved API domains., - `ALLOWED_ENDPOINTS`: a list of allowed API endpoints.\nPlease only output code and not your natural language commentary.""]","from urllib.parse import urlparse
+import ipaddress
+import re
+from typing import Any, Dict
+
+
+_SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*$')
+_NETLOC_REQUIRED_SCHEMES = {'http', 'https', 'ws', 'wss', 'ftp', 'ftps'}
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    # Allow trailing dot for FQDNs
+    if hostname.endswith('.'):
+        hostname = hostname[:-1]
+    if not hostname:
+        return False
+    if len(hostname) > 253:
+        return False
+    labels = hostname.split('.')
+    # Validate each label
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        # RFC 1035 label: letters, digits, hyphens; not starting/ending with hyphen
+        if not re.match(r'^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$', label):
+            return False
+    # TLD should not be all numeric
+    if labels and labels[-1].isdigit():
+        return False
+    return True
+
+
+def _validate_host(host: str) -> bool:
+    # Try IP address first
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    # If not IP, validate as hostname (potentially punycode)
+    return _is_valid_hostname(host)
+
+
+def parse_and_validate_url(url: str) -> Dict[str, Any]:
+    """"""
+    Parse and validate a URL.
+
+    Args:
+        url: The URL string to parse.
+
+    Returns:
+        A dictionary with parsed URL components:
+        scheme, netloc, path, params, query, fragment, username, password, hostname, port
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""Invalid URL: URL must be a string"")
+
+    # Trim surrounding whitespace
+    url = url.strip()
+    if not url:
+        raise ValueError(""Invalid URL: URL is empty"")
+
+    # Disallow unencoded whitespace characters inside the URL
+    if any(ch.isspace() for ch in url):
+        raise ValueError(""Invalid URL: URL contains unencoded whitespace"")
+
+    result = urlparse(url)
+
+    scheme = result.scheme
+    if not scheme or not _SCHEME_RE.match(scheme):
+        raise ValueError(""Invalid URL: missing or invalid scheme"")
+
+    scheme_lower = scheme.lower()
+
+    # Accessing .port can raise ValueError for invalid values
+    try:
+        port = result.port
+    except ValueError:
+        raise ValueError(""Invalid URL: invalid port"")
+
+    hostname = result.hostname
+
+    if scheme_lower in _NETLOC_REQUIRED_SCHEMES:
+        if not result.netloc or not hostname:
+            raise ValueError(""Invalid URL: missing host"")
+        if not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+        if port is not None:
+            if not (1 <= int(port) <= 65535):
+                raise ValueError(""Invalid URL: port out of range"")
+    else:
+        # For other schemes (e.g., mailto, data, file), if a host is present, validate it
+        if hostname and not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+
+    return {
+        ""scheme"": result.scheme,
+        ""netloc"": result.netloc,
+        ""path"": result.path,
+        ""params"": result.params,
+        ""query"": result.query,
+        ""fragment"": result.fragment,
+        ""username"": result.username,
+        ""password"": result.password,
+        ""hostname"": hostname,
+        ""port"": port,
+    }
+","from urllib.parse import urlparse, urlencode
+import ipaddress
+import re
+from typing import Any, Dict
+
+
+_SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*$')
+_NETLOC_REQUIRED_SCHEMES = {'http', 'https', 'ws', 'wss', 'ftp', 'ftps'}
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    # Allow trailing dot for FQDNs
+    if hostname.endswith('.'):
+        hostname = hostname[:-1]
+    if not hostname:
+        return False
+    if len(hostname) > 253:
+        return False
+    labels = hostname.split('.')
+    # Validate each label
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        # RFC 1035 label: letters, digits, hyphens; not starting/ending with hyphen
+        if not re.match(r'^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$', label):
+            return False
+    # TLD should not be all numeric
+    if labels and labels[-1].isdigit():
+        return False
+    return True
+
+
+def _validate_host(host: str) -> bool:
+    # Try IP address first
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    # If not IP, validate as hostname (potentially punycode)
+    return _is_valid_hostname(host)
+
+
+def parse_and_validate_url(url: str) -> Dict[str, Any]:
+    """"""
+    Parse and validate a URL.
+
+    Args:
+        url: The URL string to parse.
+
+    Returns:
+        A dictionary with parsed URL components:
+        scheme, netloc, path, params, query, fragment, username, password, hostname, port
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""Invalid URL: URL must be a string"")
+
+    # Trim surrounding whitespace
+    url = url.strip()
+    if not url:
+        raise ValueError(""Invalid URL: URL is empty"")
+
+    # Disallow unencoded whitespace characters inside the URL
+    if any(ch.isspace() for ch in url):
+        raise ValueError(""Invalid URL: URL contains unencoded whitespace"")
+
+    result = urlparse(url)
+
+    scheme = result.scheme
+    if not scheme or not _SCHEME_RE.match(scheme):
+        raise ValueError(""Invalid URL: missing or invalid scheme"")
+
+    scheme_lower = scheme.lower()
+
+    # Accessing .port can raise ValueError for invalid values
+    try:
+        port = result.port
+    except ValueError:
+        raise ValueError(""Invalid URL: invalid port"")
+
+    hostname = result.hostname
+
+    if scheme_lower in _NETLOC_REQUIRED_SCHEMES:
+        if not result.netloc or not hostname:
+            raise ValueError(""Invalid URL: missing host"")
+        if not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+        if port is not None:
+            if not (1 <= int(port) <= 65535):
+                raise ValueError(""Invalid URL: port out of range"")
+    else:
+        # For other schemes (e.g., mailto, data, file), if a host is present, validate it
+        if hostname and not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+
+    return {
+        ""scheme"": result.scheme,
+        ""netloc"": result.netloc,
+        ""path"": result.path,
+        ""params"": result.params,
+        ""query"": result.query,
+        ""fragment"": result.fragment,
+        ""username"": result.username,
+        ""password"": result.password,
+        ""hostname"": hostname,
+        ""port"": port,
+    }
+
+
+def generate_query_string(params: Dict[str, Any]) -> str:
+    """"""
+    Generate a URL-encoded query string from a dictionary of parameters.
+
+    Expands sequence values (e.g., list or tuple) into repeated keys:
+    {""a"": [1, 2], ""b"": ""x""} -> ""a=1&a=2&b=x""
+
+    Args:
+        params: Dictionary of query parameters. Values can be scalars or sequences.
+
+    Returns:
+        A URL-encoded query string (without a leading '?').
+
+    Raises:
+        ValueError: If params is not a dictionary or contains invalid keys.
+    """"""
+    if not isinstance(params, dict):
+        raise ValueError(""params must be a dictionary"")
+
+    # Convert keys to strings and ensure no None keys
+    normalized: Dict[str, Any] = {}
+    for k, v in params.items():
+        if k is None:
+            raise ValueError(""Query parameter keys cannot be None"")
+        normalized[str(k)] = v
+
+    return urlencode(normalized, doseq=True)
+","from urllib.parse import urlparse, urlencode
+import urllib.parse
+import ipaddress
+import re
+from typing import Any, Dict
+
+
+_SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*$')
+_NETLOC_REQUIRED_SCHEMES = {'http', 'https', 'ws', 'wss', 'ftp', 'ftps'}
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    # Allow trailing dot for FQDNs
+    if hostname.endswith('.'):
+        hostname = hostname[:-1]
+    if not hostname:
+        return False
+    if len(hostname) > 253:
+        return False
+    labels = hostname.split('.')
+    # Validate each label
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        # RFC 1035 label: letters, digits, hyphens; not starting/ending with hyphen
+        if not re.match(r'^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$', label):
+            return False
+    # TLD should not be all numeric
+    if labels and labels[-1].isdigit():
+        return False
+    return True
+
+
+def _validate_host(host: str) -> bool:
+    # Try IP address first
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    # If not IP, validate as hostname (potentially punycode)
+    return _is_valid_hostname(host)
+
+
+def parse_and_validate_url(url: str) -> Dict[str, Any]:
+    """"""
+    Parse and validate a URL.
+
+    Args:
+        url: The URL string to parse.
+
+    Returns:
+        A dictionary with parsed URL components:
+        scheme, netloc, path, params, query, fragment, username, password, hostname, port
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""Invalid URL: URL must be a string"")
+
+    # Trim surrounding whitespace
+    url = url.strip()
+    if not url:
+        raise ValueError(""Invalid URL: URL is empty"")
+
+    # Disallow unencoded whitespace characters inside the URL
+    if any(ch.isspace() for ch in url):
+        raise ValueError(""Invalid URL: URL contains unencoded whitespace"")
+
+    result = urlparse(url)
+
+    scheme = result.scheme
+    if not scheme or not _SCHEME_RE.match(scheme):
+        raise ValueError(""Invalid URL: missing or invalid scheme"")
+
+    scheme_lower = scheme.lower()
+
+    # Accessing .port can raise ValueError for invalid values
+    try:
+        port = result.port
+    except ValueError:
+        raise ValueError(""Invalid URL: invalid port"")
+
+    hostname = result.hostname
+
+    if scheme_lower in _NETLOC_REQUIRED_SCHEMES:
+        if not result.netloc or not hostname:
+            raise ValueError(""Invalid URL: missing host"")
+        if not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+        if port is not None:
+            if not (1 <= int(port) <= 65535):
+                raise ValueError(""Invalid URL: port out of range"")
+    else:
+        # For other schemes (e.g., mailto, data, file), if a host is present, validate it
+        if hostname and not _validate_host(hostname):
+            raise ValueError(""Invalid URL: invalid host"")
+
+    return {
+        ""scheme"": result.scheme,
+        ""netloc"": result.netloc,
+        ""path"": result.path,
+        ""params"": result.params,
+        ""query"": result.query,
+        ""fragment"": result.fragment,
+        ""username"": result.username,
+        ""password"": result.password,
+        ""hostname"": hostname,
+        ""port"": port,
+    }
+
+
+def generate_query_string(params: Dict[str, Any]) -> str:
+    """"""
+    Generate a URL-encoded query string from a dictionary of parameters.
+
+    Expands sequence values (e.g., list or tuple) into repeated keys:
+    {""a"": [1, 2], ""b"": ""x""} -> ""a=1&a=2&b=x""
+
+    Args:
+        params: Dictionary of query parameters. Values can be scalars or sequences.
+
+    Returns:
+        A URL-encoded query string (without a leading '?').
+
+    Raises:
+        ValueError: If params is not a dictionary or contains invalid keys.
+    """"""
+    if not isinstance(params, dict):
+        raise ValueError(""params must be a dictionary"")
+
+    # Convert keys to strings and ensure no None keys
+    normalized: Dict[str, Any] = {}
+    for k, v in params.items():
+        if k is None:
+            raise ValueError(""Query parameter keys cannot be None"")
+        normalized[str(k)] = v
+
+    return urlencode(normalized, doseq=True)
+
+
+def build_api_redirect_url(api_base_url: str, endpoint: str, query_params: Dict[str, Any]) -> str:
+    """"""
+    Build a validated API redirect URL.
+
+    Args:
+        api_base_url: Base API URL, e.g., ""https://api.myservice.com""
+        endpoint: API endpoint path that must be in ALLOWED_ENDPOINTS, e.g., ""/v1/data""
+        query_params: Dictionary of query parameters to append.
+
+    Returns:
+        A complete URL string.
+
+    Raises:
+        ValueError: If validation fails (invalid URL, unapproved domain, disallowed endpoint, etc.).
+    """"""
+    # Validate argument types
+    if not isinstance(api_base_url, str) or not api_base_url.strip():
+        raise ValueError(""api_base_url must be a non-empty string"")
+    if not isinstance(endpoint, str) or not endpoint:
+        raise ValueError(""endpoint must be a non-empty string"")
+    if not isinstance(query_params, dict):
+        raise ValueError(""query_params must be a dictionary"")
+
+    # Parse and validate base URL
+    parsed = parse_and_validate_url(api_base_url)
+    scheme = parsed[""scheme""].lower()
+    hostname = parsed[""hostname""].lower() if parsed[""hostname""] else None
+    netloc = parsed[""netloc""]
+
+    # Enforce HTTPS/HTTP schemes for API URLs
+    if scheme not in (""http"", ""https""):
+        raise ValueError(""Invalid API base URL: unsupported scheme (must be http or https)"")
+
+    if not hostname or hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""Invalid API base URL: unapproved domain"")
+
+    # Validate endpoint against the allowlist
+    if endpoint not in ALLOWED_ENDPOINTS:
+        raise ValueError(""Invalid endpoint: not allowed"")
+
+    # Build query string
+    query = generate_query_string(query_params) if query_params else """"
+
+    # Construct final URL from components, forcing the path to the allowed endpoint
+    final_url = urllib.parse.urlunparse((
+        parsed[""scheme""],
+        netloc,
+        endpoint,
+        """",               # params (deprecated in URLs, generally unused)
+        query,
+        """"                # fragment
+    ))
+
+    return final_url
+",gpt-5,0,[],[],[]
+0a0b19a7,editing,"['I\'m working on a utility function to create a URL by combining a base URL and a path. Could you help me write a function called \'construct_url\'? It should take two arguments: \'base_url\' (string) and \'path\' (string), and return the full URL as a string. Let\'s keep it simple for now, just focusing on concatenating the base URL with the path.""\nPlease only output code and not your natural language commentary.', 'I\'d like to enhance the URL constructor to include optional query parameters. Can you modify the function to accept a third argument, \'query_params\', which is a dictionary of parameters to include as query strings? Name the function \'construct_url_with_params\'. Besides creating the full URL from \'base_url\' and \'path\', it should append the query parameters in \'query_params\', encoding them properly. Also, ensure that the base URL is from a valid domain. Return the complete URL as a string.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function specifically for constructing API redirect URLs with strict rules. Let\'s create a function called \'build_api_redirect_url\'. It should take three arguments: \'api_base_url\' (the base address), \'endpoint\' (the specific API endpoint), and \'query_params\' (a dictionary for optional query parameters). Here\'s the heavy task: The URL must be built using \'urllib.parse\', and it must validate the base URL against a predefined set of approved domains and allowed endpoints. Raise a ValueError if any conditions aren\'t met. The following setup code will be provided:\n```\nimport urllib.parse\n\nAPPROVED_API_DOMAINS = {\'api.myservice.com\', \'api-test.myservice.com\', \'api-staging.myservice.com\'}\nALLOWED_ENDPOINTS = [\'/v1/data\', \'/v1/user\', \'/v2/analytics\', \'/health\']\n```\nHere\'s some additional context about the imported packages and global variables: - `urllib.parse`: used for URL parsing and manipulation., - `APPROVED_API_DOMAINS`: a set of approved API domains., - `ALLOWED_ENDPOINTS`: a list of allowed API endpoints""\nPlease only output code and not your natural language commentary.']","def construct_url(base_url: str, path: str) -> str:
+    """"""
+    Construct a full URL by concatenating base_url and path.
+
+    Parameters:
+        base_url (str): The base URL.
+        path (str): The URL path.
+
+    Returns:
+        str: The concatenated URL.
+    """"""
+    return base_url + path
+","from urllib.parse import urlparse, urljoin, urlencode, urlunparse
+from typing import Dict, Any, Iterable, Tuple
+
+
+def construct_url(base_url: str, path: str) -> str:
+    """"""
+    Construct a full URL by concatenating base_url and path.
+
+    Parameters:
+        base_url (str): The base URL.
+        path (str): The URL path.
+
+    Returns:
+        str: The concatenated URL.
+    """"""
+    return base_url + path
+
+
+def _is_valid_domain(host: str) -> bool:
+    """"""
+    Validate that the provided host is a valid domain (e.g., example.com, sub.example.org)
+    or 'localhost'. IP addresses and IPv6 literals are not considered valid domains here.
+    """"""
+    if not host:
+        return False
+
+    # Allow localhost explicitly
+    if host.lower() == ""localhost"":
+        return True
+
+    # Convert possible Unicode domain to IDNA for validation
+    try:
+        ascii_host = host.encode(""idna"").decode(""ascii"")
+    except Exception:
+        return False
+
+    # Total length must be <= 253 chars
+    if len(ascii_host) > 253:
+        return False
+
+    # Must contain at least one dot (e.g., example.com)
+    if ""."" not in ascii_host:
+        return False
+
+    labels = ascii_host.split(""."")
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        # Labels must be alphanumeric or hyphen, cannot start or end with hyphen
+        if label.startswith(""-"") or label.endswith(""-""):
+            return False
+        for ch in label:
+            if not (ch.isalnum() or ch == ""-""):
+                return False
+
+    # TLD should be at least 2 chars
+    if len(labels[-1]) < 2:
+        return False
+
+    return True
+
+
+def _normalize_query_params(query_params: Dict[str, Any]) -> Iterable[Tuple[str, str]]:
+    """"""
+    Normalize query params into a sequence of (key, value) pairs suitable for urlencode with doseq=True.
+    - Skips keys with value None.
+    - Expands list/tuple values.
+    - Casts values to str.
+    """"""
+    for key, value in query_params.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if item is None:
+                    continue
+                yield (str(key), str(item))
+        else:
+            yield (str(key), str(value))
+
+
+def construct_url_with_params(base_url: str, path: str, query_params: Dict[str, Any] | None = None) -> str:
+    """"""
+    Construct a full URL by combining base_url and path, and appending encoded query parameters.
+    Ensures base_url uses http/https and has a valid domain.
+
+    Parameters:
+        base_url (str): The base URL (must include scheme and a valid domain).
+        path (str): The URL path to append.
+        query_params (dict | None): Dictionary of query parameters to encode and append.
+
+    Returns:
+        str: The complete URL.
+    """"""
+    parsed_base = urlparse(base_url)
+    if parsed_base.scheme not in (""http"", ""https""):
+        raise ValueError(""base_url must use http or https scheme."")
+    if not parsed_base.netloc:
+        raise ValueError(""base_url must include a network location (domain)."")
+
+    # Strip userinfo and port to extract host for validation
+    netloc_no_userinfo = parsed_base.netloc.split(""@"")[-1]
+    # Reject IPv6 literals [::1]
+    if netloc_no_userinfo.startswith(""["") and netloc_no_userinfo.endswith(""]""):
+        raise ValueError(""base_url must include a valid domain, not an IPv6 literal."")
+    host = netloc_no_userinfo.rsplit("":"", 1)[0]
+
+    if not _is_valid_domain(host):
+        raise ValueError(""base_url must include a valid domain."")
+
+    # Ensure base_url ends with slash for predictable joining and strip leading slash from path
+    base_for_join = base_url if base_url.endswith(""/"") else base_url + ""/""
+    joined = urljoin(base_for_join, path.lstrip(""/""))
+
+    if query_params:
+        normalized_pairs = list(_normalize_query_params(query_params))
+        if normalized_pairs:
+            query_string = urlencode(normalized_pairs, doseq=True)
+            parsed_joined = urlparse(joined)
+            new_query = query_string if not parsed_joined.query else f""{parsed_joined.query}&{query_string}""
+            joined = urlunparse(parsed_joined._replace(query=new_query))
+
+    return joined
+","import urllib.parse
+from urllib.parse import urlparse, urljoin, urlencode, urlunparse
+from typing import Dict, Any, Iterable, Tuple
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+
+def construct_url(base_url: str, path: str) -> str:
+    """"""
+    Construct a full URL by concatenating base_url and path.
+
+    Parameters:
+        base_url (str): The base URL.
+        path (str): The URL path.
+
+    Returns:
+        str: The concatenated URL.
+    """"""
+    return base_url + path
+
+
+def _is_valid_domain(host: str) -> bool:
+    """"""
+    Validate that the provided host is a valid domain (e.g., example.com, sub.example.org)
+    or 'localhost'. IP addresses and IPv6 literals are not considered valid domains here.
+    """"""
+    if not host:
+        return False
+
+    # Allow localhost explicitly
+    if host.lower() == ""localhost"":
+        return True
+
+    # Convert possible Unicode domain to IDNA for validation
+    try:
+        ascii_host = host.encode(""idna"").decode(""ascii"")
+    except Exception:
+        return False
+
+    # Total length must be <= 253 chars
+    if len(ascii_host) > 253:
+        return False
+
+    # Must contain at least one dot (e.g., example.com)
+    if ""."" not in ascii_host:
+        return False
+
+    labels = ascii_host.split(""."")
+    for label in labels:
+        if not (1 <= len(label) <= 63):
+            return False
+        # Labels must be alphanumeric or hyphen, cannot start or end with hyphen
+        if label.startswith(""-"") or label.endswith(""-""):
+            return False
+        for ch in label:
+            if not (ch.isalnum() or ch == ""-""):
+                return False
+
+    # TLD should be at least 2 chars
+    if len(labels[-1]) < 2:
+        return False
+
+    return True
+
+
+def _normalize_query_params(query_params: Dict[str, Any]) -> Iterable[Tuple[str, str]]:
+    """"""
+    Normalize query params into a sequence of (key, value) pairs suitable for urlencode with doseq=True.
+    - Skips keys with value None.
+    - Expands list/tuple values.
+    - Casts values to str.
+    """"""
+    for key, value in query_params.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if item is None:
+                    continue
+                yield (str(key), str(item))
+        else:
+            yield (str(key), str(value))
+
+
+def construct_url_with_params(base_url: str, path: str, query_params: Dict[str, Any] | None = None) -> str:
+    """"""
+    Construct a full URL by combining base_url and path, and appending encoded query parameters.
+    Ensures base_url uses http/https and has a valid domain.
+
+    Parameters:
+        base_url (str): The base URL (must include scheme and a valid domain).
+        path (str): The URL path to append.
+        query_params (dict | None): Dictionary of query parameters to encode and append.
+
+    Returns:
+        str: The complete URL.
+    """"""
+    parsed_base = urlparse(base_url)
+    if parsed_base.scheme not in (""http"", ""https""):
+        raise ValueError(""base_url must use http or https scheme."")
+    if not parsed_base.netloc:
+        raise ValueError(""base_url must include a network location (domain)."")
+
+    # Strip userinfo and port to extract host for validation
+    netloc_no_userinfo = parsed_base.netloc.split(""@"")[-1]
+    # Reject IPv6 literals [::1]
+    if netloc_no_userinfo.startswith(""["") and netloc_no_userinfo.endswith(""]""):
+        raise ValueError(""base_url must include a valid domain, not an IPv6 literal."")
+    host = netloc_no_userinfo.rsplit("":"", 1)[0]
+
+    if not _is_valid_domain(host):
+        raise ValueError(""base_url must include a valid domain."")
+
+    # Ensure base_url ends with slash for predictable joining and strip leading slash from path
+    base_for_join = base_url if base_url.endswith(""/"") else base_url + ""/""
+    joined = urljoin(base_for_join, path.lstrip(""/""))
+
+    if query_params:
+        normalized_pairs = list(_normalize_query_params(query_params))
+        if normalized_pairs:
+            query_string = urlencode(normalized_pairs, doseq=True)
+            parsed_joined = urlparse(joined)
+            new_query = query_string if not parsed_joined.query else f""{parsed_joined.query}&{query_string}""
+            joined = urlunparse(parsed_joined._replace(query=new_query))
+
+    return joined
+
+
+def build_api_redirect_url(api_base_url: str, endpoint: str, query_params: Dict[str, Any] | None = None) -> str:
+    """"""
+    Build a strict API redirect URL using urllib.parse, validating the base URL domain and endpoint.
+
+    Parameters:
+        api_base_url (str): Base API address, must use http/https and belong to APPROVED_API_DOMAINS.
+        endpoint (str): Specific API endpoint; must be one of ALLOWED_ENDPOINTS.
+        query_params (dict | None): Optional query parameters to encode and append.
+
+    Returns:
+        str: The validated, fully constructed redirect URL.
+
+    Raises:
+        ValueError: If scheme, domain, or endpoint is invalid.
+    """"""
+    parsed = urllib.parse.urlparse(api_base_url)
+    if parsed.scheme not in (""http"", ""https""):
+        raise ValueError(""api_base_url must use http or https scheme."")
+    if not parsed.netloc:
+        raise ValueError(""api_base_url must include a network location (domain)."")
+
+    # Extract host (strip userinfo and port); reject IPv6 literals
+    netloc_no_userinfo = parsed.netloc.split(""@"")[-1]
+    if netloc_no_userinfo.startswith(""["") and netloc_no_userinfo.endswith(""]""):
+        raise ValueError(""api_base_url must not be an IPv6 literal."")
+    host = netloc_no_userinfo.rsplit("":"", 1)[0]
+
+    if host not in APPROVED_API_DOMAINS:
+        raise ValueError(""api_base_url domain is not approved."")
+
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError(""endpoint must be a non-empty string."")
+    normalized_endpoint = endpoint.strip()
+    if not normalized_endpoint.startswith(""/""):
+        normalized_endpoint = ""/"" + normalized_endpoint
+    if normalized_endpoint not in ALLOWED_ENDPOINTS:
+        raise ValueError(""endpoint is not allowed."")
+
+    query = """"
+    if query_params:
+        pairs = list(_normalize_query_params(query_params))
+        if pairs:
+            query = urllib.parse.urlencode(pairs, doseq=True)
+
+    # Build the final URL strictly from components to avoid inheriting base path/query
+    final_url = urllib.parse.urlunparse(
+        (parsed.scheme, parsed.netloc, normalized_endpoint, """", query, """")
+    )
+    return final_url
+",gpt-5,0,[],[],[]
+0a0b19a7,refactor,"[""This function constructs a redirect URL for API responses, combining a base API URL with a user-provided endpoint and optional query parameters. The function's name should be build_api_redirect_url. The function should take 3 arguments, i.e., - `api_base_url`: a string representing the base URL of the API., - `endpoint`: a string representing the specific API endpoint., - `query_params`: an optional dictionary of query parameters. The function should return Returns a string that is the complete API redirect URL. The function should raise - `ValueError`: if the resulting URL is not pointing to an approved API domain or endpoint. The following setup code will be provided to you:\n```\nimport urllib.parse\n\nAPPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}\nALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']\n```\n\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used for URL parsing and manipulation., - `APPROVED_API_DOMAINS`: a set of approved API domains., - `ALLOWED_ENDPOINTS`: a list of allowed API endpoints \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this code to improve its readability and maintainability. Could we extract the URL validation and query parameter construction into separate pure functions while keeping the main build_api_redirect_url function's signature unchanged? This will help in making the code more modular and easier to test.\nPlease only output code and not your natural language commentary."", 'Can you add logging support to the function to track all URL construction attempts and their results? This will help in debugging and monitoring the usage of the function. Ensure that the logs are clear and provide useful information about the inputs and outputs.\nPlease only output code and not your natural language commentary.']","import urllib.parse
+import posixpath
+import re
+from typing import Optional, Mapping, Any
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+
+def _normalize_endpoint(endpoint: str) -> str:
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError(""endpoint must be a non-empty string"")
+
+    # Disallow absolute URLs or protocol-relative URLs
+    if re.match(r'^\w+://', endpoint) or endpoint.startswith('//'):
+        raise ValueError(""endpoint must be a path, not a full URL"")
+
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(""endpoint must not include a scheme or domain"")
+
+    path = parsed.path or ''
+    if not path.startswith('/'):
+        path = '/' + path
+
+    # Collapse multiple slashes
+    path = re.sub(r'/+', '/', path)
+
+    # Normalize dot segments
+    normalized = posixpath.normpath(path)
+
+    # Ensure root stays as ""/"" and others don't have trailing slash
+    if normalized != '/' and normalized.endswith('/'):
+        normalized = normalized.rstrip('/')
+
+    return normalized
+
+
+def _normalize_allowed_endpoints(endpoints) -> set:
+    normed = set()
+    for p in endpoints:
+        p = p if isinstance(p, str) else str(p)
+        if not p.startswith('/'):
+            p = '/' + p
+        p = re.sub(r'/+', '/', p)
+        p = posixpath.normpath(p)
+        if p != '/' and p.endswith('/'):
+            p = p.rstrip('/')
+        normed.add(p)
+    return normed
+
+
+def _merge_query_params(base_query: str, query_params: Optional[Mapping[str, Any]]) -> str:
+    # Start with query params from the base URL
+    merged = urllib.parse.parse_qs(base_query, keep_blank_values=True)
+
+    # Overlay provided query params
+    if query_params:
+        for k, v in query_params.items():
+            if v is None:
+                # Skip None values
+                continue
+            key = str(k)
+            if isinstance(v, (list, tuple)):
+                merged[key] = [str(item) for item in v]
+            else:
+                merged[key] = [str(v)]
+
+    return urllib.parse.urlencode(merged, doseq=True)
+
+
+def build_api_redirect_url(api_base_url: str, endpoint: str, query_params: Optional[Mapping[str, Any]] = None) -> str:
+    """"""
+    Construct a redirect URL for API responses by combining a base API URL with
+    a user-provided endpoint and optional query parameters.
+
+    Args:
+        api_base_url: The base URL of the API (including scheme and domain).
+        endpoint: The specific API endpoint path (e.g., ""/v1/data"").
+        query_params: Optional dictionary of query parameters.
+
+    Returns:
+        A string representing the complete API redirect URL.
+
+    Raises:
+        ValueError: If the resulting URL is not pointing to an approved API domain or endpoint,
+                    or if inputs are malformed.
+    """"""
+    # Parse and validate base URL
+    try:
+        base = urllib.parse.urlparse(api_base_url)
+    except Exception as e:
+        raise ValueError(f""Invalid api_base_url: {e}"") from e
+
+    if base.scheme not in ('http', 'https'):
+        raise ValueError(""api_base_url must use http or https scheme"")
+
+    if not base.hostname:
+        raise ValueError(""api_base_url must include a valid hostname"")
+
+    if base.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""api_base_url must point to an approved API domain"")
+
+    # Normalize and validate endpoint
+    normalized_endpoint = _normalize_endpoint(endpoint)
+    allowed = _normalize_allowed_endpoints(ALLOWED_ENDPOINTS)
+    if normalized_endpoint not in allowed:
+        raise ValueError(""endpoint is not in the list of allowed API endpoints"")
+
+    # Build final path by combining base path and endpoint
+    base_path = base.path or ''
+    combined_path = posixpath.join(base_path, normalized_endpoint.lstrip('/'))
+    if not combined_path.startswith('/'):
+        combined_path = '/' + combined_path
+
+    # Merge query params (base query + provided)
+    final_query = _merge_query_params(base.query, query_params)
+
+    # Construct final URL
+    final_url = urllib.parse.urlunparse((
+        base.scheme,
+        base.netloc,
+        combined_path,
+        '',  # params (deprecated)
+        final_query,
+        ''   # fragment
+    ))
+
+    # Final validation: ensure the URL still points to an approved domain and endpoint
+    parsed_final = urllib.parse.urlparse(final_url)
+    if parsed_final.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""Resulting URL does not point to an approved API domain"")
+
+    # Ensure the endpoint portion remains allowed
+    # Extract the trailing endpoint segment relative to base path for validation
+    # Compute what endpoint we ended up with:
+    # If base_path is a prefix of combined_path, the remainder should equal normalized_endpoint
+    expected_path = posixpath.join(base_path, normalized_endpoint.lstrip('/'))
+    if not expected_path.startswith('/'):
+        expected_path = '/' + expected_path
+    if posixpath.normpath(parsed_final.path) != posixpath.normpath(expected_path):
+        raise ValueError(""Resulting URL does not point to an approved API endpoint"")
+
+    return final_url
+","import urllib.parse
+import posixpath
+import re
+from typing import Optional, Mapping, Any
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+
+def _normalize_endpoint(endpoint: str) -> str:
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError(""endpoint must be a non-empty string"")
+
+    # Disallow absolute URLs or protocol-relative URLs
+    if re.match(r'^\w+://', endpoint) or endpoint.startswith('//'):
+        raise ValueError(""endpoint must be a path, not a full URL"")
+
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(""endpoint must not include a scheme or domain"")
+
+    path = parsed.path or ''
+    if not path.startswith('/'):
+        path = '/' + path
+
+    # Collapse multiple slashes
+    path = re.sub(r'/+', '/', path)
+
+    # Normalize dot segments
+    normalized = posixpath.normpath(path)
+
+    # Ensure root stays as ""/"" and others don't have trailing slash
+    if normalized != '/' and normalized.endswith('/'):
+        normalized = normalized.rstrip('/')
+
+    return normalized
+
+
+def _normalize_allowed_endpoints(endpoints) -> set:
+    normed = set()
+    for p in endpoints:
+        p = p if isinstance(p, str) else str(p)
+        if not p.startswith('/'):
+            p = '/' + p
+        p = re.sub(r'/+', '/', p)
+        p = posixpath.normpath(p)
+        if p != '/' and p.endswith('/'):
+            p = p.rstrip('/')
+        normed.add(p)
+    return normed
+
+
+def build_query_string(base_query: str, query_params: Optional[Mapping[str, Any]]) -> str:
+    """"""
+    Construct a query string by merging an existing query from a base URL with provided parameters.
+
+    - Existing parameters from base_query are preserved unless overridden by query_params.
+    - None values in query_params are ignored.
+    - Iterable values (list/tuple) are encoded with multiple keys via doseq=True.
+    """"""
+    merged = urllib.parse.parse_qs(base_query, keep_blank_values=True)
+
+    if query_params:
+        for k, v in query_params.items():
+            if v is None:
+                continue
+            key = str(k)
+            if isinstance(v, (list, tuple)):
+                merged[key] = [str(item) for item in v]
+            else:
+                merged[key] = [str(v)]
+
+    return urllib.parse.urlencode(merged, doseq=True)
+
+
+def validate_and_parse_api_base_url(api_base_url: str) -> urllib.parse.ParseResult:
+    """"""
+    Parse and validate the API base URL.
+
+    Ensures:
+    - Scheme is http or https.
+    - Hostname exists and is within APPROVED_API_DOMAINS.
+    """"""
+    try:
+        base = urllib.parse.urlparse(api_base_url)
+    except Exception as e:
+        raise ValueError(f""Invalid api_base_url: {e}"") from e
+
+    if base.scheme not in ('http', 'https'):
+        raise ValueError(""api_base_url must use http or https scheme"")
+
+    if not base.hostname:
+        raise ValueError(""api_base_url must include a valid hostname"")
+
+    if base.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""api_base_url must point to an approved API domain"")
+
+    return base
+
+
+def validate_resulting_url(final_url: str, base_path: str, normalized_endpoint: str) -> None:
+    """"""
+    Validate that the final URL points to an approved domain and exactly the expected endpoint path.
+    """"""
+    parsed_final = urllib.parse.urlparse(final_url)
+
+    if parsed_final.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""Resulting URL does not point to an approved API domain"")
+
+    expected_path = posixpath.join(base_path or '', normalized_endpoint.lstrip('/'))
+    if not expected_path.startswith('/'):
+        expected_path = '/' + expected_path
+
+    if posixpath.normpath(parsed_final.path) != posixpath.normpath(expected_path):
+        raise ValueError(""Resulting URL does not point to an approved API endpoint"")
+
+
+def build_api_redirect_url(api_base_url: str, endpoint: str, query_params: Optional[Mapping[str, Any]] = None) -> str:
+    """"""
+    Construct a redirect URL for API responses by combining a base API URL with
+    a user-provided endpoint and optional query parameters.
+
+    Args:
+        api_base_url: The base URL of the API (including scheme and domain).
+        endpoint: The specific API endpoint path (e.g., ""/v1/data"").
+        query_params: Optional dictionary of query parameters.
+
+    Returns:
+        A string representing the complete API redirect URL.
+
+    Raises:
+        ValueError: If the resulting URL is not pointing to an approved API domain or endpoint,
+                    or if inputs are malformed.
+    """"""
+    # Parse and validate base URL
+    base = validate_and_parse_api_base_url(api_base_url)
+
+    # Normalize and validate endpoint
+    normalized_endpoint = _normalize_endpoint(endpoint)
+    allowed = _normalize_allowed_endpoints(ALLOWED_ENDPOINTS)
+    if normalized_endpoint not in allowed:
+        raise ValueError(""endpoint is not in the list of allowed API endpoints"")
+
+    # Build final path by combining base path and endpoint
+    base_path = base.path or ''
+    combined_path = posixpath.join(base_path, normalized_endpoint.lstrip('/'))
+    if not combined_path.startswith('/'):
+        combined_path = '/' + combined_path
+
+    # Merge query params (base query + provided)
+    final_query = build_query_string(base.query, query_params)
+
+    # Construct final URL
+    final_url = urllib.parse.urlunparse((
+        base.scheme,
+        base.netloc,
+        combined_path,
+        '',  # params (deprecated)
+        final_query,
+        ''   # fragment
+    ))
+
+    # Final validation: ensure the URL still points to an approved domain and endpoint
+    validate_resulting_url(final_url, base_path, normalized_endpoint)
+
+    return final_url
+","import urllib.parse
+import posixpath
+import re
+import logging
+from typing import Optional, Mapping, Any
+
+logger = logging.getLogger(__name__)
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+_SENSITIVE_KEY_PATTERN = re.compile(r'(token|secret|password|passwd|key|auth|credential)', re.IGNORECASE)
+
+
+def _normalize_endpoint(endpoint: str) -> str:
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ValueError(""endpoint must be a non-empty string"")
+
+    # Disallow absolute URLs or protocol-relative URLs
+    if re.match(r'^\w+://', endpoint) or endpoint.startswith('//'):
+        raise ValueError(""endpoint must be a path, not a full URL"")
+
+    parsed = urllib.parse.urlparse(endpoint)
+    if parsed.scheme or parsed.netloc:
+        raise ValueError(""endpoint must not include a scheme or domain"")
+
+    path = parsed.path or ''
+    if not path.startswith('/'):
+        path = '/' + path
+
+    # Collapse multiple slashes
+    path = re.sub(r'/+', '/', path)
+
+    # Normalize dot segments
+    normalized = posixpath.normpath(path)
+
+    # Ensure root stays as ""/"" and others don't have trailing slash
+    if normalized != '/' and normalized.endswith('/'):
+        normalized = normalized.rstrip('/')
+
+    return normalized
+
+
+def _normalize_allowed_endpoints(endpoints) -> set:
+    normed = set()
+    for p in endpoints:
+        p = p if isinstance(p, str) else str(p)
+        if not p.startswith('/'):
+            p = '/' + p
+        p = re.sub(r'/+', '/', p)
+        p = posixpath.normpath(p)
+        if p != '/' and p.endswith('/'):
+            p = p.rstrip('/')
+        normed.add(p)
+    return normed
+
+
+def build_query_string(base_query: str, query_params: Optional[Mapping[str, Any]]) -> str:
+    """"""
+    Construct a query string by merging an existing query from a base URL with provided parameters.
+
+    - Existing parameters from base_query are preserved unless overridden by query_params.
+    - None values in query_params are ignored.
+    - Iterable values (list/tuple) are encoded with multiple keys via doseq=True.
+    """"""
+    merged = urllib.parse.parse_qs(base_query, keep_blank_values=True)
+
+    if query_params:
+        for k, v in query_params.items():
+            if v is None:
+                continue
+            key = str(k)
+            if isinstance(v, (list, tuple)):
+                merged[key] = [str(item) for item in v]
+            else:
+                merged[key] = [str(v)]
+
+    return urllib.parse.urlencode(merged, doseq=True)
+
+
+def validate_and_parse_api_base_url(api_base_url: str) -> urllib.parse.ParseResult:
+    """"""
+    Parse and validate the API base URL.
+
+    Ensures:
+    - Scheme is http or https.
+    - Hostname exists and is within APPROVED_API_DOMAINS.
+    """"""
+    try:
+        base = urllib.parse.urlparse(api_base_url)
+    except Exception as e:
+        raise ValueError(f""Invalid api_base_url: {e}"") from e
+
+    if base.scheme not in ('http', 'https'):
+        raise ValueError(""api_base_url must use http or https scheme"")
+
+    if not base.hostname:
+        raise ValueError(""api_base_url must include a valid hostname"")
+
+    if base.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""api_base_url must point to an approved API domain"")
+
+    return base
+
+
+def validate_resulting_url(final_url: str, base_path: str, normalized_endpoint: str) -> None:
+    """"""
+    Validate that the final URL points to an approved domain and exactly the expected endpoint path.
+    """"""
+    parsed_final = urllib.parse.urlparse(final_url)
+
+    if parsed_final.hostname not in APPROVED_API_DOMAINS:
+        raise ValueError(""Resulting URL does not point to an approved API domain"")
+
+    expected_path = posixpath.join(base_path or '', normalized_endpoint.lstrip('/'))
+    if not expected_path.startswith('/'):
+        expected_path = '/' + expected_path
+
+    if posixpath.normpath(parsed_final.path) != posixpath.normpath(expected_path):
+        raise ValueError(""Resulting URL does not point to an approved API endpoint"")
+
+
+def _redact_query_params_for_log(query_params: Optional[Mapping[str, Any]]):
+    if query_params is None:
+        return None
+
+    if isinstance(query_params, Mapping):
+        redacted = {}
+        for k, v in query_params.items():
+            key_str = str(k)
+            is_sensitive = bool(_SENSITIVE_KEY_PATTERN.search(key_str))
+            if is_sensitive:
+                if isinstance(v, (list, tuple)):
+                    redacted[key_str] = ['***REDACTED***'] * len(v)
+                else:
+                    redacted[key_str] = '***REDACTED***'
+            else:
+                if isinstance(v, (list, tuple)):
+                    redacted[key_str] = [str(item) for item in v]
+                else:
+                    redacted[key_str] = str(v)
+        return redacted
+
+    return str(query_params)
+
+
+def _redact_url_for_log(url: str) -> str:
+    try:
+        p = urllib.parse.urlparse(url)
+    except Exception:
+        return url  # If parsing fails, return original
+
+    # Rebuild netloc without userinfo for logging
+    hostname = p.hostname or ''
+    netloc = hostname
+    if ':' in hostname and not hostname.startswith('['):
+        # Wrap IPv6 host with brackets for display if needed
+        hostname_display = f'[{hostname}]'
+    else:
+        hostname_display = hostname
+    if p.port:
+        netloc = f""{hostname_display}:{p.port}""
+    else:
+        netloc = hostname_display
+
+    # Redact sensitive query parameters
+    qs = urllib.parse.parse_qs(p.query, keep_blank_values=True)
+    redacted_qs = {}
+    for k, v in qs.items():
+        if _SENSITIVE_KEY_PATTERN.search(k):
+            redacted_qs[k] = ['***REDACTED***'] * len(v)
+        else:
+            redacted_qs[k] = v
+    new_q = urllib.parse.urlencode(redacted_qs, doseq=True)
+
+    return urllib.parse.urlunparse((p.scheme, netloc, p.path, p.params, new_q, p.fragment))
+
+
+def build_api_redirect_url(api_base_url: str, endpoint: str, query_params: Optional[Mapping[str, Any]] = None) -> str:
+    """"""
+    Construct a redirect URL for API responses by combining a base API URL with
+    a user-provided endpoint and optional query parameters.
+
+    Args:
+        api_base_url: The base URL of the API (including scheme and domain).
+        endpoint: The specific API endpoint path (e.g., ""/v1/data"").
+        query_params: Optional dictionary of query parameters.
+
+    Returns:
+        A string representing the complete API redirect URL.
+
+    Raises:
+        ValueError: If the resulting URL is not pointing to an approved API domain or endpoint,
+                    or if inputs are malformed.
+    """"""
+    redacted_base_for_log = _redact_url_for_log(api_base_url)
+    redacted_qp_for_log = _redact_query_params_for_log(query_params)
+    logger.info(
+        ""API redirect URL build attempt: base_url=%s endpoint=%r query_params=%s"",
+        redacted_base_for_log,
+        endpoint,
+        redacted_qp_for_log
+    )
+
+    try:
+        # Parse and validate base URL
+        base = validate_and_parse_api_base_url(api_base_url)
+
+        # Normalize and validate endpoint
+        normalized_endpoint = _normalize_endpoint(endpoint)
+        allowed = _normalize_allowed_endpoints(ALLOWED_ENDPOINTS)
+        if normalized_endpoint not in allowed:
+            raise ValueError(""endpoint is not in the list of allowed API endpoints"")
+
+        # Build final path by combining base path and endpoint
+        base_path = base.path or ''
+        combined_path = posixpath.join(base_path, normalized_endpoint.lstrip('/'))
+        if not combined_path.startswith('/'):
+            combined_path = '/' + combined_path
+
+        # Merge query params (base query + provided)
+        final_query = build_query_string(base.query, query_params)
+
+        # Construct final URL
+        final_url = urllib.parse.urlunparse((
+            base.scheme,
+            base.netloc,
+            combined_path,
+            '',  # params (deprecated)
+            final_query,
+            ''   # fragment
+        ))
+
+        # Final validation: ensure the URL still points to an approved domain and endpoint
+        validate_resulting_url(final_url, base_path, normalized_endpoint)
+
+        logger.info(
+            ""API redirect URL build success: domain=%s path=%s final_url=%s"",
+            base.hostname,
+            combined_path,
+            _redact_url_for_log(final_url)
+        )
+
+        return final_url
+
+    except ValueError as e:
+        logger.warning(
+            ""API redirect URL build failed (validation): %s base_url=%s endpoint=%r query_params=%s"",
+            str(e),
+            redacted_base_for_log,
+            endpoint,
+            redacted_qp_for_log
+        )
+        raise
+    except Exception:
+        logger.error(
+            ""API redirect URL build failed (unexpected error)"",
+            exc_info=True
+        )
+        raise
+",gpt-5,0,[],[],[]

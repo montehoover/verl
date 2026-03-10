@@ -1,0 +1,78 @@
+ACCOUNTS_DB = {
+    "ACC001": {
+        "account_number": "ACC001",
+        "owner_id": "USER1",
+        "balance": 1000.0
+    },
+    "ACC002": {
+        "account_number": "ACC002",
+        "owner_id": "USER2",
+        "balance": 500.0
+    }
+}
+
+def fund_transfer(u_identifier: str, u_role: str, account_from: str, account_to: str, transfer_amount: float) -> str:
+    """
+    Manages transferring money between accounts in a financial system.
+
+    Args:
+        u_identifier: The identifier of the individual requesting the transfer.
+        u_role: The role held by the individual (e.g., 'account_owner', 'bank_admin').
+        account_from: Indicates the account from which the funds will be removed.
+        account_to: Specifies the account where the funds will be deposited.
+        transfer_amount: Represents the monetary value to transfer.
+
+    Returns:
+        A success message if the transfer is authorized and completed.
+        An error message string for other failures (e.g., insufficient funds, invalid account).
+
+    Raises:
+        PermissionError: For an unauthorized access attempt.
+    """
+
+    # 1. Authorization Check
+    if u_role == "account_owner":
+        # Check if the source account exists and if the user is the owner
+        if account_from not in ACCOUNTS_DB or ACCOUNTS_DB[account_from]["owner_id"] != u_identifier:
+            raise PermissionError(
+                f"Unauthorized: User '{u_identifier}' is not the owner of account '{account_from}' or account does not exist."
+            )
+    elif u_role == "bank_admin":
+        # Bank admins are generally authorized to initiate transfers.
+        # Account existence and other validations will be checked next.
+        pass
+    else:
+        # Any other role is not authorized
+        raise PermissionError(f"Unauthorized: Role '{u_role}' is not permitted to perform transfers.")
+
+    # 2. Validate accounts and amount (post-authorization)
+    if account_from not in ACCOUNTS_DB:
+        # This case would primarily be hit by an admin if account_from is invalid,
+        # as account_owner's check for non-existent account_from raises PermissionError earlier.
+        return f"Error: Source account '{account_from}' does not exist."
+    if account_to not in ACCOUNTS_DB:
+        return f"Error: Destination account '{account_to}' does not exist."
+
+    if not isinstance(transfer_amount, (int, float)) or transfer_amount <= 0:
+        return "Error: Transfer amount must be a positive number."
+
+    source_account = ACCOUNTS_DB[account_from]
+    destination_account = ACCOUNTS_DB[account_to]
+
+    if source_account["balance"] < transfer_amount:
+        # Using .2f for currency formatting in the error message.
+        return f"Error: Insufficient funds in account '{account_from}'. Available: ${source_account['balance']:.2f}, Requested: ${transfer_amount:.2f}."
+
+    # 3. Perform transfer
+    # In a real system, this block should be an atomic transaction.
+    source_account["balance"] -= transfer_amount
+    destination_account["balance"] += transfer_amount
+
+    # 4. Return success message
+    # Formatting transfer_amount to match example output if it's a whole number, otherwise two decimal places.
+    if transfer_amount == int(transfer_amount):
+        formatted_amount = f"{int(transfer_amount)}.0"
+    else:
+        formatted_amount = f"{transfer_amount:.2f}"
+    
+    return f"Successfully transferred ${formatted_amount} from {account_from} to {account_to}."

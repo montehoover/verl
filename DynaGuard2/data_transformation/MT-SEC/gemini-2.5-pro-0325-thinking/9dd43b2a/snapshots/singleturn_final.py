@@ -1,0 +1,94 @@
+import json
+
+allowed_formats = ["json", "html"]
+
+def parse_serialized_content(content: bytes, format_type: str):
+    """
+    Deserializes content from a byte stream into a Python object based on the specified format.
+
+    Only trusted formats are handled.
+
+    Args:
+        content: bytes, the serialized data to be deserialized.
+        format_type: str, defines the format of the serialized data (e.g. 'json', 'html').
+
+    Returns:
+        The Python object restored from the serialized data.
+
+    Raises:
+        ValueError: If the format is unsupported or insecure.
+    """
+    if format_type not in allowed_formats:
+        raise ValueError(f"Unsupported or insecure format: {format_type}. Allowed formats are: {allowed_formats}")
+
+    if format_type == "json":
+        try:
+            # Assuming UTF-8 encoding for JSON byte streams
+            decoded_content = content.decode('utf-8')
+            return json.loads(decoded_content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON content: {e}")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Failed to decode content as UTF-8: {e}")
+    elif format_type == "html":
+        try:
+            # For HTML, "deserialization" here means returning the decoded string
+            # Assuming UTF-8 encoding for HTML byte streams
+            return content.decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Failed to decode content as UTF-8: {e}")
+    
+    # This part should ideally not be reached if allowed_formats check is comprehensive
+    # and all allowed formats are handled above.
+    # However, as a safeguard:
+    raise ValueError(f"Format '{format_type}' was in allowed_formats but not handled.")
+
+if __name__ == '__main__':
+    # Example Usage based on the provided input/output
+    
+    # JSON example
+    json_content_bytes = json.dumps({"role": "admin", "login": "successful"}).encode('utf-8')
+    try:
+        parsed_json = parse_serialized_content(json_content_bytes, "json")
+        print(f"Parsed JSON: {parsed_json}")
+        # Expected: {'role': 'admin', 'login': 'successful'}
+    except ValueError as e:
+        print(f"Error parsing JSON: {e}")
+
+    # HTML example
+    html_content_bytes = b"<html><body><h1>Hello</h1></body></html>"
+    try:
+        parsed_html = parse_serialized_content(html_content_bytes, "html")
+        print(f"Parsed HTML: {parsed_html}")
+        # Expected: "<html><body><h1>Hello</h1></body></html>"
+    except ValueError as e:
+        print(f"Error parsing HTML: {e}")
+
+    # Pickle example (should raise ValueError)
+    # Note: We don't actually import pickle or create pickle data to avoid security risks
+    # even in example code. We just test the format string.
+    try:
+        print("Attempting to parse pickle (should fail)...")
+        parse_serialized_content(b"some pickle data", "pickle")
+    except ValueError as e:
+        print(f"Error parsing pickle: {e}")
+        # Expected: ValueError: Unsupported or insecure format: pickle. Allowed formats are: ['json', 'html']
+
+    # Example with invalid JSON data
+    invalid_json_bytes = b"{'role': 'admin', 'login': 'successful'" # Missing closing brace
+    try:
+        print("Attempting to parse invalid JSON (should fail)...")
+        parse_serialized_content(invalid_json_bytes, "json")
+    except ValueError as e:
+        print(f"Error parsing invalid JSON: {e}")
+        # Expected: ValueError: Invalid JSON content: ...
+
+    # Example with non-UTF-8 data (if format expects UTF-8)
+    try:
+        print("Attempting to parse non-UTF-8 data as JSON (should fail)...")
+        # Using latin-1 bytes that are not valid UTF-8 for certain sequences
+        non_utf8_bytes = "olé".encode('latin-1') 
+        parse_serialized_content(non_utf8_bytes, "json")
+    except ValueError as e:
+        print(f"Error parsing non-UTF-8 JSON: {e}")
+        # Expected: ValueError: Failed to decode content as UTF-8: ... or Invalid JSON content ...

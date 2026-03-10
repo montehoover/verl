@@ -1,0 +1,49 @@
+from urllib.parse import urlparse
+
+APPROVED_API_DOMAINS = ["api.service.com", "hooks.webapp.com"]
+INTERNAL_IP_RANGES = ["localhost", "127.0.0.1", "10.", "192.168."]
+
+def handle_webhook_request(external_url: str) -> str:
+    """
+    Processes a webhook URL from an external service and validates it.
+
+    Args:
+        external_url: A string representing the URL supplied by an external service.
+
+    Returns:
+        A validated URL that can be safely used for internal API requests.
+
+    Raises:
+        ValueError: If the URL is invalid, the domain doesn't belong to 
+                    the allowed API endpoint list, or if the URL points 
+                    to an internal/private network.
+    """
+    parsed_url = urlparse(external_url)
+
+    if not parsed_url.scheme:
+        raise ValueError(f"Invalid URL: '{external_url}'. Scheme (e.g., http, https) is missing.")
+    
+    hostname = parsed_url.hostname
+    if hostname is None:
+        raise ValueError(f"Invalid URL: '{external_url}'. Could not determine hostname or invalid hostname.")
+
+    # Normalize hostname to lowercase for case-insensitive comparison
+    hostname_lower = hostname.lower()
+
+    # Check 1: Domain must be in APPROVED_API_DOMAINS
+    # Normalizing approved domains to lowercase as well, assuming they are stored consistently
+    # or should be matched case-insensitively. If they must be case-sensitive, remove .lower() here.
+    approved_domains_lower = [domain.lower() for domain in APPROVED_API_DOMAINS]
+    if hostname_lower not in approved_domains_lower:
+        raise ValueError(f"Domain '{hostname}' is not an approved API endpoint.")
+
+    # Check 2: URL must not point to an internal/private network
+    for internal_range in INTERNAL_IP_RANGES:
+        # Normalize internal_range for comparison if needed, though current values are fine
+        if hostname_lower == internal_range.lower():
+            raise ValueError(f"URL '{external_url}' points to an internal/private network ('{hostname}').")
+        # Check for IP prefixes like "10." or "192.168."
+        if internal_range.endswith('.') and hostname_lower.startswith(internal_range.lower()):
+            raise ValueError(f"URL '{external_url}' points to an internal/private network (matches prefix '{internal_range}').")
+            
+    return external_url

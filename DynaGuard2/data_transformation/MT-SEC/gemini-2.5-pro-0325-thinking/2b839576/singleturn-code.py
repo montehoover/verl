@@ -1,0 +1,65 @@
+USERS = {
+    1: {"user_id": 1, "role": "admin"},
+    2: {"user_id": 2, "role": "user"},
+    3: {"user_id": 3, "role": "user"},
+    4: {"user_id": 4, "role": "user"}
+}
+
+PROJECTS = {
+    101: {"owner_id": 2, "members": [2, 3]},
+    102: {"owner_id": 3, "members": [3, 4]},
+    103: {"owner_id": 4, "members": [4]},
+}
+
+def project_access_control(active_user_id: int, prj_id: int, action_type: str, member_user_id: int) -> bool:
+    """
+    Manages project access control, allowing project owners to add/remove members,
+    and admins to manage any project.
+    """
+    # Validate active user and project existence
+    if active_user_id not in USERS:
+        return False  # Active user does not exist
+    if prj_id not in PROJECTS:
+        return False  # Project does not exist
+
+    # Validate action type
+    if action_type not in ['add', 'remove']:
+        return False  # Invalid action type
+
+    active_user = USERS[active_user_id]
+    project = PROJECTS[prj_id]
+
+    # Authorization check: User must be an admin or the project owner
+    is_admin = active_user["role"] == "admin"
+    is_owner = project["owner_id"] == active_user_id
+
+    if not is_admin and not is_owner:
+        return False  # Permission denied
+
+    project_members = project["members"]
+
+    if action_type == 'add':
+        # Validate member_user_id for 'add' action
+        if member_user_id not in USERS:
+            return False  # User to be added does not exist
+        
+        if member_user_id in project_members:
+            return False  # Member already in project, no change
+        
+        project_members.append(member_user_id)
+        return True  # Successfully added
+    
+    elif action_type == 'remove':
+        if member_user_id not in project_members:
+            return False  # Member not in project, cannot remove, no change
+
+        # Special condition: Project owner cannot remove themselves from members list.
+        # Only an admin can remove an owner from the members list.
+        if member_user_id == project["owner_id"] and not is_admin:
+            return False  # Owner cannot remove self; only admin can remove owner
+        
+        project_members.remove(member_user_id)
+        return True  # Successfully removed
+    
+    # Should not be reached if action_type is validated as 'add' or 'remove'
+    return False

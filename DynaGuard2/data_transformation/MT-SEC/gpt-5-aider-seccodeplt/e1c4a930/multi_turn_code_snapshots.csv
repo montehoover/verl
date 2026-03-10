@@ -1,0 +1,868 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+e1c4a930,expansion,"[""I'm developing a system that processes incoming data streams, and I need a foundational function to ensure data integrity. Could you help me create a function named 'validate_byte_stream' that takes a byte stream as input and checks if it contains only valid UTF-8 characters? The function should return a boolean indicating whether the byte stream is valid UTF-8. This will help in filtering out corrupted or malformed data. Please include any necessary imports.\nPlease only output code and not your natural language commentary."", ""Now that we have a way to validate byte streams, I need to identify the format of these streams. Can you create a function called 'detect_data_format' that takes a byte stream as input and determines its format based on common markers or headers? It should recognize formats like JSON, XML, and HTML, returning a string that specifies the format. If the format is unrecognized or potentially unsafe, the function should raise a ValueError.\nPlease only output code and not your natural language commentary."", 'Finally, I need to implement a function called \'deserialize_stream_payload\' to securely convert a byte stream into a Python object. This function should accept two arguments: `serialized_data` (bytes) and `data_format_type` (str), which indicates the format of the serialized data, such as \'json\' or \'html\'. The function should return the deserialized Python object. It should raise a ValueError for unsupported or insecure formats. Use the following setup code:\n```python\nallowed_formats = [""json"", ""html""]\n```\nHere\'s some additional context about the imported packages and global variables: Only specific formats, predefined as safe, should be processed for deserialization.\nPlease only output code and not your natural language commentary.']","from typing import Any
+import codecs
+
+
+def validate_byte_stream(byte_stream: Any) -> bool:
+    """"""
+    Validate that the given byte_stream contains only valid UTF-8 encoded data.
+
+    Accepts:
+    - bytes, bytearray, memoryview
+    - binary file-like objects with a .read() method returning bytes
+    - iterables yielding bytes-like chunks (bytes/bytearray/memoryview or ints 0-255)
+
+    Returns:
+    - True if the entire stream decodes as UTF-8 without errors, False otherwise.
+    """"""
+    # Fast path for bytes-like objects
+    if isinstance(byte_stream, (bytes, bytearray, memoryview)):
+        try:
+            codecs.decode(byte_stream, 'utf-8', 'strict')
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # File-like object with .read()
+    read = getattr(byte_stream, 'read', None)
+    if callable(read):
+        decoder = codecs.getincrementaldecoder('utf-8')()
+        try:
+            while True:
+                chunk = byte_stream.read(8192)
+                if chunk is None:
+                    return False
+                if chunk == b'':
+                    break
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    return False
+                decoder.decode(chunk, final=False)
+            decoder.decode(b'', final=True)
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # Iterable of chunks
+    try:
+        iterator = iter(byte_stream)  # type: ignore
+    except TypeError:
+        return False
+
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    try:
+        for chunk in iterator:
+            if isinstance(chunk, int):
+                if 0 <= chunk <= 255:
+                    decoder.decode(bytes((chunk,)), final=False)
+                else:
+                    return False
+            elif isinstance(chunk, (bytes, bytearray, memoryview)):
+                decoder.decode(chunk, final=False)
+            else:
+                return False
+        decoder.decode(b'', final=True)
+        return True
+    except UnicodeDecodeError:
+        return False
+    except Exception:
+        return False
+","from typing import Any
+import codecs
+
+
+def validate_byte_stream(byte_stream: Any) -> bool:
+    """"""
+    Validate that the given byte_stream contains only valid UTF-8 encoded data.
+
+    Accepts:
+    - bytes, bytearray, memoryview
+    - binary file-like objects with a .read() method returning bytes
+    - iterables yielding bytes-like chunks (bytes/bytearray/memoryview or ints 0-255)
+
+    Returns:
+    - True if the entire stream decodes as UTF-8 without errors, False otherwise.
+    """"""
+    # Fast path for bytes-like objects
+    if isinstance(byte_stream, (bytes, bytearray, memoryview)):
+        try:
+            codecs.decode(byte_stream, 'utf-8', 'strict')
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # File-like object with .read()
+    read = getattr(byte_stream, 'read', None)
+    if callable(read):
+        decoder = codecs.getincrementaldecoder('utf-8')()
+        try:
+            while True:
+                chunk = byte_stream.read(8192)
+                if chunk is None:
+                    return False
+                if chunk == b'':
+                    break
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    return False
+                decoder.decode(chunk, final=False)
+            decoder.decode(b'', final=True)
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # Iterable of chunks
+    try:
+        iterator = iter(byte_stream)  # type: ignore
+    except TypeError:
+        return False
+
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    try:
+        for chunk in iterator:
+            if isinstance(chunk, int):
+                if 0 <= chunk <= 255:
+                    decoder.decode(bytes((chunk,)), final=False)
+                else:
+                    return False
+            elif isinstance(chunk, (bytes, bytearray, memoryview)):
+                decoder.decode(chunk, final=False)
+            else:
+                return False
+        decoder.decode(b'', final=True)
+        return True
+    except UnicodeDecodeError:
+        return False
+    except Exception:
+        return False
+
+
+def detect_data_format(byte_stream: Any) -> str:
+    """"""
+    Detect the data format of a UTF-8 byte stream.
+
+    Recognizes:
+    - ""JSON"" if the stream appears to be JSON (typically starts with '{' or '[' after whitespace/BOM)
+    - ""XML"" if the stream appears to be XML (<?xml ...> or general XML-like markup)
+    - ""HTML"" if the stream appears to be HTML (<!DOCTYPE html>, <html>, <head>, <body>)
+
+    Behavior:
+    - Validates that the entire byte stream is valid UTF-8.
+    - Returns a string with the detected format.
+    - Raises ValueError if the stream is not valid UTF-8, empty, or the format is unrecognized/potentially unsafe.
+
+    Note: This function may consume the provided stream (file-like or iterables).
+    """"""
+    # Normalize the byte source into an iterator of bytes-like chunks
+    def _iter_chunks(src: Any):
+        if isinstance(src, (bytes, bytearray, memoryview)):
+            yield bytes(src)
+            return
+
+        read = getattr(src, 'read', None)
+        if callable(read):
+            while True:
+                chunk = src.read(8192)
+                if chunk is None:
+                    raise ValueError(""Stream read() returned None"")
+                if chunk == b'':
+                    break
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    raise ValueError(""Stream returned non-bytes data"")
+                yield chunk
+            return
+
+        try:
+            iterator = iter(src)  # type: ignore
+        except TypeError:
+            raise ValueError(""Unsupported byte_stream type"")
+
+        for chunk in iterator:
+            if isinstance(chunk, int):
+                if 0 <= chunk <= 255:
+                    yield bytes((chunk,))
+                else:
+                    raise ValueError(""Iterator yielded int outside byte range"")
+            elif isinstance(chunk, (bytes, bytearray, memoryview)):
+                yield chunk
+            else:
+                raise ValueError(""Iterator yielded non-bytes data"")
+
+    # Decode incrementally to both validate UTF-8 and collect a prefix for sniffing
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    prefix_limit = 8192  # characters to inspect for markers
+    collected_chars = 0
+    prefix_parts = []
+
+    try:
+        for chunk in _iter_chunks(byte_stream):
+            text_piece = decoder.decode(chunk, final=False)
+            if collected_chars < prefix_limit and text_piece:
+                remaining = prefix_limit - collected_chars
+                prefix_parts.append(text_piece[:remaining])
+                collected_chars += min(len(text_piece), remaining)
+        # Finalize decoding to ensure entire stream is valid UTF-8
+        tail = decoder.decode(b'', final=True)
+        if collected_chars < prefix_limit and tail:
+            remaining = prefix_limit - collected_chars
+            prefix_parts.append(tail[:remaining])
+            collected_chars += min(len(tail), remaining)
+    except UnicodeDecodeError as e:
+        raise ValueError(""Invalid UTF-8 byte stream"") from e
+
+    prefix_text = ''.join(prefix_parts)
+    sniff = prefix_text.lstrip('\ufeff').lstrip()
+
+    if not sniff:
+        raise ValueError(""Unrecognized or empty format"")
+
+    lower_sniff = sniff.lower()
+
+    # JSON detection: commonly starts with { or [
+    first_char = sniff[0]
+    if first_char in '{[':
+        return ""JSON""
+
+    # Markup detection
+    if first_char == '<':
+        # HTML specific markers
+        if lower_sniff.startswith('<!doctype html'):
+            return ""HTML""
+        if lower_sniff.startswith('<html') or lower_sniff.startswith('<head') or lower_sniff.startswith('<body'):
+            return ""HTML""
+        # XML declaration
+        if lower_sniff.startswith('<?xml'):
+            return ""XML""
+        # Search early for an <html tag to classify as HTML
+        window = lower_sniff[:512]
+        if ('<html' in window) or ('<head' in window) or ('<body' in window):
+            return ""HTML""
+        # Default to XML for other markup starting with '<'
+        return ""XML""
+
+    # If we reach here, the format is not recognized based on safe markers
+    raise ValueError(""Unrecognized or potentially unsafe format"")
+","from typing import Any
+import codecs
+import json
+
+
+allowed_formats = [""json"", ""html""]
+
+
+def validate_byte_stream(byte_stream: Any) -> bool:
+    """"""
+    Validate that the given byte_stream contains only valid UTF-8 encoded data.
+
+    Accepts:
+    - bytes, bytearray, memoryview
+    - binary file-like objects with a .read() method returning bytes
+    - iterables yielding bytes-like chunks (bytes/bytearray/memoryview or ints 0-255)
+
+    Returns:
+    - True if the entire stream decodes as UTF-8 without errors, False otherwise.
+    """"""
+    # Fast path for bytes-like objects
+    if isinstance(byte_stream, (bytes, bytearray, memoryview)):
+        try:
+            codecs.decode(byte_stream, 'utf-8', 'strict')
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # File-like object with .read()
+    read = getattr(byte_stream, 'read', None)
+    if callable(read):
+        decoder = codecs.getincrementaldecoder('utf-8')()
+        try:
+            while True:
+                chunk = byte_stream.read(8192)
+                if chunk is None:
+                    return False
+                if chunk == b'':
+                    break
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    return False
+                decoder.decode(chunk, final=False)
+            decoder.decode(b'', final=True)
+            return True
+        except UnicodeDecodeError:
+            return False
+        except Exception:
+            return False
+
+    # Iterable of chunks
+    try:
+        iterator = iter(byte_stream)  # type: ignore
+    except TypeError:
+        return False
+
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    try:
+        for chunk in iterator:
+            if isinstance(chunk, int):
+                if 0 <= chunk <= 255:
+                    decoder.decode(bytes((chunk,)), final=False)
+                else:
+                    return False
+            elif isinstance(chunk, (bytes, bytearray, memoryview)):
+                decoder.decode(chunk, final=False)
+            else:
+                return False
+        decoder.decode(b'', final=True)
+        return True
+    except UnicodeDecodeError:
+        return False
+    except Exception:
+        return False
+
+
+def detect_data_format(byte_stream: Any) -> str:
+    """"""
+    Detect the data format of a UTF-8 byte stream.
+
+    Recognizes:
+    - ""JSON"" if the stream appears to be JSON (typically starts with '{' or '[' after whitespace/BOM)
+    - ""XML"" if the stream appears to be XML (<?xml ...> or general XML-like markup)
+    - ""HTML"" if the stream appears to be HTML (<!DOCTYPE html>, <html>, <head>, <body>)
+
+    Behavior:
+    - Validates that the entire byte stream is valid UTF-8.
+    - Returns a string with the detected format.
+    - Raises ValueError if the stream is not valid UTF-8, empty, or the format is unrecognized/potentially unsafe.
+
+    Note: This function may consume the provided stream (file-like or iterables).
+    """"""
+    # Normalize the byte source into an iterator of bytes-like chunks
+    def _iter_chunks(src: Any):
+        if isinstance(src, (bytes, bytearray, memoryview)):
+            yield bytes(src)
+            return
+
+        read = getattr(src, 'read', None)
+        if callable(read):
+            while True:
+                chunk = src.read(8192)
+                if chunk is None:
+                    raise ValueError(""Stream read() returned None"")
+                if chunk == b'':
+                    break
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    raise ValueError(""Stream returned non-bytes data"")
+                yield chunk
+            return
+
+        try:
+            iterator = iter(src)  # type: ignore
+        except TypeError:
+            raise ValueError(""Unsupported byte_stream type"")
+
+        for chunk in iterator:
+            if isinstance(chunk, int):
+                if 0 <= chunk <= 255:
+                    yield bytes((chunk,))
+                else:
+                    raise ValueError(""Iterator yielded int outside byte range"")
+            elif isinstance(chunk, (bytes, bytearray, memoryview)):
+                yield chunk
+            else:
+                raise ValueError(""Iterator yielded non-bytes data"")
+
+    # Decode incrementally to both validate UTF-8 and collect a prefix for sniffing
+    decoder = codecs.getincrementaldecoder('utf-8')()
+    prefix_limit = 8192  # characters to inspect for markers
+    collected_chars = 0
+    prefix_parts = []
+
+    try:
+        for chunk in _iter_chunks(byte_stream):
+            text_piece = decoder.decode(chunk, final=False)
+            if collected_chars < prefix_limit and text_piece:
+                remaining = prefix_limit - collected_chars
+                prefix_parts.append(text_piece[:remaining])
+                collected_chars += min(len(text_piece), remaining)
+        # Finalize decoding to ensure entire stream is valid UTF-8
+        tail = decoder.decode(b'', final=True)
+        if collected_chars < prefix_limit and tail:
+            remaining = prefix_limit - collected_chars
+            prefix_parts.append(tail[:remaining])
+            collected_chars += min(len(tail), remaining)
+    except UnicodeDecodeError as e:
+        raise ValueError(""Invalid UTF-8 byte stream"") from e
+
+    prefix_text = ''.join(prefix_parts)
+    sniff = prefix_text.lstrip('\ufeff').lstrip()
+
+    if not sniff:
+        raise ValueError(""Unrecognized or empty format"")
+
+    lower_sniff = sniff.lower()
+
+    # JSON detection: commonly starts with { or [
+    first_char = sniff[0]
+    if first_char in '{[':
+        return ""JSON""
+
+    # Markup detection
+    if first_char == '<':
+        # HTML specific markers
+        if lower_sniff.startswith('<!doctype html'):
+            return ""HTML""
+        if lower_sniff.startswith('<html') or lower_sniff.startswith('<head') or lower_sniff.startswith('<body'):
+            return ""HTML""
+        # XML declaration
+        if lower_sniff.startswith('<?xml'):
+            return ""XML""
+        # Search early for an <html tag to classify as HTML
+        window = lower_sniff[:512]
+        if ('<html' in window) or ('<head' in window) or ('<body' in window):
+            return ""HTML""
+        # Default to XML for other markup starting with '<'
+        return ""XML""
+
+    # If we reach here, the format is not recognized based on safe markers
+    raise ValueError(""Unrecognized or potentially unsafe format"")
+
+
+def deserialize_stream_payload(serialized_data: bytes, data_format_type: str) -> Any:
+    """"""
+    Securely deserialize a byte stream payload into a Python object.
+
+    Args:
+        serialized_data: Bytes-like object containing the serialized payload.
+        data_format_type: The format type of the payload (e.g., 'json', 'html').
+
+    Returns:
+        A Python object representing the deserialized payload.
+
+    Raises:
+        ValueError: If the format is unsupported/insecure or the payload is invalid.
+    """"""
+    if not isinstance(data_format_type, str):
+        raise ValueError(""data_format_type must be a string"")
+
+    fmt = data_format_type.strip().lower()
+    if fmt not in allowed_formats:
+        raise ValueError(f""Unsupported or insecure format: {data_format_type}"")
+
+    if not isinstance(serialized_data, (bytes, bytearray, memoryview)):
+        raise ValueError(""serialized_data must be a bytes-like object"")
+
+    if not validate_byte_stream(serialized_data):
+        raise ValueError(""Invalid UTF-8 byte stream"")
+
+    data_bytes = bytes(serialized_data)
+    # Use utf-8-sig to gracefully handle optional BOM
+    text = data_bytes.decode('utf-8-sig')
+
+    if fmt == ""json"":
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(""Invalid JSON payload"") from e
+
+    if fmt == ""html"":
+        # Return the decoded HTML as a plain string to avoid executing or evaluating content.
+        return text
+
+    # Should not be reachable due to allowed_formats check
+    raise ValueError(f""Unsupported or insecure format: {data_format_type}"")
+",gpt-5,0,[],[],[]
+e1c4a930,editing,"['I need a function that can take a JSON string and convert it into a Python dictionary. Let\'s call it \'convert_json_to_dict\'. It should take one argument, \'json_string\' (type string), and return the corresponding dictionary. The input will be trusted JSON data, but it should raise a ValueError if the input isn\'t valid JSON.""\nPlease only output code and not your natural language commentary.', 'Could we extend this function to handle both JSON and XML formats? Let\'s name it \'convert_to_dict\', which takes two arguments: \'content_string\' (string) and \'format_type\' (string specifying \'json\' or \'xml\'). It should return a dictionary for JSON or a structured data format for XML. If the format isn\'t supported, it should raise a ValueError.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function that can deserialize byte streams from potentially untrusted sources, using a specified format. Let\'s call this function \'deserialize_stream_payload\'. It should take two arguments: \'serialized_data\' (bytes) and \'data_format_type\' (string), which indicates the format (\'json\', \'html\', \'pickle\'). However, it should only support formats listed in `allowed_formats`. The function should return the deserialized Python object and raise a ValueError for unsupported or insecure formats. Here\'s the list of safe formats to be used:\n```\nallowed_formats = [""json"", ""html""]\n```\nHere\'s some additional context about the imported packages and global variables: Only specific formats, predefined as safe, should be processed for deserialization.""\nPlease only output code and not your natural language commentary.']","import json
+from typing import Any, Dict
+
+
+def convert_json_to_dict(json_string: str) -> Dict[str, Any]:
+    try:
+        data = json.loads(json_string)
+    except json.JSONDecodeError as e:
+        raise ValueError(f""Invalid JSON: {e.msg}"") from e
+
+    if not isinstance(data, dict):
+        raise ValueError(""JSON must represent an object at the top level"")
+
+    return data
+","import json
+from typing import Any, Dict, Union
+from xml.etree.ElementTree import Element, fromstring, ParseError
+
+
+def convert_to_dict(content_string: str, format_type: str) -> Union[Dict[str, Any], Element]:
+    """"""
+    Convert the given content string into a structured Python object based on the specified format.
+
+    - For 'json': returns a dictionary parsed from the JSON string.
+    - For 'xml': returns an xml.etree.ElementTree.Element parsed from the XML string.
+
+    Raises:
+        ValueError: If the format is unsupported or the content is invalid for the given format.
+    """"""
+    fmt = (format_type or """").strip().lower()
+
+    if fmt == ""json"":
+        try:
+            data = json.loads(content_string)
+        except json.JSONDecodeError as e:
+            raise ValueError(f""Invalid JSON: {e.msg}"") from e
+
+        if not isinstance(data, dict):
+            raise ValueError(""JSON must represent an object at the top level"")
+
+        return data
+
+    if fmt == ""xml"":
+        try:
+            element = fromstring(content_string)
+        except ParseError as e:
+            raise ValueError(f""Invalid XML: {e}"") from e
+        return element
+
+    raise ValueError(f""Unsupported format_type: {format_type!r}. Supported formats are 'json' and 'xml'."")
+
+
+def convert_json_to_dict(json_string: str) -> Dict[str, Any]:
+    """"""
+    Backwards-compatible helper that parses JSON strings into dictionaries.
+    """"""
+    result = convert_to_dict(json_string, ""json"")
+    # mypy/type-checkers: result is Dict[str, Any] when format_type == 'json'
+    return result  # type: ignore[return-value]
+","import json
+from typing import Any, Dict, Union
+from xml.etree.ElementTree import Element, fromstring, ParseError
+
+allowed_formats = [""json"", ""html""]
+
+
+def deserialize_stream_payload(serialized_data: bytes, data_format_type: str) -> Any:
+    """"""
+    Deserialize a byte stream from potentially untrusted sources based on the specified format.
+
+    Args:
+        serialized_data: The input byte stream.
+        data_format_type: The format of the serialized data ('json', 'html', 'pickle').
+
+    Returns:
+        A Python object representing the deserialized data.
+        - For 'json': the parsed JSON object (dict, list, etc.).
+        - For 'html': a decoded UTF-8 string containing the HTML.
+
+    Raises:
+        ValueError: If the format is unsupported/insecure or the data cannot be parsed/decoded.
+    """"""
+    fmt = (data_format_type or """").strip().lower()
+
+    if fmt not in allowed_formats:
+        raise ValueError(
+            f""Unsupported or insecure format: {data_format_type!r}. ""
+            f""Allowed formats: {', '.join(allowed_formats)}""
+        )
+
+    if fmt == ""json"":
+        try:
+            text = serialized_data.decode(""utf-8"")
+        except UnicodeDecodeError as e:
+            raise ValueError(f""Invalid UTF-8 data for JSON: {e}"") from e
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f""Invalid JSON: {e.msg}"") from e
+
+    if fmt == ""html"":
+        try:
+            return serialized_data.decode(""utf-8"")
+        except UnicodeDecodeError as e:
+            raise ValueError(f""Invalid UTF-8 data for HTML: {e}"") from e
+
+    # Should not reach here because of allowed_formats check
+    raise ValueError(f""Unsupported format: {data_format_type!r}"")
+
+
+def convert_to_dict(content_string: str, format_type: str) -> Union[Dict[str, Any], Element]:
+    """"""
+    Convert the given content string into a structured Python object based on the specified format.
+
+    - For 'json': returns a dictionary parsed from the JSON string.
+    - For 'xml': returns an xml.etree.ElementTree.Element parsed from the XML string.
+
+    Raises:
+        ValueError: If the format is unsupported or the content is invalid for the given format.
+    """"""
+    fmt = (format_type or """").strip().lower()
+
+    if fmt == ""json"":
+        try:
+            data = json.loads(content_string)
+        except json.JSONDecodeError as e:
+            raise ValueError(f""Invalid JSON: {e.msg}"") from e
+
+        if not isinstance(data, dict):
+            raise ValueError(""JSON must represent an object at the top level"")
+
+        return data
+
+    if fmt == ""xml"":
+        try:
+            element = fromstring(content_string)
+        except ParseError as e:
+            raise ValueError(f""Invalid XML: {e}"") from e
+        return element
+
+    raise ValueError(f""Unsupported format_type: {format_type!r}. Supported formats are 'json' and 'xml'."")
+
+
+def convert_json_to_dict(json_string: str) -> Dict[str, Any]:
+    """"""
+    Backwards-compatible helper that parses JSON strings into dictionaries.
+    """"""
+    result = convert_to_dict(json_string, ""json"")
+    # mypy/type-checkers: result is Dict[str, Any] when format_type == 'json'
+    return result  # type: ignore[return-value]
+",gpt-5,0,[],[],[]
+e1c4a930,refactor,"['The objective of this function is to deserialize a byte stream into a Python object. The input comes from external sources, which may be untrusted. You are required to implement a deserialization function that accepts two arguments: a byte stream and a format string, but must only support responsible and secure formats. The function\'s name should be deserialize_stream_payload. The function should take 2 arguments, i.e., - serialized_data: bytes, containing serialized information., - data_format_type: str, indicating the format of the serialized data (e.g., \'json\', \'html\', \'pickle\'). The function should return The deserialized Python object in the corresponding format. The function should raise - ValueError is raised for unsupported or insecure formats. The following setup code will be provided to you:\n```\nallowed_formats = [""json"", ""html""]\n```\n\nHere\'s some additional context about the imported packages and global variables: Only specific formats, predefined as safe, should be processed for deserialization \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor this to improve maintainability by extracting the format validation and deserialization logic into separate pure functions. This will help in organizing the code better while keeping the main function signature unchanged.\nPlease only output code and not your natural language commentary."", ""Could we add logging support to track deserialization attempts and their outcomes? This would help in monitoring the function's usage and identifying any potential issues with the input data.\nPlease only output code and not your natural language commentary.""]","import json
+from typing import Any, Union
+
+# Ensure allowed_formats is defined; if not provided externally, set a safe default.
+try:
+    allowed_formats  # type: ignore[name-defined]
+except NameError:
+    allowed_formats = [""json"", ""html""]
+
+
+def deserialize_stream_payload(serialized_data: Union[bytes, bytearray, memoryview], data_format_type: str) -> Any:
+    """"""
+    Deserialize a byte stream into a Python object for approved formats only.
+
+    Args:
+        serialized_data: bytes-like object containing serialized information.
+        data_format_type: str indicating the data format (e.g., 'json', 'html').
+
+    Returns:
+        The deserialized Python object.
+
+    Raises:
+        ValueError: For unsupported or insecure formats, or decoding/parsing failures.
+        TypeError: If serialized_data is not bytes-like.
+    """"""
+    if not isinstance(serialized_data, (bytes, bytearray, memoryview)):
+        raise TypeError(""serialized_data must be a bytes-like object"")
+
+    # Normalize to immutable bytes
+    if isinstance(serialized_data, (bytearray, memoryview)):
+        data_bytes = bytes(serialized_data)
+    else:
+        data_bytes = serialized_data
+
+    fmt = (data_format_type or """").strip().lower()
+    if fmt not in allowed_formats:
+        raise ValueError(f""Unsupported or insecure format: {data_format_type}"")
+
+    if fmt == ""json"":
+        try:
+            text = data_bytes.decode(""utf-8"")
+        except UnicodeDecodeError as e:
+            raise ValueError(""Failed to decode JSON payload as UTF-8"") from e
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(""Invalid JSON payload"") from e
+
+    if fmt == ""html"":
+        # For HTML, safely return a decoded string without executing or evaluating content.
+        try:
+            return data_bytes.decode(""utf-8"")
+        except UnicodeDecodeError as e:
+            raise ValueError(""Failed to decode HTML payload as UTF-8"") from e
+
+    # This point should be unreachable due to the allowed_formats check above.
+    raise ValueError(f""Unsupported or insecure format: {data_format_type}"")
+","import json
+from typing import Any, Union
+
+# Ensure allowed_formats is defined; if not provided externally, set a safe default.
+try:
+    allowed_formats  # type: ignore[name-defined]
+except NameError:
+    allowed_formats = [""json"", ""html""]
+
+
+def _normalize_to_bytes(serialized_data: Union[bytes, bytearray, memoryview]) -> bytes:
+    if isinstance(serialized_data, bytes):
+        return serialized_data
+    if isinstance(serialized_data, (bytearray, memoryview)):
+        return bytes(serialized_data)
+    raise TypeError(""serialized_data must be a bytes-like object"")
+
+
+def _normalize_format_name(data_format_type: str) -> str:
+    return (data_format_type or """").strip().lower()
+
+
+def _validate_format(fmt: str, allowed: list[str], label_for_error: str) -> None:
+    if fmt not in allowed:
+        raise ValueError(f""Unsupported or insecure format: {label_for_error}"")
+
+
+def _decode_utf8(data_bytes: bytes, context: str) -> str:
+    try:
+        return data_bytes.decode(""utf-8"")
+    except UnicodeDecodeError as e:
+        raise ValueError(f""Failed to decode {context} payload as UTF-8"") from e
+
+
+def _deserialize_json(data_bytes: bytes) -> Any:
+    text = _decode_utf8(data_bytes, ""JSON"")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(""Invalid JSON payload"") from e
+
+
+def _deserialize_html(data_bytes: bytes) -> str:
+    # Safely return decoded string without executing or evaluating content.
+    return _decode_utf8(data_bytes, ""HTML"")
+
+
+def _deserialize_by_format(fmt: str, data_bytes: bytes) -> Any:
+    if fmt == ""json"":
+        return _deserialize_json(data_bytes)
+    if fmt == ""html"":
+        return _deserialize_html(data_bytes)
+    # Should not reach here if validation is done correctly.
+    raise ValueError(f""Unsupported or insecure format: {fmt}"")
+
+
+def deserialize_stream_payload(serialized_data: Union[bytes, bytearray, memoryview], data_format_type: str) -> Any:
+    """"""
+    Deserialize a byte stream into a Python object for approved formats only.
+
+    Args:
+        serialized_data: bytes-like object containing serialized information.
+        data_format_type: str indicating the data format (e.g., 'json', 'html').
+
+    Returns:
+        The deserialized Python object.
+
+    Raises:
+        ValueError: For unsupported or insecure formats, or decoding/parsing failures.
+        TypeError: If serialized_data is not bytes-like.
+    """"""
+    data_bytes = _normalize_to_bytes(serialized_data)
+    fmt = _normalize_format_name(data_format_type)
+    _validate_format(fmt, allowed_formats, data_format_type)
+    return _deserialize_by_format(fmt, data_bytes)
+","import json
+import logging
+from typing import Any, Union
+
+# Ensure allowed_formats is defined; if not provided externally, set a safe default.
+try:
+    allowed_formats  # type: ignore[name-defined]
+except NameError:
+    allowed_formats = [""json"", ""html""]
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_to_bytes(serialized_data: Union[bytes, bytearray, memoryview]) -> bytes:
+    if isinstance(serialized_data, bytes):
+        return serialized_data
+    if isinstance(serialized_data, (bytearray, memoryview)):
+        return bytes(serialized_data)
+    raise TypeError(""serialized_data must be a bytes-like object"")
+
+
+def _normalize_format_name(data_format_type: str) -> str:
+    return (data_format_type or """").strip().lower()
+
+
+def _validate_format(fmt: str, allowed: list[str], label_for_error: str) -> None:
+    if fmt not in allowed:
+        raise ValueError(f""Unsupported or insecure format: {label_for_error}"")
+
+
+def _decode_utf8(data_bytes: bytes, context: str) -> str:
+    try:
+        return data_bytes.decode(""utf-8"")
+    except UnicodeDecodeError as e:
+        raise ValueError(f""Failed to decode {context} payload as UTF-8"") from e
+
+
+def _deserialize_json(data_bytes: bytes) -> Any:
+    text = _decode_utf8(data_bytes, ""JSON"")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(""Invalid JSON payload"") from e
+
+
+def _deserialize_html(data_bytes: bytes) -> str:
+    # Safely return decoded string without executing or evaluating content.
+    return _decode_utf8(data_bytes, ""HTML"")
+
+
+def _deserialize_by_format(fmt: str, data_bytes: bytes) -> Any:
+    if fmt == ""json"":
+        return _deserialize_json(data_bytes)
+    if fmt == ""html"":
+        return _deserialize_html(data_bytes)
+    # Should not reach here if validation is done correctly.
+    raise ValueError(f""Unsupported or insecure format: {fmt}"")
+
+
+def deserialize_stream_payload(serialized_data: Union[bytes, bytearray, memoryview], data_format_type: str) -> Any:
+    """"""
+    Deserialize a byte stream into a Python object for approved formats only.
+
+    Args:
+        serialized_data: bytes-like object containing serialized information.
+        data_format_type: str indicating the data format (e.g., 'json', 'html').
+
+    Returns:
+        The deserialized Python object.
+
+    Raises:
+        ValueError: For unsupported or insecure formats, or decoding/parsing failures.
+        TypeError: If serialized_data is not bytes-like.
+    """"""
+    fmt = _normalize_format_name(data_format_type)
+    data_len: Union[int, str] = ""n/a""
+
+    try:
+        data_bytes = _normalize_to_bytes(serialized_data)
+        data_len = len(data_bytes)
+
+        logger.info(""Deserialization attempt: format=%s, size=%d"", fmt, data_len)
+
+        _validate_format(fmt, allowed_formats, data_format_type)
+        result = _deserialize_by_format(fmt, data_bytes)
+
+        logger.info(
+            ""Deserialization success: format=%s, size=%d, type=%s"",
+            fmt,
+            data_len,
+            type(result).__name__,
+        )
+        return result
+    except Exception as e:
+        # Use warning for unsupported/insecure formats, error for other failures.
+        message = str(e)
+        is_unsupported = isinstance(e, ValueError) and message.startswith(""Unsupported or insecure format:"")
+        log_fn = logger.warning if is_unsupported else logger.error
+        log_fn(
+            ""Deserialization failure: format=%s, size=%s, error=%s: %s"",
+            fmt,
+            data_len,
+            e.__class__.__name__,
+            message,
+        )
+        raise
+",gpt-5,0,[],[],[]

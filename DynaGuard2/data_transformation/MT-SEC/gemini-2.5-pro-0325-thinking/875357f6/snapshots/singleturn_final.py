@@ -1,0 +1,224 @@
+import ast
+import io
+import sys
+import builtins
+
+# --- Configuration for script safety ---
+
+# Whitelist of built-in function/constant names allowed in the script's execution scope.
+SAFE_BUILTINS_WHITELIST = {
+    'abs', 'all', 'any', 'ascii', 'bin', 'bool', 'bytearray', 'bytes', 'callable',
+    'chr', 'complex', 'dict', 'divmod', 'enumerate', 'filter', 'float', 'format',
+    'frozenset', 'hasattr', 'hash', 'hex', 'id', 'int', 'isinstance', 'issubclass',
+    'iter', 'len', 'list', 'map', 'max', 'min', 'next', 'oct', 'ord', 'pow',
+    'print',  # Essential for capturing script output.
+    'range', 'repr', 'reversed', 'round', 'set', 'slice', 'sorted', 'str',
+    'sum', 'super', 'tuple', 'type', 'zip',
+    # Constants
+    'None', 'True', 'False', 'NotImplemented', 'Ellipsis', '__debug__',
+    # Common exception types (useful for `isinstance` or `try-except` within the user script)
+    # Allowing these types means user script can reference them, e.g. `isinstance(e, ValueError)`
+    'ArithmeticError', 'AssertionError', 'AttributeError', 'BufferError',
+    'EOFError', 'Exception', 'FloatingPointError', 'GeneratorExit', 'ImportError',
+    'IndentationError', 'IndexError', 'KeyError', 'KeyboardInterrupt', 'LookupError',
+    'MemoryError', 'NameError', 'NotImplementedError', 'OSError', 'OverflowError',
+    'ReferenceError', 'RuntimeError', 'StopAsyncIteration', 'StopIteration',
+    'SyntaxError', 'SystemError', 'TabError', 'TypeError', 'UnboundLocalError',
+    'UnicodeDecodeError', 'UnicodeEncodeError', 'UnicodeError', 'ValueError',
+    'ZeroDivisionError',
+}
+
+# Create the restricted global scope for script execution.
+restricted_globals = {
+    name: getattr(builtins, name)
+    for name in SAFE_BUILTINS_WHITELIST
+    if hasattr(builtins, name)
+}
+# Crucially, __builtins__ within the executed script must also be restricted.
+# This ensures that even if a script gets a reference to the __builtins__ module,
+# it only sees the whitelisted items.
+restricted_globals['__builtins__'] = restricted_globals.copy()
+
+
+class ScriptValidator(ast.NodeVisitor):
+    """
+    Validates an AST to ensure it doesn't contain forbidden operations.
+    It defines specific visitor methods for forbidden node types and for nodes
+    that require careful checking (like calls and attribute access).
+    """
+
+    # Names of functions/builtins that are forbidden to be called directly.
+    # This list is augmented with any builtins not in SAFE_BUILTINS_WHITELIST.
+    FORBIDDEN_CALL_NAMES = {
+        'eval', 'exec', 'compile', 'open', '__import__',
+        'getattr', 'setattr', 'delattr',  # Can bypass restrictions or modify objects.
+        'globals', 'locals', 'vars', 'dir',  # Introspection can be risky.
+        'input',  # No interactive input.
+        'exit', 'quit',  # No program termination.
+    }
+    # Dynamically add all other callable builtins not explicitly whitelisted.
+    for name, member in builtins.__dict__.items():
+        if callable(member) and name not in SAFE_BUILTINS_WHITELIST:
+            FORBIDDEN_CALL_NAMES.add(name)
+
+    # Names of attributes that are forbidden to be accessed (e.g., obj.forbidden_attr).
+    FORBIDDEN_ATTRIBUTE_NAMES = {
+        '__builtins__', '__class__', '__subclasses__', '__mro__', '__bases__',
+        '__globals__', '__code__', '__closure__', '__func__', '__self__',
+        # Function, frame, generator, coroutine internal attributes:
+        'func_code', 'func_globals', 'func_closure', 'func_defaults', 'f_back',
+        'f_builtins', 'f_code', 'f_globals', 'f_locals', 'f_lineno', 'f_trace',
+        'tb_frame', 'tb_next', 'tb_lineno', 'gi_code', 'gi_frame', 'gi_running',
+        'gi_yieldfrom', 'cr_await', 'cr_code', 'cr_frame', 'cr_running',
+    }
+
+    # Define visitor methods for AST nodes that are explicitly forbidden.
+    def visit_Import(self, node):
+        raise ValueError("Forbidden AST node type: Import")
+
+    def visit_ImportFrom(self, node):
+        raise ValueError("Forbidden AST node type: ImportFrom")
+
+    def visit_AsyncFunctionDef(self, node):
+        raise ValueError("Forbidden AST node type: AsyncFunctionDef")
+
+    def visit_AsyncFor(self, node):
+        raise ValueError("Forbidden AST node type: AsyncFor")
+
+    def visit_AsyncWith(self, node):
+        raise ValueError("Forbidden AST node type: AsyncWith")
+
+    def visit_Await(self, node):
+        raise ValueError("Forbidden AST node type: Await")
+
+    def visit_With(self, node):
+        # `with` statements can be used with various context managers,
+        # including potentially unsafe ones if not carefully controlled (e.g., file access).
+        # For simplicity and safety, disallow `With` entirely.
+        raise ValueError("Forbidden AST node type: With")
+
+    def visit_Call(self, node):
+        """Validate function calls (e.g., func(), obj.method())."""
+        func_to_check = node.func
+        function_name = None
+
+        if isinstance(func_to_check, ast.Name):
+            function_name = func_to_check.id
+            if function_name in self.FORBIDDEN_CALL_NAMES:
+                raise ValueError(f"Forbidden function call: {function_name}()")
+            # If the name refers to a builtin, it must be in our whitelist.
+            # This check prevents calling non-whitelisted builtins even if they
+            # were not caught by FORBIDDEN_CALL_NAMES (defense in depth).
+            if function_name in builtins.__dict__ and function_name not in SAFE_BUILTINS_WHITELIST:
+                raise ValueError(f"Call to disallowed builtin function: {function_name}()")
+        
+        elif isinstance(func_to_check, ast.Attribute):
+            # For obj.method(), recursively visit the `obj` part.
+            self.visit(func_to_check.value)
+            # Check if the attribute (method name) itself is forbidden.
+            if func_to_check.attr in self.FORBIDDEN_ATTRIBUTE_NAMES:
+                 raise ValueError(f"Call to a method with a forbidden attribute name: .{func_to_check.attr}()")
+            # Further checks on `func_to_check.attr` (e.g., if it starts with '_') could be added
+            # but can be overly restrictive for user-defined objects.
+        else:
+            # The callable is more complex (e.g., a lambda, or result of another call).
+            # Recursively visit it to ensure its components are safe.
+            self.visit(func_to_check)
+
+        # Recursively visit all arguments and keyword arguments to the call.
+        for arg in node.args:
+            self.visit(arg)
+        for kwarg in node.keywords:
+            self.visit(kwarg.value)
+        # Note: Children are manually visited. No call to super().generic_visit for this node.
+
+    def visit_Attribute(self, node):
+        """Validate attribute access (e.g., obj.attr)."""
+        if node.attr in self.FORBIDDEN_ATTRIBUTE_NAMES:
+            raise ValueError(f"Forbidden attribute access: .{node.attr}")
+        
+        # Recursively visit the object part of the attribute access (e.g., `obj` in `obj.attr`).
+        self.visit(node.value)
+        # Note: Children are manually visited. No call to super().generic_visit for this node.
+    
+    def generic_visit(self, node):
+        """
+        Called by ast.NodeVisitor.visit if no explicit visitor function exists for a node type.
+        Default behavior is to visit all children of the node, which is desired.
+        """
+        super().generic_visit(node)
+
+
+def execute_user_script(submitted_script: str):
+    """
+    Safely executes a Python script provided by the user.
+
+    The script is parsed and validated against a set of safety rules. If safe,
+    it's executed in a restricted environment where only whitelisted built-ins
+    are available. Standard output from the script (via `print`) is captured.
+
+    Args:
+        submitted_script: The Python script string to execute.
+
+    Returns:
+        The standard output of the script as a string, if any. Otherwise, None.
+
+    Raises:
+        ValueError: If the script contains syntax errors, involves forbidden AST nodes
+                    or operations (as determined by ScriptValidator), or if a runtime
+                    error occurs during its execution.
+    """
+    try:
+        # Parse the script into an Abstract Syntax Tree (AST).
+        # Default mode 'exec' is suitable for sequences of statements.
+        tree = ast.parse(submitted_script)
+    except SyntaxError as e:
+        # If parsing fails, it's a syntax error in the user's script.
+        raise ValueError(f"Syntax error in submitted script: {e}")
+
+    # Validate the AST using the custom ScriptValidator.
+    # This checks for forbidden structures and operations at the AST level.
+    validator = ScriptValidator()
+    try:
+        validator.visit(tree)
+    except ValueError:
+        # Re-raise specific ValueError from the validator, which details the forbidden action.
+        raise
+
+    # If AST validation passes, proceed to execution in a controlled environment.
+    # Redirect standard output to capture anything printed by the script.
+    original_stdout = sys.stdout
+    captured_stdout = io.StringIO()
+    sys.stdout = captured_stdout
+
+    # Prepare globals for the execution context. Use a copy of our restricted set.
+    # The script will have its own local scope, initialized as empty.
+    exec_globals = restricted_globals.copy()
+    exec_locals = {}  # Fresh local scope for the script.
+
+    try:
+        # Compile the validated AST to a code object.
+        # The filename '<user_script>' will appear in tracebacks from executed code.
+        code_object = compile(tree, '<user_script>', 'exec')
+        # Execute the compiled code in the restricted environment.
+        exec(code_object, exec_globals, exec_locals)
+    except Exception as e:
+        # Catch any runtime errors that occur during the script's execution
+        # (e.g., NameError, TypeError, ZeroDivisionError).
+        # Restore stdout before raising, so any error messages from Python itself go to original stdout.
+        sys.stdout = original_stdout
+        # Wrap runtime errors in ValueError as per the problem's requirements.
+        raise ValueError(f"Error during script execution: {type(e).__name__}: {e}")
+    finally:
+        # Always restore standard output to its original state.
+        sys.stdout = original_stdout
+
+    # Retrieve the captured output from the StringIO buffer.
+    script_output = captured_stdout.getvalue()
+
+    # Return the captured output. If the script printed nothing, this will be an empty string.
+    # The problem asks for None if no output, so convert empty string to None.
+    if script_output:
+        return script_output
+    else:
+        return None

@@ -1,0 +1,616 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+19daaf2f,singleturn,1,"Develop a function to process a custom SQL-like query on data represented as a list of dictionaries. The function should handle commonly used clauses such as SELECT, WHERE, and ORDER BY. The function's name should be run_sql_query. The function should take 2 arguments, i.e., - dataset: A list of dictionaries where each dictionary represents a record in the dataset, - sql_query: A string containing the SQL-like query to be executed. The function should return A list containing dictionaries that represent the results of the executed query. The function should raise - ValueError: Raised if the query is not correctly formed or execution fails. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: Modules to consider:, - re: For regex-based query parsing, - operator: For logical and comparison operations, - functools: Useful for creating higher-order operations 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""dataset"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""sql_query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial
+
+def run_sql_query(dataset, sql_query):
+    """"""
+    Execute a minimal SQL-like query on a list of dictionaries.
+
+    Supported clauses (case-insensitive):
+      - SELECT <col1, col2, ... | *>
+      - FROM <identifier>            (identifier is required but ignored; dataset is the source)
+      - WHERE <conditions>           (supports AND/OR, comparisons: =, !=, <>, <, <=, >, >=, LIKE, NOT LIKE)
+      - ORDER BY <col [ASC|DESC], ...>
+
+    Args:
+        dataset (list[dict]): List of records.
+        sql_query (str): SQL-like query.
+
+    Returns:
+        list[dict]: Result set as list of dictionaries.
+
+    Raises:
+        ValueError: If the query is malformed or execution fails.
+    """"""
+    if not isinstance(dataset, list) or not all(isinstance(r, dict) for r in dataset):
+        raise ValueError(""dataset must be a list of dictionaries"")
+    if not isinstance(sql_query, str) or not sql_query.strip():
+        raise ValueError(""sql_query must be a non-empty string"")
+
+    try:
+        select_cols, table_name, where_expr, order_by_spec = _parse_sql(sql_query)
+
+        # Filter rows
+        filtered = _apply_where(dataset, where_expr) if where_expr else list(dataset)
+
+        # Order rows
+        if order_by_spec:
+            filtered = _apply_order_by(filtered, order_by_spec)
+
+        # Project columns
+        projected = _apply_select(filtered, select_cols)
+
+        return projected
+    except ValueError:
+        # propagate parsing/execution errors as-is
+        raise
+    except Exception as exc:
+        raise ValueError(f""Query execution failed: {exc}"") from exc
+
+
+# ----------------------
+# Parsing helpers
+# ----------------------
+
+_WORD_CHARS = set(""abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"")
+
+def _is_word_boundary(prev_char, next_char):
+    return (prev_char is None or prev_char not in _WORD_CHARS) and (next_char is None or next_char not in _WORD_CHARS)
+
+def _find_keyword_outside_quotes(s, keyword, start=0):
+    """"""
+    Find the index of a keyword (case-insensitive, word-bounded) outside of quotes.
+    Returns -1 if not found.
+    """"""
+    target = keyword.lower()
+    n = len(s)
+    i = max(0, start)
+    in_single = False
+    in_double = False
+    while i < n:
+        ch = s[i]
+        if ch == ""'"" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if ch == '""' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if not in_single and not in_double:
+            # candidate match?
+            if s[i:i+len(target)].lower() == target:
+                prev_char = s[i-1] if i > 0 else None
+                next_char = s[i+len(target)] if (i + len(target)) < n else None
+                if _is_word_boundary(prev_char, next_char):
+                    return i
+        i += 1
+    return -1
+
+def _find_order_by_outside_quotes(s, start=0):
+    """"""
+    Find ""ORDER BY"" outside quotes; returns index of 'O' or -1 if not found.
+    """"""
+    idx_order = _find_keyword_outside_quotes(s, ""ORDER"", start)
+    while idx_order != -1:
+        # Check that following tokens form ""ORDER BY""
+        j = idx_order + len(""ORDER"")
+        # Skip whitespace
+        while j < len(s) and s[j].isspace():
+            j += 1
+        if s[j:j+2].lower() == ""by"":
+            prev_char = s[idx_order-1] if idx_order > 0 else None
+            next_char = s[j+2] if (j+2) < len(s) else None
+            if _is_word_boundary(prev_char, s[idx_order+len(""ORDER"")]) and _is_word_boundary(s[j+1], next_char):
+                return idx_order
+        # Find next ORDER
+        idx_order = _find_keyword_outside_quotes(s, ""ORDER"", idx_order + 1)
+    return -1
+
+def _strip_trailing_semicolon(s):
+    s = s.strip()
+    if s.endswith("";""):
+        return s[:-1].rstrip()
+    return s
+
+def _parse_sql(sql):
+    s = _strip_trailing_semicolon(sql.strip())
+    if not s:
+        raise ValueError(""Empty SQL query"")
+
+    # Ensure it starts with SELECT
+    if _find_keyword_outside_quotes(s, ""SELECT"", start=0) != 0:
+        raise ValueError(""Query must start with SELECT"")
+
+    # Find FROM
+    idx_from = _find_keyword_outside_quotes(s, ""FROM"", start=len(""SELECT""))
+    if idx_from == -1:
+        raise ValueError(""Missing FROM clause"")
+
+    select_part = s[len(""SELECT""):idx_from].strip()
+    if not select_part:
+        raise ValueError(""SELECT list is empty"")
+
+    # Parse table identifier after FROM
+    j = idx_from + len(""FROM"")
+    n = len(s)
+    while j < n and s[j].isspace():
+        j += 1
+    if j >= n:
+        raise ValueError(""Missing table name after FROM"")
+    # read identifier
+    k = j
+    while k < n and (s[k].isalnum() or s[k] == ""_""):
+        k += 1
+    if k == j:
+        raise ValueError(""Invalid table name after FROM"")
+    table_name = s[j:k]
+
+    rest = s[k:].strip()
+
+    where_expr = None
+    order_by_expr = None
+
+    if rest:
+        # Look for ORDER BY first to bound WHERE, then WHERE
+        idx_order = _find_order_by_outside_quotes(rest, 0)
+        if idx_order != -1:
+            order_by_expr = rest[idx_order + len(""ORDER""):].strip()
+            if not order_by_expr.lower().startswith(""by""):
+                raise ValueError(""Malformed ORDER BY clause"")
+            order_by_expr = order_by_expr[2:].strip()  # after ""BY""
+            rest_wo_order = rest[:idx_order].rstrip()
+        else:
+            rest_wo_order = rest
+
+        # WHERE
+        idx_where = _find_keyword_outside_quotes(rest_wo_order, ""WHERE"", 0)
+        if idx_where != -1:
+            where_expr = rest_wo_order[idx_where + len(""WHERE""):].strip()
+            if not where_expr:
+                raise ValueError(""WHERE clause is empty"")
+            before_where = rest_wo_order[:idx_where].strip()
+            if before_where:
+                # Anything before WHERE (after table) that's non-empty is invalid
+                raise ValueError(f""Unexpected tokens after FROM: {before_where}"")
+        else:
+            # Ensure nothing extraneous remains
+            if rest_wo_order:
+                raise ValueError(f""Unexpected tokens after FROM: {rest_wo_order}"")
+
+    # Parse SELECT columns
+    select_cols = _parse_select_list(select_part)
+
+    # Parse ORDER BY if present
+    order_by_spec = _parse_order_by(order_by_expr) if order_by_expr else None
+
+    return select_cols, table_name, where_expr, order_by_spec
+
+def _parse_select_list(select_part):
+    if select_part.strip() == ""*"":
+        return [""*""]
+    cols = _split_csv_outside_quotes(select_part)
+    cols = [c.strip() for c in cols if c.strip()]
+    if not cols:
+        raise ValueError(""SELECT list is empty"")
+    # Validate identifiers (allow simple dotted names or underscores)
+    for col in cols:
+        if not re.fullmatch(r""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*"", col):
+            raise ValueError(f""Invalid column name in SELECT list: {col}"")
+    return cols
+
+def _split_csv_outside_quotes(s):
+    items = []
+    buf = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == ""'"" and not in_double:
+            in_single = not in_single
+            buf.append(ch)
+        elif ch == '""' and not in_single:
+            in_double = not in_double
+            buf.append(ch)
+        elif ch == "","" and not in_single and not in_double:
+            items.append("""".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if buf or s.endswith("",""):
+        items.append("""".join(buf).strip())
+    return items
+
+def _split_on_keyword_outside_quotes(s, keyword):
+    """"""
+    Split by a keyword (AND/OR) outside quotes, keyword is case-insensitive and must be word-bounded.
+    """"""
+    parts = []
+    n = len(s)
+    i = 0
+    start = 0
+    in_single = False
+    in_double = False
+    kw = keyword.lower()
+    kwlen = len(kw)
+    while i < n:
+        ch = s[i]
+        if ch == ""'"" and not in_double:
+            in_single = not in_single
+            i += 1
+            continue
+        if ch == '""' and not in_single:
+            in_double = not in_double
+            i += 1
+            continue
+        if not in_single and not in_double:
+            if s[i:i+kwlen].lower() == kw:
+                prev_char = s[i-1] if i > 0 else None
+                next_char = s[i+kwlen] if (i+kwlen) < n else None
+                if _is_word_boundary(prev_char, next_char):
+                    # split
+                    parts.append(s[start:i].strip())
+                    i += kwlen
+                    # skip extra spaces
+                    while i < n and s[i].isspace():
+                        i += 1
+                    start = i
+                    continue
+        i += 1
+    tail = s[start:].strip()
+    if tail or not parts:
+        parts.append(tail)
+    # Remove empty parts that may result from leading/trailing keywords
+    return [p for p in parts if p != """"]
+
+def _parse_condition(cond_str):
+    """"""
+    Parse a single comparison condition: <field> <op> <value>
+    Supports ops: =, !=, <>, <, <=, >, >=, LIKE, NOT LIKE
+    Returns a callable predicate(record) -> bool
+    """"""
+    # Regex to capture field, optional NOT before LIKE, operator, and value
+    m = re.match(
+        r""^\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*(?:(NOT)\s+)?(LIKE|=|!=|<>|<=|>=|<|>)\s*(.+?)\s*$"",
+        cond_str,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        raise ValueError(f""Malformed condition: {cond_str}"")
+    field, not_kw, op, value_raw = m.groups()
+    op_up = op.upper()
+    not_kw = (not_kw or """").upper()
+    negate = False
+    if op_up == ""LIKE"":
+        negate = (not_kw == ""NOT"")
+    else:
+        if not_kw:
+            raise ValueError(f""NOT is only supported with LIKE: {cond_str}"")
+
+    value = _parse_literal(value_raw.strip())
+
+    # Create a predicate based on operator
+    if op_up in (""="", ""!="", ""<>"", ""<"", ""<="", "">"", "">=""):
+        if op_up in (""!="", ""<>""):
+            comp_op = operator.ne
+        elif op_up == ""="":
+            comp_op = operator.eq
+        elif op_up == ""<"":
+            comp_op = operator.lt
+        elif op_up == ""<="":
+            comp_op = operator.le
+        elif op_up == "">"":
+            comp_op = operator.gt
+        else:
+            comp_op = operator.ge
+
+        def pred(rec):
+            left = _get_field_value(rec, field)
+            return _safe_compare(left, value, comp_op)
+
+        return pred
+
+    elif op_up == ""LIKE"":
+        # Convert SQL LIKE pattern to regex
+        if value is None:
+            # LIKE with NULL is always False
+            def pred_null(_):
+                return False
+            return (lambda r: not pred_null(r)) if negate else pred_null
+
+        pattern = str(value)
+        regex = _like_to_regex(pattern)
+
+        def pred(rec):
+            left = _get_field_value(rec, field)
+            if left is None:
+                result = False
+            else:
+                result = re.fullmatch(regex, str(left)) is not None
+            return (not result) if negate else result
+
+        return pred
+
+    else:
+        raise ValueError(f""Unsupported operator in condition: {op}"")
+
+def _get_field_value(rec, field):
+    """"""
+    Support dotted traversal: a.b.c
+    """"""
+    cur = rec
+    for part in field.split("".""):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+def _parse_literal(token):
+    """"""
+    Parse a literal which can be:
+      - Quoted string with single or double quotes (supports '' or \"" and \\ escaping)
+      - Numeric int/float
+      - true/false (case-insensitive) -> bool
+      - null/none (case-insensitive) -> None
+      - Unquoted bareword -> treated as string
+    """"""
+    t = token.strip()
+    if not t:
+        return """"
+    if (t[0] == t[-1]) and t[0] in (""'"", '""') and len(t) >= 2:
+        return _unquote(t)
+    # Booleans / null
+    tl = t.lower()
+    if tl in (""true"", ""false""):
+        return tl == ""true""
+    if tl in (""null"", ""none""):
+        return None
+    # Numeric
+    num = _to_number(t)
+    if num is not None:
+        return num
+    # Otherwise treat as bare string
+    return t
+
+def _unquote(s):
+    quote = s[0]
+    inner = s[1:-1]
+    if quote == ""'"":
+        # SQL-style doubling of quotes: '' -> '
+        inner = inner.replace(""''"", ""'"")
+        # Also support backslash escaping for common cases
+        inner = inner.replace(""\\'"", ""'"").replace('\\\\', '\\')
+    else:
+        # Double quotes: support \"" and \\ escapes
+        inner = inner.replace('\\""', '""').replace('\\\\', '\\')
+    return inner
+
+def _to_number(s):
+    try:
+        if re.fullmatch(r""[+-]?\d+"", s):
+            return int(s)
+        # float, but avoid trailing decimal without digits
+        if re.fullmatch(r""[+-]?\d*\.\d+([eE][+-]?\d+)?"", s) or re.fullmatch(r""[+-]?\d+([eE][+-]?\d+)"", s):
+            return float(s)
+        # Allow simple int-like to float as fallback
+        if re.fullmatch(r""[+-]?\d+\.\d*"", s):
+            return float(s)
+    except Exception:
+        return None
+    return None
+
+def _coerce_for_compare(a, b):
+    """"""
+    Try to coerce both to numbers if possible, else compare as-is.
+    Returns coerced (a2, b2) and a flag indicating numeric comparison.
+    """"""
+    # Handle None explicitly
+    if a is None or b is None:
+        return a, b, False
+
+    # Try numeric coercion
+    a_num = a if isinstance(a, (int, float)) else _to_number(str(a))
+    b_num = b if isinstance(b, (int, float)) else _to_number(str(b))
+    if a_num is not None and b_num is not None:
+        return float(a_num), float(b_num), True
+
+    return a, b, False
+
+def _safe_compare(a, b, comp_op):
+    """"""
+    Safely compare values possibly of different types. None is treated as smallest.
+    """"""
+    # If equality/inequality with None should work directly
+    if comp_op in (operator.eq, operator.ne):
+        # Special-case: for equality, coerce numbers if possible
+        a2, b2, _ = _coerce_for_compare(a, b)
+        try:
+            return comp_op(a2, b2)
+        except Exception:
+            return comp_op(str(a), str(b))
+
+    # For order comparisons, treat None as smallest
+    if a is None and b is None:
+        # a < b, a > b should be False; a <= b, a >= b should be True
+        if comp_op in (operator.le, operator.ge):
+            return True
+        return False
+    if a is None:
+        # None ? b
+        return comp_op(0, 1)  # 0<1 True, 0>1 False, etc.
+    if b is None:
+        return comp_op(1, 0)
+
+    a2, b2, numeric = _coerce_for_compare(a, b)
+    try:
+        return comp_op(a2, b2)
+    except Exception:
+        # Fallback to string comparison
+        return comp_op(str(a), str(b))
+
+def _like_to_regex(pattern):
+    """"""
+    Convert SQL LIKE pattern to a Python regex pattern (fullmatch).
+    % -> .*, _ -> .
+    Escape all other regex special chars.
+    """"""
+    out = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == ""%"":
+            out.append("".*"")
+        elif ch == ""_"":
+            out.append(""."")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    return """".join(out)
+
+def _apply_where(rows, where_expr):
+    """"""
+    Apply WHERE expression to rows.
+    """"""
+    # Split by OR (lowest precedence)
+    or_groups = _split_on_keyword_outside_quotes(where_expr, ""OR"")
+    and_groups = [ _split_on_keyword_outside_quotes(group, ""AND"") for group in or_groups ]
+    # Compile predicates
+    compiled_groups = []
+    for group in and_groups:
+        preds = []
+        for cond in group:
+            if not cond:
+                continue
+            preds.append(_parse_condition(cond))
+        if not preds:
+            continue
+        compiled_groups.append(preds)
+
+    if not compiled_groups:
+        return list(rows)
+
+    def record_matches(rec):
+        # OR of ANDs
+        for preds in compiled_groups:
+            if all(p(rec) for p in preds):
+                return True
+        return False
+
+    return [rec for rec in rows if record_matches(rec)]
+
+def _parse_order_by(order_expr):
+    items = _split_csv_outside_quotes(order_expr)
+    if not items:
+        raise ValueError(""ORDER BY clause is empty"")
+    spec = []
+    for item in items:
+        if not item:
+            continue
+        parts = item.strip().split()
+        if not parts:
+            continue
+        col = parts[0]
+        if not re.fullmatch(r""[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*"", col):
+            raise ValueError(f""Invalid column name in ORDER BY: {col}"")
+        if len(parts) == 1:
+            asc = True
+        elif len(parts) == 2:
+            dir_token = parts[1].lower()
+            if dir_token not in (""asc"", ""desc""):
+                raise ValueError(f""Invalid sort direction for {col}: {parts[1]}"")
+            asc = dir_token == ""asc""
+        else:
+            raise ValueError(f""Malformed ORDER BY item: {item}"")
+        spec.append((col, asc))
+    if not spec:
+        raise ValueError(""ORDER BY clause is empty"")
+    return spec
+
+def _normalize_sort_value(val):
+    """"""
+    Produce a sortable key across mixed types:
+      - Missing/None -> sorts last
+      - Numeric -> (0, value)
+      - Others -> (1, str(value))
+    """"""
+    if val is None:
+        return (2, 0)
+    # numeric?
+    if isinstance(val, (int, float)):
+        return (0, float(val))
+    num = None
+    if isinstance(val, str):
+        num = _to_number(val)
+    if num is not None:
+        return (0, float(num))
+    return (1, str(val))
+
+def _apply_order_by(rows, order_spec):
+    # Stable sort: apply last key first
+    result = list(rows)
+    for col, asc in reversed(order_spec):
+        def key_func(rec, c=col):
+            v = _get_field_value(rec, c)
+            return _normalize_sort_value(v)
+        result.sort(key=key_func, reverse=not asc)
+    return result
+
+def _apply_select(rows, select_cols):
+    if select_cols == [""*""]:
+        # Return shallow copies
+        return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        projected = {}
+        for c in select_cols:
+            projected[c] = _get_field_value(r, c)
+        out.append(projected)
+    return out
+",unknown,0

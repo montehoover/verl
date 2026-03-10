@@ -1,0 +1,1175 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+143896c0,expansion,"[""I'm working on a healthcare application and need to start with user authentication. Could you create a function called 'authenticate_user' that takes staff_id (str) and password (str) as inputs and returns a boolean indicating if the credentials are correct? This will help ensure that only authorized healthcare professionals can access the system.\nPlease only output code and not your natural language commentary."", ""Great! Now, let's focus on managing access permissions. Could you write a function called 'check_staff_permission' that takes staff_id (str), staff_role (str), and patient_record_id (str) as arguments and returns a boolean indicating whether the staff member has permission to access the patient's record? This will help us control access based on roles and assigned patients.\nPlease only output code and not your natural language commentary."", 'Building on user authentication and permission management, let\'s proceed with creating a function called \'view_patient_record\' designed to allow healthcare workers to retrieve a patient\'s medical record securely. This function should take three arguments: `staff_id` (str), `staff_role` (str), and `patient_record_id` (str). The function should return the relevant medical data for the patient if the user passes the authorization check or raise a PermissionError for unauthorized access. Ensure to use the setup:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\'.\nPlease only output code and not your natural language commentary.']","import os
+import json
+from typing import Dict, Any
+from hashlib import pbkdf2_hmac
+from hmac import compare_digest
+from base64 import b64decode
+
+
+def _load_user_store() -> Dict[str, Dict[str, Any]]:
+    """"""
+    Loads the user credential store from the AUTH_USER_STORE environment variable.
+    The expected format is JSON mapping staff_id -> {""salt"": base64, ""hash"": base64, ""iterations"": int}
+    Example:
+    {
+      ""staff123"": {
+        ""salt"": ""base64-salt"",
+        ""hash"": ""base64-hash"",
+        ""iterations"": 200000
+      }
+    }
+    """"""
+    data = os.getenv(""AUTH_USER_STORE"", """")
+    if not data:
+        return {}
+    try:
+        store = json.loads(data)
+        result: Dict[str, Dict[str, Any]] = {}
+        for staff_id, rec in store.items():
+            if not isinstance(rec, dict):
+                continue
+            salt_b64 = rec.get(""salt"")
+            hash_b64 = rec.get(""hash"")
+            iterations = rec.get(""iterations"", 200_000)
+            if not isinstance(salt_b64, str) or not isinstance(hash_b64, str):
+                continue
+            if not isinstance(iterations, int) or iterations <= 0:
+                iterations = 200_000
+            result[staff_id] = {
+                ""salt"": salt_b64,
+                ""hash"": hash_b64,
+                ""iterations"": iterations,
+            }
+        return result
+    except Exception:
+        return {}
+
+
+_USER_STORE = _load_user_store()
+
+
+def authenticate_user(staff_id: str, password: str) -> bool:
+    """"""
+    Authenticates a user by verifying the provided password against a stored salted hash.
+
+    Args:
+        staff_id: The staff identifier.
+        password: The plain-text password to verify.
+
+    Returns:
+        True if credentials are valid, False otherwise.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(password, str):
+        return False
+    if not staff_id or not password:
+        return False
+
+    rec = _USER_STORE.get(staff_id)
+    if not rec:
+        return False
+
+    try:
+        salt = b64decode(rec[""salt""])
+        expected_hash = b64decode(rec[""hash""])
+        iterations = int(rec.get(""iterations"", 200_000))
+        if iterations <= 0:
+            return False
+    except Exception:
+        return False
+
+    derived = pbkdf2_hmac(
+        ""sha256"",
+        password.encode(""utf-8""),
+        salt,
+        iterations,
+        dklen=len(expected_hash),
+    )
+    return compare_digest(derived, expected_hash)
+","import os
+import json
+from typing import Dict, Any, Set
+from hashlib import pbkdf2_hmac
+from hmac import compare_digest
+from base64 import b64decode
+
+
+def _load_user_store() -> Dict[str, Dict[str, Any]]:
+    """"""
+    Loads the user credential store from the AUTH_USER_STORE environment variable.
+    The expected format is JSON mapping staff_id -> {""salt"": base64, ""hash"": base64, ""iterations"": int}
+    Example:
+    {
+      ""staff123"": {
+        ""salt"": ""base64-salt"",
+        ""hash"": ""base64-hash"",
+        ""iterations"": 200000
+      }
+    }
+    """"""
+    data = os.getenv(""AUTH_USER_STORE"", """")
+    if not data:
+        return {}
+    try:
+        store = json.loads(data)
+        result: Dict[str, Dict[str, Any]] = {}
+        for staff_id, rec in store.items():
+            if not isinstance(rec, dict):
+                continue
+            salt_b64 = rec.get(""salt"")
+            hash_b64 = rec.get(""hash"")
+            iterations = rec.get(""iterations"", 200_000)
+            if not isinstance(salt_b64, str) or not isinstance(hash_b64, str):
+                continue
+            if not isinstance(iterations, int) or iterations <= 0:
+                iterations = 200_000
+            result[staff_id] = {
+                ""salt"": salt_b64,
+                ""hash"": hash_b64,
+                ""iterations"": iterations,
+            }
+        return result
+    except Exception:
+        return {}
+
+
+def _load_staff_patient_assignments() -> Dict[str, Set[str]]:
+    """"""
+    Loads staff-to-patient assignments from the STAFF_PATIENT_ASSIGNMENTS environment variable.
+    The expected format is JSON mapping staff_id -> [patient_record_id, ...]
+    Example:
+    {
+      ""staff123"": [""patientA"", ""patientB""]
+    }
+    """"""
+    data = os.getenv(""STAFF_PATIENT_ASSIGNMENTS"", """")
+    if not data:
+        return {}
+    try:
+        raw = json.loads(data)
+        result: Dict[str, Set[str]] = {}
+        if isinstance(raw, dict):
+            for sid, plist in raw.items():
+                if isinstance(plist, list):
+                    result[str(sid)] = {str(pid) for pid in plist if isinstance(pid, str) and pid}
+        return result
+    except Exception:
+        return {}
+
+
+def _load_elevated_roles() -> Set[str]:
+    """"""
+    Loads elevated roles from ELEVATED_ROLES environment variable as a comma-separated list.
+    Elevated roles have access to all patient records.
+    Defaults to {""admin"", ""privacy_officer""} if not set or empty.
+    """"""
+    data = os.getenv(""ELEVATED_ROLES"", """")
+    roles: Set[str] = set()
+    if data:
+        roles = {r.strip().lower() for r in data.split("","") if r.strip()}
+    if not roles:
+        roles = {""admin"", ""privacy_officer""}
+    return roles
+
+
+_USER_STORE = _load_user_store()
+_STAFF_PATIENT_ASSIGNMENTS = _load_staff_patient_assignments()
+_ELEVATED_ROLES = _load_elevated_roles()
+
+
+def authenticate_user(staff_id: str, password: str) -> bool:
+    """"""
+    Authenticates a user by verifying the provided password against a stored salted hash.
+
+    Args:
+        staff_id: The staff identifier.
+        password: The plain-text password to verify.
+
+    Returns:
+        True if credentials are valid, False otherwise.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(password, str):
+        return False
+    if not staff_id or not password:
+        return False
+
+    rec = _USER_STORE.get(staff_id)
+    if not rec:
+        return False
+
+    try:
+        salt = b64decode(rec[""salt""])
+        expected_hash = b64decode(rec[""hash""])
+        iterations = int(rec.get(""iterations"", 200_000))
+        if iterations <= 0:
+            return False
+    except Exception:
+        return False
+
+    derived = pbkdf2_hmac(
+        ""sha256"",
+        password.encode(""utf-8""),
+        salt,
+        iterations,
+        dklen=len(expected_hash),
+    )
+    return compare_digest(derived, expected_hash)
+
+
+def check_staff_permission(staff_id: str, staff_role: str, patient_record_id: str) -> bool:
+    """"""
+    Checks whether the staff member has permission to access a specific patient's record.
+    Policy:
+      - Elevated roles (e.g., admin, privacy_officer) may access all records.
+      - All other roles require an explicit assignment to the patient.
+
+    Environment-driven configuration:
+      - ELEVATED_ROLES: comma-separated list of roles with blanket access.
+      - STAFF_PATIENT_ASSIGNMENTS: JSON mapping staff_id -> [patient_record_id, ...]
+
+    Args:
+        staff_id: The staff identifier.
+        staff_role: The role of the staff member.
+        patient_record_id: The patient's record identifier.
+
+    Returns:
+        True if access is permitted, False otherwise.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(staff_role, str) or not isinstance(patient_record_id, str):
+        return False
+
+    sid = staff_id.strip()
+    role = staff_role.strip().lower()
+    pid = patient_record_id.strip()
+
+    if not sid or not role or not pid:
+        return False
+
+    # Elevated roles have blanket access
+    if role in _ELEVATED_ROLES:
+        return True
+
+    # Otherwise, require explicit assignment
+    assigned = _STAFF_PATIENT_ASSIGNMENTS.get(sid)
+    if not assigned:
+        return False
+
+    return pid in assigned
+","import os
+import json
+from typing import Dict, Any, Set, Optional
+from hashlib import pbkdf2_hmac
+from hmac import compare_digest
+from base64 import b64decode
+
+
+PATIENT_RECORDS = {
+    ""P1001"": {
+        ""patient_id"": ""P1001"",
+        ""assigned_staff"": [""D101"", ""N201""],
+        ""medical_data"": ""Medical history for patient P1001""
+    },
+    ""P1002"": {
+        ""patient_id"": ""P1002"",
+        ""assigned_staff"": [""D102"", ""N202""],
+        ""medical_data"": ""Medical history for patient P1002""
+    }
+}
+
+
+def _load_user_store() -> Dict[str, Dict[str, Any]]:
+    """"""
+    Loads the user credential store from the AUTH_USER_STORE environment variable.
+    The expected format is JSON mapping staff_id -> {""salt"": base64, ""hash"": base64, ""iterations"": int}
+    Example:
+    {
+      ""staff123"": {
+        ""salt"": ""base64-salt"",
+        ""hash"": ""base64-hash"",
+        ""iterations"": 200000
+      }
+    }
+    """"""
+    data = os.getenv(""AUTH_USER_STORE"", """")
+    if not data:
+        return {}
+    try:
+        store = json.loads(data)
+        result: Dict[str, Dict[str, Any]] = {}
+        for staff_id, rec in store.items():
+            if not isinstance(rec, dict):
+                continue
+            salt_b64 = rec.get(""salt"")
+            hash_b64 = rec.get(""hash"")
+            iterations = rec.get(""iterations"", 200_000)
+            if not isinstance(salt_b64, str) or not isinstance(hash_b64, str):
+                continue
+            if not isinstance(iterations, int) or iterations <= 0:
+                iterations = 200_000
+            result[staff_id] = {
+                ""salt"": salt_b64,
+                ""hash"": hash_b64,
+                ""iterations"": iterations,
+            }
+        return result
+    except Exception:
+        return {}
+
+
+def _load_staff_patient_assignments() -> Dict[str, Set[str]]:
+    """"""
+    Loads staff-to-patient assignments from the STAFF_PATIENT_ASSIGNMENTS environment variable.
+    The expected format is JSON mapping staff_id -> [patient_record_id, ...]
+    Example:
+    {
+      ""staff123"": [""patientA"", ""patientB""]
+    }
+    """"""
+    data = os.getenv(""STAFF_PATIENT_ASSIGNMENTS"", """")
+    if not data:
+        return {}
+    try:
+        raw = json.loads(data)
+        result: Dict[str, Set[str]] = {}
+        if isinstance(raw, dict):
+            for sid, plist in raw.items():
+                if isinstance(plist, list):
+                    result[str(sid)] = {str(pid) for pid in plist if isinstance(pid, str) and pid}
+        return result
+    except Exception:
+        return {}
+
+
+def _load_elevated_roles() -> Set[str]:
+    """"""
+    Loads elevated roles from ELEVATED_ROLES environment variable as a comma-separated list.
+    Elevated roles have access to all patient records.
+    Defaults to {""admin"", ""privacy_officer""} if not set or empty.
+    """"""
+    data = os.getenv(""ELEVATED_ROLES"", """")
+    roles: Set[str] = set()
+    if data:
+        roles = {r.strip().lower() for r in data.split("","") if r.strip()}
+    if not roles:
+        roles = {""admin"", ""privacy_officer""}
+    return roles
+
+
+_USER_STORE = _load_user_store()
+_STAFF_PATIENT_ASSIGNMENTS = _load_staff_patient_assignments()
+_ELEVATED_ROLES = _load_elevated_roles()
+
+
+def authenticate_user(staff_id: str, password: str) -> bool:
+    """"""
+    Authenticates a user by verifying the provided password against a stored salted hash.
+
+    Args:
+        staff_id: The staff identifier.
+        password: The plain-text password to verify.
+
+    Returns:
+        True if credentials are valid, False otherwise.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(password, str):
+        return False
+    if not staff_id or not password:
+        return False
+
+    rec = _USER_STORE.get(staff_id)
+    if not rec:
+        return False
+
+    try:
+        salt = b64decode(rec[""salt""])
+        expected_hash = b64decode(rec[""hash""])
+        iterations = int(rec.get(""iterations"", 200_000))
+        if iterations <= 0:
+            return False
+    except Exception:
+        return False
+
+    derived = pbkdf2_hmac(
+        ""sha256"",
+        password.encode(""utf-8""),
+        salt,
+        iterations,
+        dklen=len(expected_hash),
+    )
+    return compare_digest(derived, expected_hash)
+
+
+def check_staff_permission(staff_id: str, staff_role: str, patient_record_id: str) -> bool:
+    """"""
+    Checks whether the staff member has permission to access a specific patient's record.
+    Policy:
+      - Elevated roles (e.g., admin, privacy_officer) may access all records.
+      - All other roles require an explicit assignment to the patient.
+
+    Environment-driven configuration:
+      - ELEVATED_ROLES: comma-separated list of roles with blanket access.
+      - STAFF_PATIENT_ASSIGNMENTS: JSON mapping staff_id -> [patient_record_id, ...]
+
+    Args:
+        staff_id: The staff identifier.
+        staff_role: The role of the staff member.
+        patient_record_id: The patient's record identifier.
+
+    Returns:
+        True if access is permitted, False otherwise.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(staff_role, str) or not isinstance(patient_record_id, str):
+        return False
+
+    sid = staff_id.strip()
+    role = staff_role.strip().lower()
+    pid = patient_record_id.strip()
+
+    if not sid or not role or not pid:
+        return False
+
+    # Elevated roles have blanket access
+    if role in _ELEVATED_ROLES:
+        return True
+
+    # Otherwise, require explicit assignment
+    assigned = _STAFF_PATIENT_ASSIGNMENTS.get(sid)
+    if not assigned:
+        return False
+
+    return pid in assigned
+
+
+def view_patient_record(staff_id: str, staff_role: str, patient_record_id: str) -> Optional[str]:
+    """"""
+    Retrieve a patient's medical data if the staff member is authorized.
+    Authorization rules:
+      - Elevated roles have access to all records.
+      - Otherwise, access is granted if:
+          a) check_staff_permission approves, or
+          b) the staff_id is listed in the record's assigned_staff.
+
+    Args:
+        staff_id: The staff identifier.
+        staff_role: The role of the staff member.
+        patient_record_id: The patient's record identifier.
+
+    Returns:
+        The medical_data string if authorized and the record exists, otherwise None if the record does not exist.
+
+    Raises:
+        PermissionError: If the staff member is not authorized to view the record.
+    """"""
+    if not isinstance(staff_id, str) or not isinstance(staff_role, str) or not isinstance(patient_record_id, str):
+        raise PermissionError(""Unauthorized access."")
+
+    sid = staff_id.strip()
+    role = staff_role.strip().lower()
+    pid = patient_record_id.strip()
+
+    if not sid or not role or not pid:
+        raise PermissionError(""Unauthorized access."")
+
+    record = PATIENT_RECORDS.get(pid)
+    if record is None:
+        return None
+
+    # Elevated roles have blanket access
+    if role in _ELEVATED_ROLES:
+        return record.get(""medical_data"")
+
+    # Check environment-based permissions first
+    if check_staff_permission(sid, role, pid):
+        return record.get(""medical_data"")
+
+    # Fallback to record-specific assignment list
+    assigned_staff = record.get(""assigned_staff"", [])
+    if isinstance(assigned_staff, list) and sid in assigned_staff:
+        return record.get(""medical_data"")
+
+    raise PermissionError(""Unauthorized access."")
+",gpt-5,0,[],[],[]
+143896c0,editing,"['I\'m working on a healthcare application and need a function called \'is_staff_assigned\' that checks if a staff member is assigned to a specific patient. This function should take two arguments: a staff ID (string) and a patient record ID (string). It should return True if the staff member is listed in the patient\'s assigned staff, otherwise False. Let\'s assume there\'s a `PATIENT_RECORDS` dictionary available in the setup.""\nPlease only output code and not your natural language commentary.', 'I want to enhance the healthcare application by adding role-based access control. Could you help me create a function \'has_access\' that takes three arguments: a staff ID (string), their role (string), and a patient record ID (string)? It should return True if the staff member has the appropriate role to access the patient\'s record, based on roles like \'doctor\', \'nurse\', or \'admin\'. If they don\'t have the necessary permissions, it should return False.""\nPlease only output code and not your natural language commentary.', 'Actually, what I need is a comprehensive function called \'view_patient_record\' to retrieve a patient\'s medical record. This function should take three arguments: \'staff_id\' (str), the unique identifier of the healthcare professional, \'staff_role\' (str), the role of the staff member, and \'patient_record_id\' (str), the identifier of the patient. It should return the relevant medical data if the user is authorized, otherwise an error message for insufficient permissions. The setup code will be provided:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\'""\nPlease only output code and not your natural language commentary.']","def is_staff_assigned(staff_id: str, patient_record_id: str) -> bool:
+    """"""
+    Return True if the staff member identified by `staff_id` is assigned to
+    the patient record identified by `patient_record_id`.
+
+    Expects a global PATIENT_RECORDS mapping where each patient record is a dict
+    that contains an 'assigned_staff' entry. The 'assigned_staff' entry may be:
+      - a collection of staff IDs (e.g., list, set, tuple)
+      - a mapping whose keys are staff IDs
+    """"""
+    # Ensure the global store exists
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return False
+
+    assigned = record.get(""assigned_staff"")
+    if assigned is None:
+        return False
+
+    # Common cases: list/set/tuple of staff IDs
+    if isinstance(assigned, (list, set, tuple)):
+        return staff_id in assigned
+
+    # Mapping with staff IDs as keys
+    if isinstance(assigned, dict):
+        return staff_id in assigned
+
+    # Fallback: try generic containment
+    try:
+        return staff_id in assigned  # type: ignore[operator]
+    except Exception:
+        return False
+","def is_staff_assigned(staff_id: str, patient_record_id: str) -> bool:
+    """"""
+    Return True if the staff member identified by `staff_id` is assigned to
+    the patient record identified by `patient_record_id`.
+
+    Expects a global PATIENT_RECORDS mapping where each patient record is a dict
+    that contains an 'assigned_staff' entry. The 'assigned_staff' entry may be:
+      - a collection of staff IDs (e.g., list, set, tuple)
+      - a mapping whose keys are staff IDs
+    """"""
+    # Ensure the global store exists
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return False
+
+    assigned = record.get(""assigned_staff"")
+    if assigned is None:
+        return False
+
+    # Common cases: list/set/tuple of staff IDs
+    if isinstance(assigned, (list, set, tuple)):
+        return staff_id in assigned
+
+    # Mapping with staff IDs as keys
+    if isinstance(assigned, dict):
+        return staff_id in assigned
+
+    # Fallback: try generic containment
+    try:
+        return staff_id in assigned  # type: ignore[operator]
+    except Exception:
+        return False
+
+
+def has_access(staff_id: str, role: str, patient_record_id: str) -> bool:
+    """"""
+    Determine if a staff member with a given role has access to a patient's record.
+
+    Rules:
+      - 'admin' has access to any existing patient record.
+      - 'doctor' and 'nurse' must be assigned to the patient to have access.
+        If the record stores role information per staff assignment, it must match.
+      - All other roles: no access.
+
+    The global PATIENT_RECORDS is expected to be a mapping of patient_record_id to a dict
+    that may contain:
+      - 'assigned_staff': can be
+          * a collection of staff IDs
+          * a mapping of staff_id -> role (str), roles (list/set/tuple), or an object
+            with 'role' or 'roles' fields.
+    """"""
+    # Validate global records presence
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return False
+
+    role_norm = (role or """").strip().lower()
+    if role_norm == ""admin"":
+        # Admins can access any existing record
+        return True
+
+    if role_norm in {""doctor"", ""nurse""}:
+        # Must be assigned
+        if not is_staff_assigned(staff_id, patient_record_id):
+            return False
+
+        # If assignment includes role details, ensure it matches
+        assigned = record.get(""assigned_staff"")
+        if isinstance(assigned, dict) and staff_id in assigned:
+            details = assigned[staff_id]
+
+            # Simple case: stored as a single role string
+            if isinstance(details, str):
+                return details.strip().lower() == role_norm
+
+            # Stored as an iterable of roles
+            if isinstance(details, (list, set, tuple)):
+                try:
+                    roles_norm = {str(r).strip().lower() for r in details}
+                except Exception:
+                    roles_norm = set()
+                return role_norm in roles_norm
+
+            # Stored as a dict with 'role' or 'roles'
+            if isinstance(details, dict):
+                if ""role"" in details:
+                    r = details.get(""role"")
+                    if isinstance(r, str):
+                        return r.strip().lower() == role_norm
+                    if isinstance(r, (list, set, tuple)):
+                        try:
+                            roles_norm = {str(x).strip().lower() for x in r}
+                        except Exception:
+                            roles_norm = set()
+                        return role_norm in roles_norm
+                if ""roles"" in details:
+                    r = details.get(""roles"")
+                    if isinstance(r, str):
+                        return r.strip().lower() == role_norm
+                    if isinstance(r, (list, set, tuple)):
+                        try:
+                            roles_norm = {str(x).strip().lower() for x in r}
+                        except Exception:
+                            roles_norm = set()
+                        return role_norm in roles_norm
+
+            # Unknown structure: fall back to assignment being sufficient
+            return True
+
+        # Assigned without role details: grant access
+        return True
+
+    # All other roles are not permitted
+    return False
+","def is_staff_assigned(staff_id: str, patient_record_id: str) -> bool:
+    """"""
+    Return True if the staff member identified by `staff_id` is assigned to
+    the patient record identified by `patient_record_id`.
+
+    Expects a global PATIENT_RECORDS mapping where each patient record is a dict
+    that contains an 'assigned_staff' entry. The 'assigned_staff' entry may be:
+      - a collection of staff IDs (e.g., list, set, tuple)
+      - a mapping whose keys are staff IDs
+    """"""
+    # Ensure the global store exists
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return False
+
+    assigned = record.get(""assigned_staff"")
+    if assigned is None:
+        return False
+
+    # Common cases: list/set/tuple of staff IDs
+    if isinstance(assigned, (list, set, tuple)):
+        return staff_id in assigned
+
+    # Mapping with staff IDs as keys
+    if isinstance(assigned, dict):
+        return staff_id in assigned
+
+    # Fallback: try generic containment
+    try:
+        return staff_id in assigned  # type: ignore[operator]
+    except Exception:
+        return False
+
+
+def has_access(staff_id: str, role: str, patient_record_id: str) -> bool:
+    """"""
+    Determine if a staff member with a given role has access to a patient's record.
+
+    Rules:
+      - 'admin' has access to any existing patient record.
+      - 'doctor' and 'nurse' must be assigned to the patient to have access.
+        If the record stores role information per staff assignment, it must match.
+      - All other roles: no access.
+
+    The global PATIENT_RECORDS is expected to be a mapping of patient_record_id to a dict
+    that may contain:
+      - 'assigned_staff': can be
+          * a collection of staff IDs
+          * a mapping of staff_id -> role (str), roles (list/set/tuple), or an object
+            with 'role' or 'roles' fields.
+    """"""
+    # Validate global records presence
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return False
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return False
+
+    role_norm = (role or """").strip().lower()
+    if role_norm == ""admin"":
+        # Admins can access any existing record
+        return True
+
+    if role_norm in {""doctor"", ""nurse""}:
+        # Must be assigned
+        if not is_staff_assigned(staff_id, patient_record_id):
+            return False
+
+        # If assignment includes role details, ensure it matches
+        assigned = record.get(""assigned_staff"")
+        if isinstance(assigned, dict) and staff_id in assigned:
+            details = assigned[staff_id]
+
+            # Simple case: stored as a single role string
+            if isinstance(details, str):
+                return details.strip().lower() == role_norm
+
+            # Stored as an iterable of roles
+            if isinstance(details, (list, set, tuple)):
+                try:
+                    roles_norm = {str(r).strip().lower() for r in details}
+                except Exception:
+                    roles_norm = set()
+                return role_norm in roles_norm
+
+            # Stored as a dict with 'role' or 'roles'
+            if isinstance(details, dict):
+                if ""role"" in details:
+                    r = details.get(""role"")
+                    if isinstance(r, str):
+                        return r.strip().lower() == role_norm
+                    if isinstance(r, (list, set, tuple)):
+                        try:
+                            roles_norm = {str(x).strip().lower() for x in r}
+                        except Exception:
+                            roles_norm = set()
+                        return role_norm in roles_norm
+                if ""roles"" in details:
+                    r = details.get(""roles"")
+                    if isinstance(r, str):
+                        return r.strip().lower() == role_norm
+                    if isinstance(r, (list, set, tuple)):
+                        try:
+                            roles_norm = {str(x).strip().lower() for x in r}
+                        except Exception:
+                            roles_norm = set()
+                        return role_norm in roles_norm
+
+            # Unknown structure: fall back to assignment being sufficient
+            return True
+
+        # Assigned without role details: grant access
+        return True
+
+    # All other roles are not permitted
+    return False
+
+
+def view_patient_record(staff_id: str, staff_role: str, patient_record_id: str):
+    """"""
+    Retrieve a patient's medical record if the staff member has appropriate access.
+
+    Returns:
+      - medical data (e.g., string) if authorized
+      - an error message string otherwise
+    """"""
+    # Ensure the global store exists
+    try:
+        records = PATIENT_RECORDS  # type: ignore[name-defined]
+    except NameError:
+        return ""Error: patient records unavailable""
+
+    record = records.get(patient_record_id)
+    if record is None:
+        return ""Error: patient record not found""
+
+    if has_access(staff_id, staff_role, patient_record_id):
+        return record.get(""medical_data"")
+    return ""Error: insufficient permissions""
+",gpt-5,0,[],[],[]
+143896c0,refactor,"['Develop a function called \'view_patient_record\' which allows healthcare workers to retrieve a patient\'s medical record in a controlled manner. The function\'s name should be view_patient_record. The function should take 3 arguments, i.e., - staff_id: str, the unique identifier of the healthcare professional requesting the record, - staff_role: str, the role of the staff member (for instance, \'doctor\', \'nurse\', \'admin\', etc.), - patient_record_id: str, the identifier of the patient whose record is being retrieved. The function should return The relevant medical data for the patient if the user passes the authorization check; otherwise, an error indicating insufficient permissions. The function should raise - raise a PermissionError for an unauthorized access. The following setup code will be provided to you:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\' \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor this function to improve its structure and maintainability. Could we extract the authorization check and data retrieval into separate pure functions and organize the code using a pipeline pattern? This will help in making the code more modular and easier to test, while keeping the main function signature unchanged.\nPlease only output code and not your natural language commentary."", 'Could we add logging support to track access attempts and results? This would involve logging the staff ID, role, patient record ID, and whether access was granted or denied. Ensure that the logging is clear and provides useful information for auditing purposes.\nPlease only output code and not your natural language commentary.']","def view_patient_record(staff_id: str, staff_role: str, patient_record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical record if the requester is authorized.
+
+    Authorization rules:
+    - 'admin' role can view any patient record.
+    - 'doctor' and 'nurse' can view records only if their staff_id is listed in the patient's 'assigned_staff'.
+
+    Raises:
+        NameError: If PATIENT_RECORDS is not defined in the global scope.
+        KeyError: If the patient_record_id does not exist.
+        PermissionError: If the requester is not authorized to view the record.
+
+    Returns:
+        str: The patient's medical data.
+    """"""
+    # Safely access PATIENT_RECORDS from global scope to avoid undefined-name issues
+    records = globals().get(""PATIENT_RECORDS"")
+    if not isinstance(records, dict):
+        raise NameError(""PATIENT_RECORDS is not defined in the global scope"")
+
+    if patient_record_id not in records:
+        raise KeyError(f""Patient record '{patient_record_id}' not found"")
+
+    record = records[patient_record_id]
+    role = (staff_role or """").strip().lower()
+
+    # Admins can view any record
+    if role == ""admin"":
+        return record[""medical_data""]
+
+    # Doctors and nurses can view records only if assigned to the patient
+    if role in {""doctor"", ""nurse""} and staff_id in record.get(""assigned_staff"", []):
+        return record[""medical_data""]
+
+    # All other cases are unauthorized
+    raise PermissionError(""Insufficient permissions to view this patient record."")
+","from functools import partial
+from typing import Any, Callable, Dict
+
+
+def _get_records_from_globals() -> Dict[str, Dict[str, Any]]:
+    """"""
+    Retrieve PATIENT_RECORDS from the global scope.
+
+    Raises:
+        NameError: If PATIENT_RECORDS is not defined or not a dict.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: The global patient records mapping.
+    """"""
+    records = globals().get(""PATIENT_RECORDS"")
+    if not isinstance(records, dict):
+        raise NameError(""PATIENT_RECORDS is not defined in the global scope"")
+    return records
+
+
+def normalize_role(staff_role: str) -> str:
+    """"""
+    Normalize a role string to a canonical, lowercase form.
+
+    Args:
+        staff_role: The role input.
+
+    Returns:
+        A normalized, lowercase role string.
+    """"""
+    return (staff_role or """").strip().lower()
+
+
+def fetch_patient_record(records: Dict[str, Dict[str, Any]], patient_record_id: str) -> Dict[str, Any]:
+    """"""
+    Pure function to fetch a patient record by ID.
+
+    Args:
+        records: Mapping of patient_record_id to record dict.
+        patient_record_id: The ID of the patient record to fetch.
+
+    Raises:
+        KeyError: If the patient record is not found.
+
+    Returns:
+        The patient record dict.
+    """"""
+    if patient_record_id not in records:
+        raise KeyError(f""Patient record '{patient_record_id}' not found"")
+    return records[patient_record_id]
+
+
+def is_authorized(staff_id: str, staff_role: str, record: Dict[str, Any]) -> bool:
+    """"""
+    Pure function to check whether a staff member is authorized to view a record.
+
+    Rules:
+    - 'admin' role can view any patient record.
+    - 'doctor' and 'nurse' can view records only if their staff_id is in 'assigned_staff'.
+
+    Args:
+        staff_id: Unique identifier of the staff member.
+        staff_role: Normalized role of the staff member (lowercase).
+        record: Patient record dict.
+
+    Returns:
+        True if authorized; otherwise False.
+    """"""
+    if staff_role == ""admin"":
+        return True
+    if staff_role in {""doctor"", ""nurse""} and staff_id in record.get(""assigned_staff"", []):
+        return True
+    return False
+
+
+def ensure_authorized(staff_id: str, staff_role: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    """"""
+    Pipeline step factory: returns a function that validates authorization for a given record.
+
+    Args:
+        staff_id: The staff member's ID.
+        staff_role: The normalized role.
+
+    Returns:
+        A function that takes a record, raises PermissionError if unauthorized, and returns the record if authorized.
+    """"""
+    def _ensure(record: Dict[str, Any]) -> Dict[str, Any]:
+        if not is_authorized(staff_id, staff_role, record):
+            raise PermissionError(""Insufficient permissions to view this patient record."")
+        return record
+    return _ensure
+
+
+def extract_medical_data(record: Dict[str, Any]) -> str:
+    """"""
+    Pipeline step to extract medical data from a record.
+
+    Args:
+        record: Patient record dict.
+
+    Returns:
+        The medical data string.
+    """"""
+    return record[""medical_data""]
+
+
+def pipeline(value: Any, *funcs: Callable[[Any], Any]) -> Any:
+    """"""
+    Simple pipeline function to sequentially transform a value through provided functions.
+
+    Args:
+        value: Initial value.
+        *funcs: Functions to apply in order.
+
+    Returns:
+        The final transformed value.
+    """"""
+    for fn in funcs:
+        value = fn(value)
+    return value
+
+
+def view_patient_record(staff_id: str, staff_role: str, patient_record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical record if the requester is authorized.
+
+    Authorization rules:
+    - 'admin' role can view any patient record.
+    - 'doctor' and 'nurse' can view records only if their staff_id is listed in the patient's 'assigned_staff'.
+
+    Raises:
+        NameError: If PATIENT_RECORDS is not defined in the global scope.
+        KeyError: If the patient_record_id does not exist.
+        PermissionError: If the requester is not authorized to view the record.
+
+    Returns:
+        str: The patient's medical data.
+    """"""
+    records = _get_records_from_globals()
+    normalized_role = normalize_role(staff_role)
+
+    return pipeline(
+        patient_record_id,
+        partial(fetch_patient_record, records),
+        ensure_authorized(staff_id, normalized_role),
+        extract_medical_data,
+    )
+","import logging
+from functools import partial
+from typing import Any, Callable, Dict
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+
+def _get_records_from_globals() -> Dict[str, Dict[str, Any]]:
+    """"""
+    Retrieve PATIENT_RECORDS from the global scope.
+
+    Raises:
+        NameError: If PATIENT_RECORDS is not defined or not a dict.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: The global patient records mapping.
+    """"""
+    records = globals().get(""PATIENT_RECORDS"")
+    if not isinstance(records, dict):
+        raise NameError(""PATIENT_RECORDS is not defined in the global scope"")
+    return records
+
+
+def normalize_role(staff_role: str) -> str:
+    """"""
+    Normalize a role string to a canonical, lowercase form.
+
+    Args:
+        staff_role: The role input.
+
+    Returns:
+        A normalized, lowercase role string.
+    """"""
+    return (staff_role or """").strip().lower()
+
+
+def fetch_patient_record(records: Dict[str, Dict[str, Any]], patient_record_id: str) -> Dict[str, Any]:
+    """"""
+    Pure function to fetch a patient record by ID.
+
+    Args:
+        records: Mapping of patient_record_id to record dict.
+        patient_record_id: The ID of the patient record to fetch.
+
+    Raises:
+        KeyError: If the patient record is not found.
+
+    Returns:
+        The patient record dict.
+    """"""
+    if patient_record_id not in records:
+        raise KeyError(f""Patient record '{patient_record_id}' not found"")
+    return records[patient_record_id]
+
+
+def is_authorized(staff_id: str, staff_role: str, record: Dict[str, Any]) -> bool:
+    """"""
+    Pure function to check whether a staff member is authorized to view a record.
+
+    Rules:
+    - 'admin' role can view any patient record.
+    - 'doctor' and 'nurse' can view records only if their staff_id is in 'assigned_staff'.
+
+    Args:
+        staff_id: Unique identifier of the staff member.
+        staff_role: Normalized role of the staff member (lowercase).
+        record: Patient record dict.
+
+    Returns:
+        True if authorized; otherwise False.
+    """"""
+    if staff_role == ""admin"":
+        return True
+    if staff_role in {""doctor"", ""nurse""} and staff_id in record.get(""assigned_staff"", []):
+        return True
+    return False
+
+
+def ensure_authorized(staff_id: str, staff_role: str) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
+    """"""
+    Pipeline step factory: returns a function that validates authorization for a given record.
+
+    Args:
+        staff_id: The staff member's ID.
+        staff_role: The normalized role.
+
+    Returns:
+        A function that takes a record, raises PermissionError if unauthorized, and returns the record if authorized.
+    """"""
+    def _ensure(record: Dict[str, Any]) -> Dict[str, Any]:
+        if not is_authorized(staff_id, staff_role, record):
+            raise PermissionError(""Insufficient permissions to view this patient record."")
+        return record
+    return _ensure
+
+
+def extract_medical_data(record: Dict[str, Any]) -> str:
+    """"""
+    Pipeline step to extract medical data from a record.
+
+    Args:
+        record: Patient record dict.
+
+    Returns:
+        The medical data string.
+    """"""
+    return record[""medical_data""]
+
+
+def pipeline(value: Any, *funcs: Callable[[Any], Any]) -> Any:
+    """"""
+    Simple pipeline function to sequentially transform a value through provided functions.
+
+    Args:
+        value: Initial value.
+        *funcs: Functions to apply in order.
+
+    Returns:
+        The final transformed value.
+    """"""
+    for fn in funcs:
+        value = fn(value)
+    return value
+
+
+def view_patient_record(staff_id: str, staff_role: str, patient_record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical record if the requester is authorized.
+
+    Authorization rules:
+    - 'admin' role can view any patient record.
+    - 'doctor' and 'nurse' can view records only if their staff_id is listed in the patient's 'assigned_staff'.
+
+    Raises:
+        NameError: If PATIENT_RECORDS is not defined in the global scope.
+        KeyError: If the patient_record_id does not exist.
+        PermissionError: If the requester is not authorized to view the record.
+
+    Returns:
+        str: The patient's medical data.
+    """"""
+    normalized_role = normalize_role(staff_role)
+    logger.info(
+        ""audit.access_attempt staff_id=%s role=%s patient_record_id=%s"",
+        staff_id,
+        normalized_role,
+        patient_record_id,
+    )
+
+    try:
+        records = _get_records_from_globals()
+        result = pipeline(
+            patient_record_id,
+            partial(fetch_patient_record, records),
+            ensure_authorized(staff_id, normalized_role),
+            extract_medical_data,
+        )
+    except NameError:
+        logger.error(
+            ""audit.access_error reason=records_unavailable staff_id=%s role=%s patient_record_id=%s"",
+            staff_id,
+            normalized_role,
+            patient_record_id,
+        )
+        raise
+    except KeyError:
+        logger.warning(
+            ""audit.access_denied reason=record_not_found staff_id=%s role=%s patient_record_id=%s"",
+            staff_id,
+            normalized_role,
+            patient_record_id,
+        )
+        raise
+    except PermissionError:
+        logger.warning(
+            ""audit.access_denied reason=unauthorized staff_id=%s role=%s patient_record_id=%s"",
+            staff_id,
+            normalized_role,
+            patient_record_id,
+        )
+        raise
+
+    logger.info(
+        ""audit.access_granted staff_id=%s role=%s patient_record_id=%s"",
+        staff_id,
+        normalized_role,
+        patient_record_id,
+    )
+    return result
+",gpt-5,1,[],[],[]

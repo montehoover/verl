@@ -1,0 +1,2073 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+0a873119,expansion,"[""I'm working on a system that allows users to submit Python scripts for execution. To start, I need a function called 'analyze_ast_for_safety' that takes a string of Python code, parses it into an abstract syntax tree (AST), and checks for any potentially harmful operations. The function should return a boolean indicating whether the script is safe. Use the 'ast' module to parse the code and analyze the nodes.\nPlease only output code and not your natural language commentary."", ""Thanks for the AST analysis function! Now, I need a way to execute these scripts safely. Can you help me create a function called 'execute_safe_script' that takes a string of Python code, executes it, and returns the result? The function should ensure that only non-harmful operations are executed, and it should raise a ValueError if the script contains any prohibited operations. Use a restricted execution environment to prevent any harmful activity.\nPlease only output code and not your natural language commentary."", ""With the AST analysis and safe execution functions ready, I need to combine them into a comprehensive solution. Can you implement 'safe_run_script', which takes a user-provided Python script, checks its safety using 'analyze_ast_for_safety', and executes it using 'execute_safe_script'? It should return the result of the script or None if there's no result, and raise a ValueError for any prohibited operations or invalid syntax. Here's the setup code you'll use:\n```\nimport ast\n```\nHere's some additional context about the imported packages and global variables: This function is meant for environments where users can run simple, safe Python scripts, without risking any harmful activity.\nPlease only output code and not your natural language commentary.""]","import ast
+
+def analyze_ast_for_safety(code_string: str) -> bool:
+    """"""
+    Parses a string of Python code into an AST and checks for
+    potentially harmful operations.
+
+    Args:
+        code_string: The Python code to analyze.
+
+    Returns:
+        True if the script is deemed safe, False otherwise.
+    """"""
+    try:
+        tree = ast.parse(code_string)
+    except SyntaxError:
+        # If the code can't be parsed, it can't be run,
+        # but we'll consider it ""unsafe"" from an execution standpoint.
+        return False
+
+    for node in ast.walk(tree):
+        # Disallow imports
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return False
+        
+        # Disallow calls to certain built-in functions
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in ['open', 'eval', 'exec']:
+                    return False
+            # Disallow attribute calls like os.system
+            if isinstance(node.func, ast.Attribute):
+                # This is a simple check, could be more sophisticated
+                # e.g., checking if 'os' or 'subprocess' was imported and then used.
+                # For now, let's be very restrictive.
+                # A more robust check would track imported modules.
+                if node.func.attr in ['system', 'popen', 'spawn', 'call', 'run']:
+                    return False
+
+    return True
+
+if __name__ == '__main__':
+    safe_code_1 = ""print('Hello, world!')""
+    safe_code_2 = ""x = 1 + 2\nprint(x)""
+    safe_code_3 = """"""
+def greet(name):
+    return f""Hello, {name}""
+print(greet(""User""))
+""""""
+
+    unsafe_code_1 = ""import os\nos.system('echo unsafe')""
+    unsafe_code_2 = ""open('some_file.txt', 'w').write('dangerous')""
+    unsafe_code_3 = ""eval('1 + 1')"" # eval itself is disallowed
+    unsafe_code_4 = ""exec('print(\""executed\"")')"" # exec itself is disallowed
+    unsafe_code_5 = ""__import__('os').system('echo unsafe')"" # using __import__
+    unsafe_code_6 = ""import subprocess\nsubprocess.call(['ls'])""
+    unsafe_code_7 = """"""
+import os
+def do_something():
+    os.system(""echo 'dangerous'"")
+do_something()
+""""""
+
+    print(f""'{safe_code_1[:20]}...' is safe: {analyze_ast_for_safety(safe_code_1)}"")
+    print(f""'{safe_code_2[:20]}...' is safe: {analyze_ast_for_safety(safe_code_2)}"")
+    print(f""'{safe_code_3[:20]}...' is safe: {analyze_ast_for_safety(safe_code_3)}"")
+
+    print(f""'{unsafe_code_1[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_1)}"")
+    print(f""'{unsafe_code_2[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_2)}"")
+    print(f""'{unsafe_code_3[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_3)}"")
+    print(f""'{unsafe_code_4[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_4)}"")
+    print(f""'{unsafe_code_5[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_5)}"")
+    print(f""'{unsafe_code_6[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_6)}"")
+    print(f""'{unsafe_code_7[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_7)}"")
+
+    # Test syntax error
+    syntax_error_code = ""print('Hello'""
+    print(f""'{syntax_error_code[:20]}...' is safe: {analyze_ast_for_safety(syntax_error_code)}"")
+","import ast
+import io
+import contextlib
+
+# Define a list of allowed built-in functions for the restricted execution scope
+ALLOWED_BUILTINS = {
+    ""print"": print,
+    ""abs"": abs,
+    ""all"": all,
+    ""any"": any,
+    ""ascii"": ascii,
+    ""bin"": bin,
+    ""bool"": bool,
+    ""bytearray"": bytearray,
+    ""bytes"": bytes,
+    ""callable"": callable,
+    ""chr"": chr,
+    ""complex"": complex,
+    ""dict"": dict,
+    ""divmod"": divmod,
+    ""enumerate"": enumerate,
+    ""filter"": filter,
+    ""float"": float,
+    ""format"": format,
+    ""frozenset"": frozenset,
+    ""hasattr"": hasattr,
+    ""hash"": hash,
+    ""hex"": hex,
+    ""id"": id,
+    ""int"": int,
+    ""isinstance"": isinstance,
+    ""issubclass"": issubclass,
+    ""iter"": iter,
+    ""len"": len,
+    ""list"": list,
+    ""map"": map,
+    ""max"": max,
+    ""min"": min,
+    ""next"": next,
+    ""oct"": oct,
+    ""ord"": ord,
+    ""pow"": pow,
+    ""repr"": repr,
+    ""reversed"": reversed,
+    ""round"": round,
+    ""set"": set,
+    ""slice"": slice,
+    ""sorted"": sorted,
+    ""str"": str,
+    ""sum"": sum,
+    ""tuple"": tuple,
+    ""type"": type,
+    ""zip"": zip,
+}
+
+def analyze_ast_for_safety(code_string: str) -> bool:
+    """"""
+    Parses a string of Python code into an AST and checks for
+    potentially harmful operations.
+
+    Args:
+        code_string: The Python code to analyze.
+
+    Returns:
+        True if the script is deemed safe, False otherwise.
+    """"""
+    try:
+        tree = ast.parse(code_string)
+    except SyntaxError:
+        # If the code can't be parsed, it can't be run,
+        # but we'll consider it ""unsafe"" from an execution standpoint.
+        return False
+
+    for node in ast.walk(tree):
+        # Disallow imports
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return False
+        
+        # Disallow calls to certain built-in functions
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in ['open', 'eval', 'exec']:
+                    return False
+            # Disallow attribute calls like os.system
+            if isinstance(node.func, ast.Attribute):
+                # This is a simple check, could be more sophisticated
+                # e.g., checking if 'os' or 'subprocess' was imported and then used.
+                # For now, let's be very restrictive.
+                # A more robust check would track imported modules.
+                if node.func.attr in ['system', 'popen', 'spawn', 'call', 'run']:
+                    return False
+
+    return True
+
+def execute_safe_script(code_string: str) -> str:
+    """"""
+    Executes a Python script if it's deemed safe by AST analysis,
+    capturing and returning its stdout.
+
+    Args:
+        code_string: The Python code to execute.
+
+    Returns:
+        The captured stdout from the script execution.
+
+    Raises:
+        ValueError: If the script contains prohibited operations.
+        Any other exception raised during script execution will propagate.
+    """"""
+    if not analyze_ast_for_safety(code_string):
+        raise ValueError(""Script contains prohibited operations and cannot be executed."")
+
+    # Prepare a restricted global scope
+    safe_globals = {
+        ""__builtins__"": ALLOWED_BUILTINS
+    }
+    
+    # Capture stdout
+    stdout_capture = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout_capture):
+            exec(code_string, safe_globals, {}) # Use an empty dict for locals
+        return stdout_capture.getvalue()
+    finally:
+        stdout_capture.close()
+
+if __name__ == '__main__':
+    safe_code_1 = ""print('Hello, world!')""
+    safe_code_2 = ""x = 1 + 2\nprint(x)""
+    safe_code_3 = """"""
+def greet(name):
+    return f""Hello, {name}""
+print(greet(""User""))
+""""""
+
+    unsafe_code_1 = ""import os\nos.system('echo unsafe')""
+    unsafe_code_2 = ""open('some_file.txt', 'w').write('dangerous')""
+    unsafe_code_3 = ""eval('1 + 1')"" # eval itself is disallowed
+    unsafe_code_4 = ""exec('print(\""executed\"")')"" # exec itself is disallowed
+    unsafe_code_5 = ""__import__('os').system('echo unsafe')"" # using __import__
+    unsafe_code_6 = ""import subprocess\nsubprocess.call(['ls'])""
+    unsafe_code_7 = """"""
+import os
+def do_something():
+    os.system(""echo 'dangerous'"")
+do_something()
+""""""
+
+    print(f""'{safe_code_1[:20]}...' is safe: {analyze_ast_for_safety(safe_code_1)}"")
+    print(f""'{safe_code_2[:20]}...' is safe: {analyze_ast_for_safety(safe_code_2)}"")
+    print(f""'{safe_code_3[:20]}...' is safe: {analyze_ast_for_safety(safe_code_3)}"")
+
+    print(f""'{unsafe_code_1[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_1)}"")
+    print(f""'{unsafe_code_2[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_2)}"")
+    print(f""'{unsafe_code_3[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_3)}"")
+    print(f""'{unsafe_code_4[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_4)}"")
+    print(f""'{unsafe_code_5[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_5)}"")
+    print(f""'{unsafe_code_6[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_6)}"")
+    print(f""'{unsafe_code_7[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_7)}"")
+
+    # Test syntax error
+    syntax_error_code = ""print('Hello'""
+    print(f""'{syntax_error_code[:20]}...' is safe: {analyze_ast_for_safety(syntax_error_code)}"")
+
+    print(""\n--- Testing execute_safe_script ---"")
+    
+    # Test 1: Safe code that prints
+    code_to_exec_1 = ""print('Hello from executed script!')\nx = 10\nprint(f'x is {x}')""
+    print(f""Executing: {code_to_exec_1[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_1)
+        print(f""Output:\n{output.strip()}"")
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Safe code, no print (result should be empty string)
+    code_to_exec_2 = ""y = 5 * 5""
+    print(f""\nExecuting: {code_to_exec_2[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_2)
+        print(f""Output:\n'{output.strip()}'"") # Expecting empty string
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Unsafe code (import)
+    code_to_exec_3 = ""import os\nprint(os.getcwd())""
+    print(f""\nExecuting: {code_to_exec_3[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_3)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 4: Unsafe code (open)
+    code_to_exec_4 = ""with open('test.txt', 'w') as f: f.write('hello')"" # AST check disallows open
+    print(f""\nExecuting: {code_to_exec_4[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_4)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 5: AST-safe code with runtime error
+    code_to_exec_5 = ""print('About to divide by zero...')\nprint(1/0)""
+    print(f""\nExecuting: {code_to_exec_5[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_5)
+        print(f""Output:\n{output.strip()}"")
+    except ZeroDivisionError as e:
+        print(f""Caught expected runtime error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+    
+    # Test 6: Code trying to use a disallowed builtin (eval) - caught by AST check
+    code_to_exec_6 = ""eval('1+1')""
+    print(f""\nExecuting: {code_to_exec_6[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_6)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e: 
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 7: Code trying to use a builtin not in ALLOWED_BUILTINS (e.g. input)
+    # 'input' is not in ALLOWED_BUILTINS and not explicitly in the AST check's dangerous list.
+    # This should result in a NameError during exec.
+    code_to_exec_7 = ""name = input('Enter name: ')\nprint(name)""
+    print(f""\nExecuting: {code_to_exec_7[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_7)
+        print(f""Output:\n{output.strip()}"")
+    except NameError as e:
+        print(f""Caught expected runtime error (NameError for input): {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+    
+    # Test 8: Code that is syntactically incorrect
+    code_to_exec_8 = ""print('Hello'""
+    print(f""\nExecuting syntactically incorrect code: {code_to_exec_8[:30]}..."")
+    try:
+        # analyze_ast_for_safety will return False for syntax errors,
+        # leading to ValueError from execute_safe_script
+        output = execute_safe_script(code_to_exec_8)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error for syntax issue: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+","import ast
+import io
+import contextlib
+
+# Define a list of allowed built-in functions for the restricted execution scope
+ALLOWED_BUILTINS = {
+    ""print"": print,
+    ""abs"": abs,
+    ""all"": all,
+    ""any"": any,
+    ""ascii"": ascii,
+    ""bin"": bin,
+    ""bool"": bool,
+    ""bytearray"": bytearray,
+    ""bytes"": bytes,
+    ""callable"": callable,
+    ""chr"": chr,
+    ""complex"": complex,
+    ""dict"": dict,
+    ""divmod"": divmod,
+    ""enumerate"": enumerate,
+    ""filter"": filter,
+    ""float"": float,
+    ""format"": format,
+    ""frozenset"": frozenset,
+    ""hasattr"": hasattr,
+    ""hash"": hash,
+    ""hex"": hex,
+    ""id"": id,
+    ""int"": int,
+    ""isinstance"": isinstance,
+    ""issubclass"": issubclass,
+    ""iter"": iter,
+    ""len"": len,
+    ""list"": list,
+    ""map"": map,
+    ""max"": max,
+    ""min"": min,
+    ""next"": next,
+    ""oct"": oct,
+    ""ord"": ord,
+    ""pow"": pow,
+    ""repr"": repr,
+    ""reversed"": reversed,
+    ""round"": round,
+    ""set"": set,
+    ""slice"": slice,
+    ""sorted"": sorted,
+    ""str"": str,
+    ""sum"": sum,
+    ""tuple"": tuple,
+    ""type"": type,
+    ""zip"": zip,
+}
+
+def analyze_ast_for_safety(code_string: str) -> bool:
+    """"""
+    Parses a string of Python code into an AST and checks for
+    potentially harmful operations.
+
+    Args:
+        code_string: The Python code to analyze.
+
+    Returns:
+        True if the script is deemed safe, False otherwise.
+    """"""
+    try:
+        tree = ast.parse(code_string)
+    except SyntaxError:
+        # If the code can't be parsed, it can't be run,
+        # but we'll consider it ""unsafe"" from an execution standpoint.
+        return False
+
+    for node in ast.walk(tree):
+        # Disallow imports
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return False
+        
+        # Disallow calls to certain built-in functions
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in ['open', 'eval', 'exec']:
+                    return False
+            # Disallow attribute calls like os.system
+            if isinstance(node.func, ast.Attribute):
+                # This is a simple check, could be more sophisticated
+                # e.g., checking if 'os' or 'subprocess' was imported and then used.
+                # For now, let's be very restrictive.
+                # A more robust check would track imported modules.
+                if node.func.attr in ['system', 'popen', 'spawn', 'call', 'run']:
+                    return False
+
+    return True
+
+def execute_safe_script(code_string: str) -> str:
+    """"""
+    Executes a Python script if it's deemed safe by AST analysis,
+    capturing and returning its stdout.
+
+    Args:
+        code_string: The Python code to execute.
+
+    Returns:
+        The captured stdout from the script execution.
+
+    Raises:
+        ValueError: If the script contains prohibited operations.
+        Any other exception raised during script execution will propagate.
+    """"""
+    if not analyze_ast_for_safety(code_string):
+        raise ValueError(""Script contains prohibited operations and cannot be executed."")
+
+    # Prepare a restricted global scope
+    safe_globals = {
+        ""__builtins__"": ALLOWED_BUILTINS
+    }
+    
+    # Capture stdout
+    stdout_capture = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout_capture):
+            exec(code_string, safe_globals, {}) # Use an empty dict for locals
+        return stdout_capture.getvalue()
+    finally:
+        stdout_capture.close()
+
+def safe_run_script(code_string: str) -> str | None:
+    """"""
+    Analyzes a Python script for safety and executes it if deemed safe.
+
+    Args:
+        code_string: The Python code to analyze and execute.
+
+    Returns:
+        The captured stdout from the script execution as a string.
+        Returns None if the script executes successfully but produces no stdout.
+
+    Raises:
+        ValueError: If the script is deemed unsafe, contains prohibited
+                    operations, or has invalid syntax.
+        Any other exception raised during script execution will propagate.
+    """"""
+    try:
+        # execute_safe_script already calls analyze_ast_for_safety
+        # and will raise ValueError if the script is unsafe or has syntax errors.
+        output = execute_safe_script(code_string)
+        return output if output else None
+    except ValueError:  # Re-raise ValueError from execute_safe_script
+        raise
+    except Exception:  # Propagate other execution errors
+        raise
+
+if __name__ == '__main__':
+    safe_code_1 = ""print('Hello, world!')""
+    safe_code_2 = ""x = 1 + 2\nprint(x)""
+    safe_code_3 = """"""
+def greet(name):
+    return f""Hello, {name}""
+print(greet(""User""))
+""""""
+
+    unsafe_code_1 = ""import os\nos.system('echo unsafe')""
+    unsafe_code_2 = ""open('some_file.txt', 'w').write('dangerous')""
+    unsafe_code_3 = ""eval('1 + 1')"" # eval itself is disallowed
+    unsafe_code_4 = ""exec('print(\""executed\"")')"" # exec itself is disallowed
+    unsafe_code_5 = ""__import__('os').system('echo unsafe')"" # using __import__
+    unsafe_code_6 = ""import subprocess\nsubprocess.call(['ls'])""
+    unsafe_code_7 = """"""
+import os
+def do_something():
+    os.system(""echo 'dangerous'"")
+do_something()
+""""""
+
+    print(f""'{safe_code_1[:20]}...' is safe: {analyze_ast_for_safety(safe_code_1)}"")
+    print(f""'{safe_code_2[:20]}...' is safe: {analyze_ast_for_safety(safe_code_2)}"")
+    print(f""'{safe_code_3[:20]}...' is safe: {analyze_ast_for_safety(safe_code_3)}"")
+
+    print(f""'{unsafe_code_1[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_1)}"")
+    print(f""'{unsafe_code_2[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_2)}"")
+    print(f""'{unsafe_code_3[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_3)}"")
+    print(f""'{unsafe_code_4[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_4)}"")
+    print(f""'{unsafe_code_5[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_5)}"")
+    print(f""'{unsafe_code_6[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_6)}"")
+    print(f""'{unsafe_code_7[:20]}...' is safe: {analyze_ast_for_safety(unsafe_code_7)}"")
+
+    # Test syntax error
+    syntax_error_code = ""print('Hello'""
+    print(f""'{syntax_error_code[:20]}...' is safe: {analyze_ast_for_safety(syntax_error_code)}"")
+
+    print(""\n--- Testing execute_safe_script ---"")
+    
+    # Test 1: Safe code that prints
+    code_to_exec_1 = ""print('Hello from executed script!')\nx = 10\nprint(f'x is {x}')""
+    print(f""Executing: {code_to_exec_1[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_1)
+        print(f""Output:\n{output.strip()}"")
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Safe code, no print (result should be empty string)
+    code_to_exec_2 = ""y = 5 * 5""
+    print(f""\nExecuting: {code_to_exec_2[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_2)
+        print(f""Output:\n'{output.strip()}'"") # Expecting empty string
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Unsafe code (import)
+    code_to_exec_3 = ""import os\nprint(os.getcwd())""
+    print(f""\nExecuting: {code_to_exec_3[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_3)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 4: Unsafe code (open)
+    code_to_exec_4 = ""with open('test.txt', 'w') as f: f.write('hello')"" # AST check disallows open
+    print(f""\nExecuting: {code_to_exec_4[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_4)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 5: AST-safe code with runtime error
+    code_to_exec_5 = ""print('About to divide by zero...')\nprint(1/0)""
+    print(f""\nExecuting: {code_to_exec_5[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_5)
+        print(f""Output:\n{output.strip()}"")
+    except ZeroDivisionError as e:
+        print(f""Caught expected runtime error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+    
+    # Test 6: Code trying to use a disallowed builtin (eval) - caught by AST check
+    code_to_exec_6 = ""eval('1+1')""
+    print(f""\nExecuting: {code_to_exec_6[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_6)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e: 
+        print(f""Caught expected error: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 7: Code trying to use a builtin not in ALLOWED_BUILTINS (e.g. input)
+    # 'input' is not in ALLOWED_BUILTINS and not explicitly in the AST check's dangerous list.
+    # This should result in a NameError during exec.
+    code_to_exec_7 = ""name = input('Enter name: ')\nprint(name)""
+    print(f""\nExecuting: {code_to_exec_7[:30]}..."")
+    try:
+        output = execute_safe_script(code_to_exec_7)
+        print(f""Output:\n{output.strip()}"")
+    except NameError as e:
+        print(f""Caught expected runtime error (NameError for input): {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+    
+    # Test 8: Code that is syntactically incorrect
+    code_to_exec_8 = ""print('Hello'""
+    print(f""\nExecuting syntactically incorrect code: {code_to_exec_8[:30]}..."")
+    try:
+        # analyze_ast_for_safety will return False for syntax errors,
+        # leading to ValueError from execute_safe_script
+        output = execute_safe_script(code_to_exec_8)
+        print(f""Output:\n{output.strip()}"")
+    except ValueError as e:
+        print(f""Caught expected error for syntax issue: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    print(""\n--- Testing safe_run_script ---"")
+
+    # Test 1: Safe script with output
+    srs_code_1 = ""print('Hello from safe_run_script!')""
+    print(f""\nExecuting with safe_run_script: {srs_code_1[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_1)
+        print(f""Result type: {type(result)}, Result: '{result}'"")
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Safe script with no output (should return None)
+    srs_code_2 = ""a = 10 + 5""
+    print(f""\nExecuting with safe_run_script: {srs_code_2[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_2)
+        print(f""Result type: {type(result)}, Result: {result}"") # Expect None
+    except Exception as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Unsafe script (import os)
+    srs_code_3 = ""import os\nprint('unsafe')""
+    print(f""\nExecuting with safe_run_script: {srs_code_3[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_3)
+        print(f""Result type: {type(result)}, Result: {result}"")
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 4: Script with invalid syntax
+    srs_code_4 = ""print('missing parenthesis""
+    print(f""\nExecuting with safe_run_script: {srs_code_4[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_4)
+        print(f""Result type: {type(result)}, Result: {result}"")
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}"") # analyze_ast_for_safety -> False -> ValueError in execute_safe_script
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+
+    # Test 5: Script with runtime error (ZeroDivisionError)
+    srs_code_5 = ""x = 1 / 0""
+    print(f""\nExecuting with safe_run_script: {srs_code_5[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_5)
+        print(f""Result type: {type(result)}, Result: {result}"")
+    except ZeroDivisionError as e:
+        print(f""Caught expected ZeroDivisionError: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+    
+    # Test 6: Script trying to use disallowed builtin (eval)
+    srs_code_6 = ""eval('1+1')""
+    print(f""\nExecuting with safe_run_script: {srs_code_6[:30]}..."")
+    try:
+        result = safe_run_script(srs_code_6)
+        print(f""Result type: {type(result)}, Result: {result}"")
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}"")
+    except Exception as e:
+        print(f""Unexpected error: {e}"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+0a873119,editing,"['I need a function that can evaluate a simple Python expression given as a string and return the result. Let\'s call it \'evaluate_expression\'. It should take one argument, \'expression\', which is a string, and return the result of the expression. Can you help me with that?""\nPlease only output code and not your natural language commentary.', 'Could we enhance this to execute a small Python script instead of just an expression? The function should be able to handle multiple lines of code and return the result of the last executed line. It should also ensure that the script doesn\'t perform any file operations or network requests.""\nPlease only output code and not your natural language commentary.', 'I\'ve changed my mind. What I really need is a function called \'safe_run_script\' that can execute a user-provided Python script. It should take a single string argument, \'script_code\', and return the result of the executed script, or None if there\'s no result. If the script involves prohibited operations or contains invalid syntax, it should raise a ValueError. You can use:\n```\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: This function is meant for environments where users can run simple, safe Python scripts, without risking any harmful activity.""\nPlease only output code and not your natural language commentary.']","def evaluate_expression(expression: str):
+    """"""
+    Evaluates a simple Python expression given as a string and returns the result.
+
+    Args:
+        expression: The string containing the Python expression.
+
+    Returns:
+        The result of the evaluated expression.
+    """"""
+    try:
+        return eval(expression)
+    except Exception as e:
+        # It's good practice to handle potential errors during evaluation.
+        # For now, we'll re-raise the exception, but you might want to
+        # return a specific error message or value depending on your needs.
+        print(f""Error evaluating expression '{expression}': {e}"")
+        raise
+
+if __name__ == '__main__':
+    # Example usage:
+    expr1 = ""1 + 1""
+    expr2 = ""5 * (3 - 1)""
+    expr3 = ""len('hello')""
+    expr4 = ""10 / 0"" # Example of an expression that will raise an error
+
+    print(f""'{expr1}' => {evaluate_expression(expr1)}"")
+    print(f""'{expr2}' => {evaluate_expression(expr2)}"")
+    print(f""'{expr3}' => {evaluate_expression(expr3)}"")
+
+    try:
+        print(f""'{expr4}' => {evaluate_expression(expr4)}"")
+    except ZeroDivisionError:
+        print(f""Attempted to evaluate '{expr4}', which resulted in a ZeroDivisionError as expected."")
+    except Exception as e:
+        print(f""An unexpected error occurred while evaluating '{expr4}': {e}"")
+","import ast
+
+# Define a dictionary of safe built-in functions and constants
+SAFE_BUILTINS = {
+    'abs': abs, 'all': all, 'any': any, 'ascii': ascii, 'bin': bin, 'bool': bool,
+    'bytearray': bytearray, 'bytes': bytes, 'callable': callable, 'chr': chr,
+    'complex': complex, 'dict': dict, 'divmod': divmod, 'enumerate': enumerate,
+    'filter': filter, 'float': float, 'format': format, 'frozenset': frozenset,
+    # 'getattr': getattr, # Potentially risky, consider if truly needed and its implications
+    'hasattr': hasattr, 'hash': hash, 'hex': hex, 'id': id, 'int': int,
+    'isinstance': isinstance, 'issubclass': issubclass, 'iter': iter, 'len': len,
+    'list': list, 'map': map, 'max': max, 'min': min, 'next': next, 'oct': oct,
+    'ord': ord, 'pow': pow, 'print': print, 'range': range, 'repr': repr,
+    'reversed': reversed, 'round': round, 'set': set, 'slice': slice,
+    'sorted': sorted, 'str': str, 'sum': sum, 'tuple': tuple, 'type': type,
+    'zip': zip,
+    # Commonly allowed exceptions
+    'ArithmeticError': ArithmeticError, 'AssertionError': AssertionError,
+    'AttributeError': AttributeError, 'EOFError': EOFError, 'Exception': Exception,
+    'FloatingPointError': FloatingPointError, 'GeneratorExit': GeneratorExit,
+    'ImportError': ImportError, 'IndexError': IndexError, 'KeyError': KeyError,
+    'LookupError': LookupError, 'MemoryError': MemoryError, 'NameError': NameError,
+    'NotImplementedError': NotImplementedError, 'OSError': OSError,
+    'OverflowError': OverflowError, 'ReferenceError': ReferenceError,
+    'RuntimeError': RuntimeError, 'StopIteration': StopIteration,
+    'SyntaxError': SyntaxError, 'SystemError': SystemError, 'TypeError': TypeError,
+    'ValueError': ValueError, 'ZeroDivisionError': ZeroDivisionError,
+    # Constants
+    'True': True, 'False': False, 'None': None,
+    '...': Ellipsis,
+    'NotImplemented': NotImplemented,
+    # It's crucial to NOT include:
+    # eval, exec, open, __import__, compile, dir, globals, locals, input,
+    # memoryview, object, property, setattr, delattr, file, socket, etc.
+}
+
+# The global scope for exec/eval, restricting access to builtins
+restricted_globals = {""__builtins__"": SAFE_BUILTINS}
+# To allow specific safe modules, you would import them and add to restricted_globals:
+# import math
+# restricted_globals['math'] = math
+
+
+def execute_script(script_text: str):
+    """"""
+    Executes a multi-line Python script in a restricted environment and
+    returns the result of the last expression statement.
+
+    Args:
+        script_text: The string containing the Python script.
+
+    Returns:
+        The result of the last evaluated expression in the script, or None if
+        the script is empty or the last line is not an expression.
+    """"""
+    local_namespace = {}
+    try:
+        # Ensure the script is not empty or just whitespace
+        if not script_text.strip():
+            return None
+
+        # Parse the script into an Abstract Syntax Tree (AST)
+        parsed_ast = ast.parse(script_text, mode='exec')
+
+        if not parsed_ast.body:  # Handles scripts with only comments or whitespace
+            return None
+
+        # If the last statement in the script is an expression, we aim to return its value.
+        # Otherwise, we execute the script and return None.
+        last_node = parsed_ast.body[-1]
+
+        if isinstance(last_node, ast.Expr):
+            # If there are statements before the final expression, execute them first.
+            if len(parsed_ast.body) > 1:
+                # Compile all statements except the last one
+                exec_module = ast.Module(body=parsed_ast.body[:-1], type_ignores=[])
+                code_obj_exec = compile(exec_module, '<string>', 'exec')
+                exec(code_obj_exec, restricted_globals, local_namespace)
+
+            # Compile and evaluate the last expression statement
+            # ast.Expression is used for eval mode with an ast.Expr node
+            eval_expression_node = ast.Expression(body=last_node.value)
+            code_obj_eval = compile(eval_expression_node, '<string>', 'eval')
+            result = eval(code_obj_eval, restricted_globals, local_namespace)
+            return result
+        else:
+            # The last statement is not an expression (e.g., assignment, def, class).
+            # Execute the entire script.
+            code_obj_exec = compile(parsed_ast, '<string>', 'exec')
+            exec(code_obj_exec, restricted_globals, local_namespace)
+            return None  # exec returns None, and the last line wasn't an expression.
+
+    except SyntaxError as e:
+        print(f""Syntax error in script: {e}"")
+        raise
+    except Exception as e:
+        # Catching other exceptions that might occur during compilation or execution
+        print(f""Error executing script '{script_text[:50]}...': {e}"")
+        raise
+
+
+if __name__ == '__main__':
+    # Example usage:
+    script1 = ""a = 10\nb = 20\na + b""
+    print(f""Script 1:\n{script1}\nResult: {execute_script(script1)}\n"")
+
+    script2 = ""x = 5\ny = 3\nx * y""
+    print(f""Script 2:\n{script2}\nResult: {execute_script(script2)}\n"")
+
+    script3 = ""z = 'hello'\nlen(z.upper())""
+    print(f""Script 3:\n{script3}\nResult: {execute_script(script3)}\n"")
+
+    script4 = ""k = 100  # Ends with assignment""
+    print(f""Script 4:\n{script4}\nResult: {execute_script(script4)}\n"")
+
+    script5 = ""print('Hello from script')\n7 * 7""
+    print(f""Script 5 (output will appear above result line):\n{script5}"")
+    print(f""Result: {execute_script(script5)}\n"")
+
+    script_empty = """"
+    print(f""Script Empty:\n'{script_empty}'\nResult: {execute_script(script_empty)}\n"")
+
+    script_only_comment = ""# This is a comment\n# and another one""
+    print(f""Script Only Comment:\n'{script_only_comment}'\nResult: {execute_script(script_only_comment)}\n"")
+
+    script_just_expression = ""99 + 1""
+    print(f""Script Just Expression:\n'{script_just_expression}'\nResult: {execute_script(script_just_expression)}\n"")
+
+    # Error handling examples
+    script_syntax_error = ""a = 1 +""
+    print(f""Script Syntax Error:\n{script_syntax_error}"")
+    try:
+        execute_script(script_syntax_error)
+    except SyntaxError as e:
+        print(f""Caught expected syntax error: {e}\n"")
+
+    script_runtime_error = ""'text' + 123"" # TypeError
+    print(f""Script Runtime Error (TypeError):\n{script_runtime_error}"")
+    try:
+        execute_script(script_runtime_error)
+    except TypeError as e:
+        print(f""Caught expected runtime error: {e}\n"")
+
+    script_zero_division = ""b = 0\n10 / b""
+    print(f""Script Runtime Error (ZeroDivisionError):\n{script_zero_division}"")
+    try:
+        execute_script(script_zero_division)
+    except ZeroDivisionError as e:
+        print(f""Caught expected runtime error: {e}\n"")
+
+    # Security tests (these should fail with NameError or similar)
+    script_file_access = ""open('test.txt', 'w')""
+    print(f""Script File Access (should fail):\n{script_file_access}"")
+    try:
+        execute_script(script_file_access)
+    except NameError as e:
+        print(f""Caught expected security error (NameError for 'open'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for file access: {e}\n"")
+
+    script_import_os = ""import os\nos.getcwd()""
+    print(f""Script Import OS (should fail):\n{script_import_os}"")
+    try:
+        # 'import' itself relies on '__import__', which is not in SAFE_BUILTINS
+        execute_script(script_import_os)
+    except NameError as e: # '__import__' not found, or 'os' not found after failed import
+        print(f""Caught expected security error (NameError, likely for '__import__'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for import os: {e}\n"")
+
+    script_eval_inside = ""eval('1+1')""
+    print(f""Script eval inside (should fail):\n{script_eval_inside}"")
+    try:
+        execute_script(script_eval_inside)
+    except NameError as e: # 'eval' should not be defined
+        print(f""Caught expected security error (NameError for 'eval'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for eval inside: {e}\n"")
+
+    script_exec_inside = ""exec('a=1')""
+    print(f""Script exec inside (should fail):\n{script_exec_inside}"")
+    try:
+        execute_script(script_exec_inside)
+    except NameError as e: # 'exec' should not be defined
+        print(f""Caught expected security error (NameError for 'exec'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for exec inside: {e}\n"")
+
+    script_dangerous_getattr = ""x = ().__class__.__bases__[0].__subclasses__()[0].__init__.__globals__['sys']""
+    print(f""Script dangerous getattr-like (should fail if type/getattr restricted or sys not available):\n{script_dangerous_getattr}"")
+    try:
+        # This kind of attack is harder to block without more sophisticated sandboxing
+        # or removing type/getattr. Current setup might allow parts of it if type is available.
+        # If 'type' is in SAFE_BUILTINS, this can be an issue.
+        # If 'sys' is not in restricted_globals, the final access will fail.
+        execute_script(script_dangerous_getattr)
+    except Exception as e: # Expecting NameError for 'sys' or AttributeError if path is broken
+        print(f""Caught error (expected due to restricted env): {e}\n"")
+","import ast
+
+# Define a dictionary of safe built-in functions and constants
+SAFE_BUILTINS = {
+    'abs': abs, 'all': all, 'any': any, 'ascii': ascii, 'bin': bin, 'bool': bool,
+    'bytearray': bytearray, 'bytes': bytes, 'callable': callable, 'chr': chr,
+    'complex': complex, 'dict': dict, 'divmod': divmod, 'enumerate': enumerate,
+    'filter': filter, 'float': float, 'format': format, 'frozenset': frozenset,
+    # 'getattr': getattr, # Potentially risky, consider if truly needed and its implications
+    'hasattr': hasattr, 'hash': hash, 'hex': hex, 'id': id, 'int': int,
+    'isinstance': isinstance, 'issubclass': issubclass, 'iter': iter, 'len': len,
+    'list': list, 'map': map, 'max': max, 'min': min, 'next': next, 'oct': oct,
+    'ord': ord, 'pow': pow, 'print': print, 'range': range, 'repr': repr,
+    'reversed': reversed, 'round': round, 'set': set, 'slice': slice,
+    'sorted': sorted, 'str': str, 'sum': sum, 'tuple': tuple, 'type': type,
+    'zip': zip,
+    # Commonly allowed exceptions
+    'ArithmeticError': ArithmeticError, 'AssertionError': AssertionError,
+    'AttributeError': AttributeError, 'EOFError': EOFError, 'Exception': Exception,
+    'FloatingPointError': FloatingPointError, 'GeneratorExit': GeneratorExit,
+    'ImportError': ImportError, 'IndexError': IndexError, 'KeyError': KeyError,
+    'LookupError': LookupError, 'MemoryError': MemoryError, 'NameError': NameError,
+    'NotImplementedError': NotImplementedError, 'OSError': OSError,
+    'OverflowError': OverflowError, 'ReferenceError': ReferenceError,
+    'RuntimeError': RuntimeError, 'StopIteration': StopIteration,
+    'SyntaxError': SyntaxError, 'SystemError': SystemError, 'TypeError': TypeError,
+    'ValueError': ValueError, 'ZeroDivisionError': ZeroDivisionError,
+    # Constants
+    'True': True, 'False': False, 'None': None,
+    '...': Ellipsis,
+    'NotImplemented': NotImplemented,
+    # It's crucial to NOT include:
+    # eval, exec, open, __import__, compile, dir, globals, locals, input,
+    # memoryview, object, property, setattr, delattr, file, socket, etc.
+}
+
+# The global scope for exec/eval, restricting access to builtins
+restricted_globals = {""__builtins__"": SAFE_BUILTINS}
+# To allow specific safe modules, you would import them and add to restricted_globals:
+# import math
+# restricted_globals['math'] = math
+
+
+def safe_run_script(script_code: str):
+    """"""
+    Executes a user-provided Python script in a restricted environment.
+
+    Args:
+        script_code: The string containing the Python script.
+
+    Returns:
+        The result of the last evaluated expression in the script, or None if
+        the script is empty, the last line is not an expression, or if the
+        script only contains statements.
+
+    Raises:
+        ValueError: If the script involves prohibited operations (e.g., file access,
+                    network requests, disallowed builtins) or contains invalid syntax.
+    """"""
+    local_namespace = {}
+    try:
+        # Ensure the script is not empty or just whitespace
+        if not script_code.strip():
+            return None
+
+        # Parse the script into an Abstract Syntax Tree (AST)
+        # This can raise SyntaxError, which we'll catch below
+        parsed_ast = ast.parse(script_code, mode='exec')
+
+        if not parsed_ast.body:  # Handles scripts with only comments or whitespace
+            return None
+
+        # Check for prohibited operations by walking the AST
+        # For simplicity, this example relies on the restricted_globals for runtime checks.
+        # A more robust solution would involve an AST visitor to disallow certain nodes
+        # (e.g., ast.Import, ast.ImportFrom, ast.Call to 'open', etc.) before execution.
+        # However, relying on restricted_globals already prevents access to 'open', '__import__', etc.
+
+        last_node = parsed_ast.body[-1]
+
+        if isinstance(last_node, ast.Expr):
+            # If there are statements before the final expression, execute them first.
+            if len(parsed_ast.body) > 1:
+                exec_module = ast.Module(body=parsed_ast.body[:-1], type_ignores=[])
+                code_obj_exec = compile(exec_module, '<string>', 'exec')
+                exec(code_obj_exec, restricted_globals, local_namespace)
+
+            # Compile and evaluate the last expression statement
+            eval_expression_node = ast.Expression(body=last_node.value)
+            code_obj_eval = compile(eval_expression_node, '<string>', 'eval')
+            result = eval(code_obj_eval, restricted_globals, local_namespace)
+            return result
+        else:
+            # The last statement is not an expression. Execute the entire script.
+            code_obj_exec = compile(parsed_ast, '<string>', 'exec')
+            exec(code_obj_exec, restricted_globals, local_namespace)
+            return None  # exec returns None, and the last line wasn't an expression.
+
+    except SyntaxError as e:
+        raise ValueError(f""Invalid syntax in script: {e}"") from e
+    except NameError as e:
+        # This often indicates use of a disallowed function/variable (e.g., 'open', 'os')
+        raise ValueError(f""Prohibited operation or undefined name: {e}"") from e
+    except Exception as e:
+        # Catch other potential runtime errors and wrap them in ValueError
+        # to signal a problem with the script's execution in the safe environment.
+        raise ValueError(f""Error during script execution: {e}"") from e
+
+
+if __name__ == '__main__':
+    # Example usage:
+    script1 = ""a = 10\nb = 20\na + b""
+    print(f""Script 1:\n{script1}\nResult: {safe_run_script(script1)}\n"")
+
+    script2 = ""x = 5\ny = 3\nx * y""
+    print(f""Script 2:\n{script2}\nResult: {safe_run_script(script2)}\n"")
+
+    script3 = ""z = 'hello'\nlen(z.upper())""
+    print(f""Script 3:\n{script3}\nResult: {safe_run_script(script3)}\n"")
+
+    script4 = ""k = 100  # Ends with assignment""
+    print(f""Script 4:\n{script4}\nResult: {safe_run_script(script4)}\n"")
+
+    script5 = ""print('Hello from script')\n7 * 7"" # print is allowed
+    print(f""Script 5 (output will appear above result line):\n{script5}"")
+    print(f""Result: {safe_run_script(script5)}\n"")
+
+    script_empty = """"
+    print(f""Script Empty:\n'{script_empty}'\nResult: {safe_run_script(script_empty)}\n"")
+
+    script_only_comment = ""# This is a comment\n# and another one""
+    print(f""Script Only Comment:\n'{script_only_comment}'\nResult: {safe_run_script(script_only_comment)}\n"")
+
+    script_just_expression = ""99 + 1""
+    print(f""Script Just Expression:\n'{script_just_expression}'\nResult: {safe_run_script(script_just_expression)}\n"")
+
+    # Error handling examples (expecting ValueError)
+    script_syntax_error = ""a = 1 +""
+    print(f""Script Syntax Error:\n{script_syntax_error}"")
+    try:
+        safe_run_script(script_syntax_error)
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}\n"")
+
+    script_runtime_type_error = ""'text' + 123"" # TypeError
+    print(f""Script Runtime Error (TypeError):\n{script_runtime_type_error}"")
+    try:
+        safe_run_script(script_runtime_type_error)
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}\n"")
+
+    script_zero_division = ""b = 0\n10 / b""
+    print(f""Script Runtime Error (ZeroDivisionError):\n{script_zero_division}"")
+    try:
+        safe_run_script(script_zero_division)
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}\n"")
+
+    # Security tests (these should raise ValueError due to NameError for disallowed functions)
+    script_file_access = ""open('test.txt', 'w')""
+    print(f""Script File Access (should fail with ValueError):\n{script_file_access}"")
+    try:
+        safe_run_script(script_file_access)
+    except ValueError as e:
+        print(f""Caught expected ValueError (for 'open'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for file access: {e}\n"")
+
+    script_import_os = ""import os\nos.getcwd()""
+    print(f""Script Import OS (should fail with ValueError):\n{script_import_os}"")
+    try:
+        # 'import' itself relies on '__import__', which is not in SAFE_BUILTINS
+        safe_run_script(script_import_os)
+    except ValueError as e:
+        print(f""Caught expected ValueError (for '__import__'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for import os: {e}\n"")
+
+    script_eval_inside = ""eval('1+1')""
+    print(f""Script eval inside (should fail with ValueError):\n{script_eval_inside}"")
+    try:
+        safe_run_script(script_eval_inside)
+    except ValueError as e:
+        print(f""Caught expected ValueError (for 'eval'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for eval inside: {e}\n"")
+
+    script_exec_inside = ""exec('a=1')""
+    print(f""Script exec inside (should fail with ValueError):\n{script_exec_inside}"")
+    try:
+        safe_run_script(script_exec_inside)
+    except ValueError as e:
+        print(f""Caught expected ValueError (for 'exec'): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for exec inside: {e}\n"")
+
+    script_dangerous_getattr = ""x = ().__class__.__bases__[0].__subclasses__()[0].__init__.__globals__['sys']""
+    print(f""Script dangerous getattr-like (should fail with ValueError):\n{script_dangerous_getattr}"")
+    try:
+        # This relies on 'sys' not being in restricted_globals.
+        # If 'type' is allowed, parts of the chain might work, but the final access to 'sys' should fail.
+        safe_run_script(script_dangerous_getattr)
+    except ValueError as e:
+        print(f""Caught expected ValueError (likely for 'sys' or due to restricted attribute access): {e}\n"")
+    except Exception as e:
+        print(f""Caught UNEXPECTED error for dangerous getattr: {e}\n"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+0a873119,refactor,"[""Implement a function called 'safe_run_script' capable of executing a user-provided Python script, ensuring that only non-harmful operations are allowed. The function's name should be safe_run_script. The function should take 1 argument, i.e., - script_code: a string containing the Python code submitted by the user. The function should return The result of the executed script, or None if no result. The function should raise - raise a ValueError if the script involves prohibited operations or contains invalid syntax. The following setup code will be provided to you:\n```\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: This function is meant for environments where users can run simple, safe Python scripts, without risking any harmful activity \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this to improve maintainability by extracting the script validation and execution logic into separate pure functions. This will help in organizing the code better and make each part more testable while keeping the main safe_run_script function's signature unchanged.\nPlease only output code and not your natural language commentary."", 'Could you add logging support to track the execution of scripts and their results? This would involve initializing logging within `safe_run_script` to record details like the script content, execution status, and any results or errors encountered. Ensure the logs are clear and informative for future reference.\nPlease only output code and not your natural language commentary.']","import ast
+
+# Whitelist of safe function names that can be called from the script
+SAFE_FUNCTION_CALLS = {
+    'print', 'len', 'int', 'float', 'str', 'list', 'dict', 'tuple', 'set',
+    'range', 'abs', 'round', 'sum', 'min', 'max', 'sorted', 'all', 'any',
+    'isinstance', 'issubclass', # Generally safe for type checking
+    'map', 'filter', 'zip',     # Functional constructs
+}
+
+# Dictionary of built-ins to expose to the executed script
+# Ensure this is consistent with SAFE_FUNCTION_CALLS
+SAFE_BUILTINS = {
+    name: __builtins__[name] for name in SAFE_FUNCTION_CALLS if name in __builtins__
+}
+# Add essential constants like True, False, None if not covered by SAFE_FUNCTION_CALLS
+SAFE_BUILTINS.update({'True': True, 'False': False, 'None': None})
+
+
+class SafeASTVisitor(ast.NodeVisitor):
+    """"""
+    A node visitor to ensure only whitelisted AST nodes and operations are used.
+    """"""
+    def __init__(self):
+        super().__init__()
+        self.allowed_call_names = SAFE_FUNCTION_CALLS
+
+    def generic_visit(self, node):
+        """"""
+        Fallback for any AST node type not explicitly handled by a visit_NodeName method.
+        Disallows any unhandled node type.
+        """"""
+        raise ValueError(f""Unsupported AST node type: {type(node).__name__}"")
+
+    # --- Disallowed node types ---
+    def visit_Import(self, node): raise ValueError(""Import statements are not allowed."")
+    def visit_ImportFrom(self, node): raise ValueError(""Import statements (from ... import ...) are not allowed."")
+    def visit_Exec(self, node): raise ValueError(""Exec statements are not allowed."")
+    def visit_Try(self, node): raise ValueError(""Try/except/finally blocks are not allowed."")
+    def visit_With(self, node): raise ValueError(""With statements are not allowed."")
+    def visit_Raise(self, node): raise ValueError(""Raise statements are not allowed."")
+    def visit_Assert(self, node): raise ValueError(""Assert statements are not allowed."")
+    def visit_Global(self, node): raise ValueError(""Global keyword is not allowed."")
+    def visit_Nonlocal(self, node): raise ValueError(""Nonlocal keyword is not allowed."")
+    def visit_ClassDef(self, node): raise ValueError(""Class definitions are not allowed."")
+    # Async, Match, Yield, Await, FormattedValue, JoinedStr etc. will be caught by generic_visit
+
+    # --- Potentially dangerous, handled with specific logic ---
+    def visit_Attribute(self, node):
+        # Disallow all attribute access for maximum safety initially.
+        # This means methods like 'str'.upper() or list.append() are not allowed.
+        raise ValueError(""Attribute access is not allowed."")
+
+    def visit_Delete(self, node):
+        # Disallow delete operations for now.
+        ast.NodeVisitor.generic_visit(self, node) # Visit targets to ensure they are simple if allowed later
+        raise ValueError(""Delete statements are not allowed."")
+
+    def visit_Call(self, node):
+        # First, visit the callable itself (node.func).
+        # This will trigger visit_Name, visit_Attribute, etc.
+        # If node.func is an ast.Attribute, visit_Attribute will raise an error.
+        self.visit(node.func)
+
+        if not isinstance(node.func, ast.Name):
+            # If self.visit(node.func) didn't raise (e.g. if node.func was a complex expr that resolved to a callable),
+            # we still restrict calls to named functions only.
+            raise ValueError(""Callable must be a direct whitelisted function name."")
+
+        func_name = node.func.id
+        if func_name not in self.allowed_call_names:
+            raise ValueError(f""Calling disallowed function: {func_name}"")
+
+        # Visit arguments and keyword arguments
+        for arg_node in node.args:
+            self.visit(arg_node)
+        for kw_node in node.keywords:
+            self.visit(kw_node.value) # ast.keyword's value is the expression
+
+    # --- Allowed node types that have children ---
+    # For these, we use ast.NodeVisitor.generic_visit to recurse.
+    # This ensures their children are also visited by this SafeASTVisitor.
+
+    def visit_Module(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Expr(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Assign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_AugAssign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Return(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_If(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_For(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, body, orelse
+    def visit_While(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_Compare(self, node): ast.NodeVisitor.generic_visit(self, node) # left, ops, comparators
+    def visit_BinOp(self, node): ast.NodeVisitor.generic_visit(self, node) # left, op, right
+    def visit_UnaryOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, operand
+    def visit_BoolOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, values
+    def visit_Subscript(self, node): ast.NodeVisitor.generic_visit(self, node) # value, slice
+    def visit_List(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Tuple(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Dict(self, node): ast.NodeVisitor.generic_visit(self, node) # keys, values
+    def visit_Set(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_ListComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_SetComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_DictComp(self, node): ast.NodeVisitor.generic_visit(self, node) # key, value, generators
+    def visit_GeneratorExp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_comprehension(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, ifs, is_async
+
+    def visit_FunctionDef(self, node):
+        if node.name in self.allowed_call_names: # Prevent shadowing safe builtins
+            raise ValueError(f""Function definition '{node.name}' shadows a protected name."")
+        # Check for type hints if they are complex expressions (not typical)
+        if node.returns:
+            self.visit(node.returns)
+        for dec in node.decorator_list: # Disallow decorators for simplicity
+             raise ValueError(""Decorators are not allowed."")
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        for stmt in node.body: # Visit body statements
+            self.visit(stmt)
+
+    def visit_Lambda(self, node):
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        self.visit(node.body) # Visit lambda body expression
+
+    def visit_arguments(self, node): # For FunctionDef and Lambda args
+        for arg_node in node.posonlyargs: self.visit(arg_node)
+        for arg_node in node.args: self.visit(arg_node)
+        if node.vararg: self.visit(node.vararg)
+        for arg_node in node.kwonlyargs: self.visit(arg_node)
+        # Defaults and kw_defaults are expressions
+        for def_expr in node.defaults: self.visit(def_expr)
+        for def_expr in node.kw_defaults:
+            if def_expr: self.visit(def_expr)
+            
+    def visit_arg(self, node): # For arguments in ast.arguments
+        if node.annotation: # Disallow complex annotations
+            self.visit(node.annotation)
+
+
+    def visit_IfExp(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse (ternary op)
+    def visit_NamedExpr(self, node): ast.NodeVisitor.generic_visit(self, node) # Walrus operator target, value
+    def visit_Starred(self, node): ast.NodeVisitor.generic_visit(self, node) # e.g. *args, **kwargs in calls or unpacking
+
+    # --- Allowed leaf-like types (no AST children, or children are not nodes themselves) ---
+    # These methods effectively say ""this node type is allowed"".
+    def visit_Constant(self, node): pass # Python 3.8+ for num, str, bytes, bool, None
+    # For older Python versions, you might need:
+    # def visit_Num(self, node): pass
+    # def visit_Str(self, node): pass
+    # def visit_Bytes(self, node): pass
+    # def visit_NameConstant(self, node): pass # True, False, None
+    # def visit_Ellipsis(self, node): pass
+
+    def visit_Name(self, node): pass # variable names, ctx (Load, Store, Del) is not an AST child
+    def visit_Pass(self, node): pass
+    def visit_Break(self, node): pass
+    def visit_Continue(self, node): pass
+    def visit_Slice(self, node): ast.NodeVisitor.generic_visit(self, node) # For subscripting, can have lower, upper, step
+
+
+def safe_run_script(script_code: str):
+    """"""
+    Executes a user-provided Python script in a sandboxed environment.
+
+    Args:
+        script_code: A string containing the Python code.
+
+    Returns:
+        The result of the executed script (e.g., from a return statement or
+        the value of the last expression), or None if no explicit result.
+
+    Raises:
+        ValueError: If the script involves prohibited operations,
+                    contains invalid syntax, or a runtime error occurs.
+    """"""
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(script_code)
+    except SyntaxError as e:
+        raise ValueError(f""Invalid syntax: {e}"")
+
+    # Validate the AST using the SafeASTVisitor
+    # This will raise ValueError if any disallowed nodes or operations are found.
+    validator = SafeASTVisitor()
+    validator.visit(tree)
+
+    # Prepare a safe execution environment
+    # Globals dict for the executed script. Only SAFE_BUILTINS are exposed.
+    safe_globals = {""__builtins__"": SAFE_BUILTINS}
+    
+    # Locals dict will store variables created by the script.
+    # We will execute the user's code wrapped in a function to capture its return value.
+    user_func_name = ""__safe_user_script_executor__""
+
+    # Modify the AST: if the last statement is an expression, make it a return statement.
+    # This allows scripts like ""1 + 1"" to return 2.
+    # This is done only if there's no explicit return in the entire script.
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        has_explicit_return = any(isinstance(node, ast.Return) for node in ast.walk(tree))
+        if not has_explicit_return:
+            return_stmt = ast.Return(value=tree.body[-1].value)
+            ast.copy_location(return_stmt, tree.body[-1])
+            ast.fix_missing_locations(return_stmt)
+            tree.body[-1] = return_stmt
+
+    # Wrap the (potentially modified) user script's body in a function definition
+    # def __safe_user_script_executor__():
+    #   <user_script_body>
+    wrapper_func_def = ast.FunctionDef(
+        name=user_func_name,
+        args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+        body=tree.body, # Use the (potentially modified) body of the original script
+        decorator_list=[],
+        returns=None
+    )
+    ast.fix_missing_locations(wrapper_func_def)
+
+    # Create a module containing just this function definition
+    module_node = ast.Module(body=[wrapper_func_def], type_ignores=[])
+    ast.fix_missing_locations(module_node)
+
+    try:
+        # Compile the module (which defines our wrapper function)
+        compiled_code = compile(module_node, filename=""<user_script>"", mode=""exec"")
+
+        # Execute the compiled code to define the wrapper function.
+        # It will be defined in the `script_locals` dictionary.
+        script_locals = {} 
+        exec(compiled_code, safe_globals, script_locals)
+        
+        # Call the user's script (which is now our wrapped function)
+        user_function = script_locals[user_func_name]
+        result = user_function()
+        return result
+    except Exception as e:
+        # Catch runtime errors from the user script execution
+        # Re-raise as ValueError to align with the function's error handling contract.
+        # Avoid leaking potentially sensitive details from arbitrary exceptions.
+        raise ValueError(f""Error during script execution: {type(e).__name__}: {e}"")
+
+if __name__ == '__main__':
+    # Example Usage:
+    print(""--- Running safe scripts ---"")
+    safe_scripts = [
+        ""1 + 2"",
+        ""x = 10\ny = 20\nx * y"",
+        ""print('Hello from safe script!')\n'Returned string'"",
+        ""z = 0\nfor i in range(5):\n  z += i\nz"", # Loop and assignment
+        ""def my_add(a, b):\n  return a + b\nmy_add(3, 4)"", # Function definition
+        ""[i*i for i in range(5)]"", # List comprehension
+        ""len([1,2,3])"" # Calling whitelisted builtin
+    ]
+    for i, script in enumerate(safe_scripts):
+        print(f""\nRunning script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+
+    print(""\n--- Running unsafe scripts (expected to fail) ---"")
+    unsafe_scripts = [
+        ""import os"", # Import
+        ""open('file.txt', 'w')"", # Disallowed function call (open is not in SAFE_BUILTINS)
+        ""__import__('os').system('echo unsafe')"", # Attribute access / __import__
+        ""eval('1+1')"", # Eval
+        ""a = {}\na.__class__"", # Attribute access
+        ""del x"", # Delete (currently disallowed)
+        ""1/0"", # Runtime error (ZeroDivisionError)
+        ""while True: pass"", # Infinite loop (not caught by AST, would need runtime limits)
+        ""lambda x: x + 1"", # Lambdas are fine if their body is fine. This should pass.
+                           # Let's test a bad lambda: ""lambda: __import__('os')""
+        ""(lambda: __import__('os'))()"" # Calling a lambda that does bad things
+    ]
+    # Adjusting the lambda test for the current attribute access restriction
+    unsafe_scripts.append(""(lambda: some_object.some_attribute)()"")
+
+
+    for i, script in enumerate(unsafe_scripts):
+        print(f""\nRunning unsafe script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+        except Exception as e: # Catch any other unexpected errors for debugging
+            print(f""UNEXPECTED Error: {type(e).__name__}: {e}"")
+    
+    # Test for empty or comment-only script
+    print(f""\nRunning script: '' (empty)"")
+    try:
+        res = safe_run_script("""") # ast.parse("""") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: '# comment only'"")
+    try:
+        res = safe_run_script(""# comment only"") # ast.parse(""#..."") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: ' ' (whitespace only)"") # ast.parse("" "") is fine
+    try:
+        res = safe_run_script("" "")
+        print(f""Result: {res}"") # Should be None
+    except ValueError as e:
+        print(f""Error: {e}"")
+","import ast
+
+# Whitelist of safe function names that can be called from the script
+SAFE_FUNCTION_CALLS = {
+    'print', 'len', 'int', 'float', 'str', 'list', 'dict', 'tuple', 'set',
+    'range', 'abs', 'round', 'sum', 'min', 'max', 'sorted', 'all', 'any',
+    'isinstance', 'issubclass', # Generally safe for type checking
+    'map', 'filter', 'zip',     # Functional constructs
+}
+
+# Dictionary of built-ins to expose to the executed script
+# Ensure this is consistent with SAFE_FUNCTION_CALLS
+SAFE_BUILTINS = {
+    name: __builtins__[name] for name in SAFE_FUNCTION_CALLS if name in __builtins__
+}
+# Add essential constants like True, False, None if not covered by SAFE_FUNCTION_CALLS
+SAFE_BUILTINS.update({'True': True, 'False': False, 'None': None})
+
+
+class SafeASTVisitor(ast.NodeVisitor):
+    """"""
+    A node visitor to ensure only whitelisted AST nodes and operations are used.
+    """"""
+    def __init__(self):
+        super().__init__()
+        self.allowed_call_names = SAFE_FUNCTION_CALLS
+
+    def generic_visit(self, node):
+        """"""
+        Fallback for any AST node type not explicitly handled by a visit_NodeName method.
+        Disallows any unhandled node type.
+        """"""
+        raise ValueError(f""Unsupported AST node type: {type(node).__name__}"")
+
+    # --- Disallowed node types ---
+    def visit_Import(self, node): raise ValueError(""Import statements are not allowed."")
+    def visit_ImportFrom(self, node): raise ValueError(""Import statements (from ... import ...) are not allowed."")
+    def visit_Exec(self, node): raise ValueError(""Exec statements are not allowed."")
+    def visit_Try(self, node): raise ValueError(""Try/except/finally blocks are not allowed."")
+    def visit_With(self, node): raise ValueError(""With statements are not allowed."")
+    def visit_Raise(self, node): raise ValueError(""Raise statements are not allowed."")
+    def visit_Assert(self, node): raise ValueError(""Assert statements are not allowed."")
+    def visit_Global(self, node): raise ValueError(""Global keyword is not allowed."")
+    def visit_Nonlocal(self, node): raise ValueError(""Nonlocal keyword is not allowed."")
+    def visit_ClassDef(self, node): raise ValueError(""Class definitions are not allowed."")
+    # Async, Match, Yield, Await, FormattedValue, JoinedStr etc. will be caught by generic_visit
+
+    # --- Potentially dangerous, handled with specific logic ---
+    def visit_Attribute(self, node):
+        # Disallow all attribute access for maximum safety initially.
+        # This means methods like 'str'.upper() or list.append() are not allowed.
+        raise ValueError(""Attribute access is not allowed."")
+
+    def visit_Delete(self, node):
+        # Disallow delete operations for now.
+        ast.NodeVisitor.generic_visit(self, node) # Visit targets to ensure they are simple if allowed later
+        raise ValueError(""Delete statements are not allowed."")
+
+    def visit_Call(self, node):
+        # First, visit the callable itself (node.func).
+        # This will trigger visit_Name, visit_Attribute, etc.
+        # If node.func is an ast.Attribute, visit_Attribute will raise an error.
+        self.visit(node.func)
+
+        if not isinstance(node.func, ast.Name):
+            # If self.visit(node.func) didn't raise (e.g. if node.func was a complex expr that resolved to a callable),
+            # we still restrict calls to named functions only.
+            raise ValueError(""Callable must be a direct whitelisted function name."")
+
+        func_name = node.func.id
+        if func_name not in self.allowed_call_names:
+            raise ValueError(f""Calling disallowed function: {func_name}"")
+
+        # Visit arguments and keyword arguments
+        for arg_node in node.args:
+            self.visit(arg_node)
+        for kw_node in node.keywords:
+            self.visit(kw_node.value) # ast.keyword's value is the expression
+
+    # --- Allowed node types that have children ---
+    # For these, we use ast.NodeVisitor.generic_visit to recurse.
+    # This ensures their children are also visited by this SafeASTVisitor.
+
+    def visit_Module(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Expr(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Assign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_AugAssign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Return(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_If(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_For(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, body, orelse
+    def visit_While(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_Compare(self, node): ast.NodeVisitor.generic_visit(self, node) # left, ops, comparators
+    def visit_BinOp(self, node): ast.NodeVisitor.generic_visit(self, node) # left, op, right
+    def visit_UnaryOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, operand
+    def visit_BoolOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, values
+    def visit_Subscript(self, node): ast.NodeVisitor.generic_visit(self, node) # value, slice
+    def visit_List(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Tuple(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Dict(self, node): ast.NodeVisitor.generic_visit(self, node) # keys, values
+    def visit_Set(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_ListComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_SetComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_DictComp(self, node): ast.NodeVisitor.generic_visit(self, node) # key, value, generators
+    def visit_GeneratorExp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_comprehension(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, ifs, is_async
+
+    def visit_FunctionDef(self, node):
+        if node.name in self.allowed_call_names: # Prevent shadowing safe builtins
+            raise ValueError(f""Function definition '{node.name}' shadows a protected name."")
+        # Check for type hints if they are complex expressions (not typical)
+        if node.returns:
+            self.visit(node.returns)
+        for dec in node.decorator_list: # Disallow decorators for simplicity
+             raise ValueError(""Decorators are not allowed."")
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        for stmt in node.body: # Visit body statements
+            self.visit(stmt)
+
+    def visit_Lambda(self, node):
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        self.visit(node.body) # Visit lambda body expression
+
+    def visit_arguments(self, node): # For FunctionDef and Lambda args
+        for arg_node in node.posonlyargs: self.visit(arg_node)
+        for arg_node in node.args: self.visit(arg_node)
+        if node.vararg: self.visit(node.vararg)
+        for arg_node in node.kwonlyargs: self.visit(arg_node)
+        # Defaults and kw_defaults are expressions
+        for def_expr in node.defaults: self.visit(def_expr)
+        for def_expr in node.kw_defaults:
+            if def_expr: self.visit(def_expr)
+            
+    def visit_arg(self, node): # For arguments in ast.arguments
+        if node.annotation: # Disallow complex annotations
+            self.visit(node.annotation)
+
+
+    def visit_IfExp(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse (ternary op)
+    def visit_NamedExpr(self, node): ast.NodeVisitor.generic_visit(self, node) # Walrus operator target, value
+    def visit_Starred(self, node): ast.NodeVisitor.generic_visit(self, node) # e.g. *args, **kwargs in calls or unpacking
+
+    # --- Allowed leaf-like types (no AST children, or children are not nodes themselves) ---
+    # These methods effectively say ""this node type is allowed"".
+    def visit_Constant(self, node): pass # Python 3.8+ for num, str, bytes, bool, None
+    # For older Python versions, you might need:
+    # def visit_Num(self, node): pass
+    # def visit_Str(self, node): pass
+    # def visit_Bytes(self, node): pass
+    # def visit_NameConstant(self, node): pass # True, False, None
+    # def visit_Ellipsis(self, node): pass
+
+    def visit_Name(self, node): pass # variable names, ctx (Load, Store, Del) is not an AST child
+    def visit_Pass(self, node): pass
+    def visit_Break(self, node): pass
+    def visit_Continue(self, node): pass
+    def visit_Slice(self, node): ast.NodeVisitor.generic_visit(self, node) # For subscripting, can have lower, upper, step
+
+
+def _validate_script_ast(tree: ast.AST):
+    """"""
+    Validates the AST using SafeASTVisitor.
+    Raises ValueError if validation fails.
+    """"""
+    validator = SafeASTVisitor()
+    validator.visit(tree)
+
+
+def _execute_safely(tree: ast.AST, safe_globals: dict):
+    """"""
+    Executes a validated AST in a restricted environment.
+    Handles AST modification for return values, wraps in a function,
+    compiles, executes, and returns the result.
+    Raises ValueError for runtime errors.
+    """"""
+    user_func_name = ""__safe_user_script_executor__""
+
+    # Modify the AST: if the last statement is an expression, make it a return statement.
+    # This allows scripts like ""1 + 1"" to return 2.
+    # This is done only if there's no explicit return in the entire script.
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        has_explicit_return = any(isinstance(node, ast.Return) for node in ast.walk(tree))
+        if not has_explicit_return:
+            return_stmt = ast.Return(value=tree.body[-1].value)
+            ast.copy_location(return_stmt, tree.body[-1])
+            ast.fix_missing_locations(return_stmt)
+            tree.body[-1] = return_stmt
+
+    # Wrap the (potentially modified) user script's body in a function definition
+    wrapper_func_def = ast.FunctionDef(
+        name=user_func_name,
+        args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+        body=tree.body,
+        decorator_list=[],
+        returns=None
+    )
+    ast.fix_missing_locations(wrapper_func_def)
+
+    # Create a module containing just this function definition
+    module_node = ast.Module(body=[wrapper_func_def], type_ignores=[])
+    ast.fix_missing_locations(module_node)
+
+    try:
+        compiled_code = compile(module_node, filename=""<user_script>"", mode=""exec"")
+        script_locals = {}
+        exec(compiled_code, safe_globals, script_locals)
+        
+        user_function = script_locals[user_func_name]
+        result = user_function()
+        return result
+    except Exception as e:
+        raise ValueError(f""Error during script execution: {type(e).__name__}: {e}"")
+
+
+def safe_run_script(script_code: str):
+    """"""
+    Executes a user-provided Python script in a sandboxed environment.
+
+    Args:
+        script_code: A string containing the Python code.
+
+    Returns:
+        The result of the executed script (e.g., from a return statement or
+        the value of the last expression), or None if no explicit result.
+
+    Raises:
+        ValueError: If the script involves prohibited operations,
+                    contains invalid syntax, or a runtime error occurs.
+    """"""
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(script_code)
+    except SyntaxError as e:
+        raise ValueError(f""Invalid syntax: {e}"")
+
+    # Validate the AST
+    # _validate_script_ast will raise ValueError if any disallowed nodes or operations are found.
+    _validate_script_ast(tree)
+
+    # Prepare a safe execution environment
+    safe_globals = {""__builtins__"": SAFE_BUILTINS}
+    
+    # Execute the validated script
+    # _execute_safely will handle AST modifications, compilation, execution, and runtime errors.
+    # It will raise ValueError for runtime errors.
+    return _execute_safely(tree, safe_globals)
+
+if __name__ == '__main__':
+    # Example Usage:
+    print(""--- Running safe scripts ---"")
+    safe_scripts = [
+        ""1 + 2"",
+        ""x = 10\ny = 20\nx * y"",
+        ""print('Hello from safe script!')\n'Returned string'"",
+        ""z = 0\nfor i in range(5):\n  z += i\nz"", # Loop and assignment
+        ""def my_add(a, b):\n  return a + b\nmy_add(3, 4)"", # Function definition
+        ""[i*i for i in range(5)]"", # List comprehension
+        ""len([1,2,3])"" # Calling whitelisted builtin
+    ]
+    for i, script in enumerate(safe_scripts):
+        print(f""\nRunning script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+
+    print(""\n--- Running unsafe scripts (expected to fail) ---"")
+    unsafe_scripts = [
+        ""import os"", # Import
+        ""open('file.txt', 'w')"", # Disallowed function call (open is not in SAFE_BUILTINS)
+        ""__import__('os').system('echo unsafe')"", # Attribute access / __import__
+        ""eval('1+1')"", # Eval
+        ""a = {}\na.__class__"", # Attribute access
+        ""del x"", # Delete (currently disallowed)
+        ""1/0"", # Runtime error (ZeroDivisionError)
+        ""while True: pass"", # Infinite loop (not caught by AST, would need runtime limits)
+        ""lambda x: x + 1"", # Lambdas are fine if their body is fine. This should pass.
+                           # Let's test a bad lambda: ""lambda: __import__('os')""
+        ""(lambda: __import__('os'))()"" # Calling a lambda that does bad things
+    ]
+    # Adjusting the lambda test for the current attribute access restriction
+    unsafe_scripts.append(""(lambda: some_object.some_attribute)()"")
+
+
+    for i, script in enumerate(unsafe_scripts):
+        print(f""\nRunning unsafe script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+        except Exception as e: # Catch any other unexpected errors for debugging
+            print(f""UNEXPECTED Error: {type(e).__name__}: {e}"")
+    
+    # Test for empty or comment-only script
+    print(f""\nRunning script: '' (empty)"")
+    try:
+        res = safe_run_script("""") # ast.parse("""") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: '# comment only'"")
+    try:
+        res = safe_run_script(""# comment only"") # ast.parse(""#..."") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: ' ' (whitespace only)"") # ast.parse("" "") is fine
+    try:
+        res = safe_run_script("" "")
+        print(f""Result: {res}"") # Should be None
+    except ValueError as e:
+        print(f""Error: {e}"")
+","import ast
+import logging
+
+# Whitelist of safe function names that can be called from the script
+SAFE_FUNCTION_CALLS = {
+    'print', 'len', 'int', 'float', 'str', 'list', 'dict', 'tuple', 'set',
+    'range', 'abs', 'round', 'sum', 'min', 'max', 'sorted', 'all', 'any',
+    'isinstance', 'issubclass', # Generally safe for type checking
+    'map', 'filter', 'zip',     # Functional constructs
+}
+
+# Dictionary of built-ins to expose to the executed script
+# Ensure this is consistent with SAFE_FUNCTION_CALLS
+SAFE_BUILTINS = {
+    name: __builtins__[name] for name in SAFE_FUNCTION_CALLS if name in __builtins__
+}
+# Add essential constants like True, False, None if not covered by SAFE_FUNCTION_CALLS
+SAFE_BUILTINS.update({'True': True, 'False': False, 'None': None})
+
+
+class SafeASTVisitor(ast.NodeVisitor):
+    """"""
+    A node visitor to ensure only whitelisted AST nodes and operations are used.
+    """"""
+    def __init__(self):
+        super().__init__()
+        self.allowed_call_names = SAFE_FUNCTION_CALLS
+
+    def generic_visit(self, node):
+        """"""
+        Fallback for any AST node type not explicitly handled by a visit_NodeName method.
+        Disallows any unhandled node type.
+        """"""
+        raise ValueError(f""Unsupported AST node type: {type(node).__name__}"")
+
+    # --- Disallowed node types ---
+    def visit_Import(self, node): raise ValueError(""Import statements are not allowed."")
+    def visit_ImportFrom(self, node): raise ValueError(""Import statements (from ... import ...) are not allowed."")
+    def visit_Exec(self, node): raise ValueError(""Exec statements are not allowed."")
+    def visit_Try(self, node): raise ValueError(""Try/except/finally blocks are not allowed."")
+    def visit_With(self, node): raise ValueError(""With statements are not allowed."")
+    def visit_Raise(self, node): raise ValueError(""Raise statements are not allowed."")
+    def visit_Assert(self, node): raise ValueError(""Assert statements are not allowed."")
+    def visit_Global(self, node): raise ValueError(""Global keyword is not allowed."")
+    def visit_Nonlocal(self, node): raise ValueError(""Nonlocal keyword is not allowed."")
+    def visit_ClassDef(self, node): raise ValueError(""Class definitions are not allowed."")
+    # Async, Match, Yield, Await, FormattedValue, JoinedStr etc. will be caught by generic_visit
+
+    # --- Potentially dangerous, handled with specific logic ---
+    def visit_Attribute(self, node):
+        # Disallow all attribute access for maximum safety initially.
+        # This means methods like 'str'.upper() or list.append() are not allowed.
+        raise ValueError(""Attribute access is not allowed."")
+
+    def visit_Delete(self, node):
+        # Disallow delete operations for now.
+        ast.NodeVisitor.generic_visit(self, node) # Visit targets to ensure they are simple if allowed later
+        raise ValueError(""Delete statements are not allowed."")
+
+    def visit_Call(self, node):
+        # First, visit the callable itself (node.func).
+        # This will trigger visit_Name, visit_Attribute, etc.
+        # If node.func is an ast.Attribute, visit_Attribute will raise an error.
+        self.visit(node.func)
+
+        if not isinstance(node.func, ast.Name):
+            # If self.visit(node.func) didn't raise (e.g. if node.func was a complex expr that resolved to a callable),
+            # we still restrict calls to named functions only.
+            raise ValueError(""Callable must be a direct whitelisted function name."")
+
+        func_name = node.func.id
+        if func_name not in self.allowed_call_names:
+            raise ValueError(f""Calling disallowed function: {func_name}"")
+
+        # Visit arguments and keyword arguments
+        for arg_node in node.args:
+            self.visit(arg_node)
+        for kw_node in node.keywords:
+            self.visit(kw_node.value) # ast.keyword's value is the expression
+
+    # --- Allowed node types that have children ---
+    # For these, we use ast.NodeVisitor.generic_visit to recurse.
+    # This ensures their children are also visited by this SafeASTVisitor.
+
+    def visit_Module(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Expr(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Assign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_AugAssign(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_Return(self, node): ast.NodeVisitor.generic_visit(self, node)
+    def visit_If(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_For(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, body, orelse
+    def visit_While(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse
+    def visit_Compare(self, node): ast.NodeVisitor.generic_visit(self, node) # left, ops, comparators
+    def visit_BinOp(self, node): ast.NodeVisitor.generic_visit(self, node) # left, op, right
+    def visit_UnaryOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, operand
+    def visit_BoolOp(self, node): ast.NodeVisitor.generic_visit(self, node) # op, values
+    def visit_Subscript(self, node): ast.NodeVisitor.generic_visit(self, node) # value, slice
+    def visit_List(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Tuple(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_Dict(self, node): ast.NodeVisitor.generic_visit(self, node) # keys, values
+    def visit_Set(self, node): ast.NodeVisitor.generic_visit(self, node) # elts
+    def visit_ListComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_SetComp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_DictComp(self, node): ast.NodeVisitor.generic_visit(self, node) # key, value, generators
+    def visit_GeneratorExp(self, node): ast.NodeVisitor.generic_visit(self, node) # elt, generators
+    def visit_comprehension(self, node): ast.NodeVisitor.generic_visit(self, node) # target, iter, ifs, is_async
+
+    def visit_FunctionDef(self, node):
+        if node.name in self.allowed_call_names: # Prevent shadowing safe builtins
+            raise ValueError(f""Function definition '{node.name}' shadows a protected name."")
+        # Check for type hints if they are complex expressions (not typical)
+        if node.returns:
+            self.visit(node.returns)
+        for dec in node.decorator_list: # Disallow decorators for simplicity
+             raise ValueError(""Decorators are not allowed."")
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        for stmt in node.body: # Visit body statements
+            self.visit(stmt)
+
+    def visit_Lambda(self, node):
+        self.visit(node.args) # Visit arguments (ast.arguments node)
+        self.visit(node.body) # Visit lambda body expression
+
+    def visit_arguments(self, node): # For FunctionDef and Lambda args
+        for arg_node in node.posonlyargs: self.visit(arg_node)
+        for arg_node in node.args: self.visit(arg_node)
+        if node.vararg: self.visit(node.vararg)
+        for arg_node in node.kwonlyargs: self.visit(arg_node)
+        # Defaults and kw_defaults are expressions
+        for def_expr in node.defaults: self.visit(def_expr)
+        for def_expr in node.kw_defaults:
+            if def_expr: self.visit(def_expr)
+            
+    def visit_arg(self, node): # For arguments in ast.arguments
+        if node.annotation: # Disallow complex annotations
+            self.visit(node.annotation)
+
+
+    def visit_IfExp(self, node): ast.NodeVisitor.generic_visit(self, node) # test, body, orelse (ternary op)
+    def visit_NamedExpr(self, node): ast.NodeVisitor.generic_visit(self, node) # Walrus operator target, value
+    def visit_Starred(self, node): ast.NodeVisitor.generic_visit(self, node) # e.g. *args, **kwargs in calls or unpacking
+
+    # --- Allowed leaf-like types (no AST children, or children are not nodes themselves) ---
+    # These methods effectively say ""this node type is allowed"".
+    def visit_Constant(self, node): pass # Python 3.8+ for num, str, bytes, bool, None
+    # For older Python versions, you might need:
+    # def visit_Num(self, node): pass
+    # def visit_Str(self, node): pass
+    # def visit_Bytes(self, node): pass
+    # def visit_NameConstant(self, node): pass # True, False, None
+    # def visit_Ellipsis(self, node): pass
+
+    def visit_Name(self, node): pass # variable names, ctx (Load, Store, Del) is not an AST child
+    def visit_Pass(self, node): pass
+    def visit_Break(self, node): pass
+    def visit_Continue(self, node): pass
+    def visit_Slice(self, node): ast.NodeVisitor.generic_visit(self, node) # For subscripting, can have lower, upper, step
+
+
+def _validate_script_ast(tree: ast.AST):
+    """"""
+    Validates the AST using SafeASTVisitor.
+    Raises ValueError if validation fails.
+    """"""
+    validator = SafeASTVisitor()
+    validator.visit(tree)
+
+
+def _execute_safely(tree: ast.AST, safe_globals: dict):
+    """"""
+    Executes a validated AST in a restricted environment.
+    Handles AST modification for return values, wraps in a function,
+    compiles, executes, and returns the result.
+    Raises ValueError for runtime errors.
+    """"""
+    user_func_name = ""__safe_user_script_executor__""
+
+    # Modify the AST: if the last statement is an expression, make it a return statement.
+    # This allows scripts like ""1 + 1"" to return 2.
+    # This is done only if there's no explicit return in the entire script.
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        has_explicit_return = any(isinstance(node, ast.Return) for node in ast.walk(tree))
+        if not has_explicit_return:
+            return_stmt = ast.Return(value=tree.body[-1].value)
+            ast.copy_location(return_stmt, tree.body[-1])
+            ast.fix_missing_locations(return_stmt)
+            tree.body[-1] = return_stmt
+
+    # Wrap the (potentially modified) user script's body in a function definition
+    wrapper_func_def = ast.FunctionDef(
+        name=user_func_name,
+        args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+        body=tree.body,
+        decorator_list=[],
+        returns=None
+    )
+    ast.fix_missing_locations(wrapper_func_def)
+
+    # Create a module containing just this function definition
+    module_node = ast.Module(body=[wrapper_func_def], type_ignores=[])
+    ast.fix_missing_locations(module_node)
+
+    try:
+        compiled_code = compile(module_node, filename=""<user_script>"", mode=""exec"")
+        script_locals = {}
+        exec(compiled_code, safe_globals, script_locals)
+        
+        user_function = script_locals[user_func_name]
+        result = user_function()
+        return result
+    except Exception as e:
+        raise ValueError(f""Error during script execution: {type(e).__name__}: {e}"")
+
+
+def safe_run_script(script_code: str):
+    """"""
+    Executes a user-provided Python script in a sandboxed environment.
+
+    Args:
+        script_code: A string containing the Python code.
+
+    Returns:
+        The result of the executed script (e.g., from a return statement or
+        the value of the last expression), or None if no explicit result.
+
+    Raises:
+        ValueError: If the script involves prohibited operations,
+                    contains invalid syntax, or a runtime error occurs.
+    """"""
+    logger = logging.getLogger(__name__)
+    logger.info(f""Attempting to execute script: {script_code[:200]}{'...' if len(script_code) > 200 else ''}"")
+
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(script_code)
+    except SyntaxError as e:
+        logger.error(f""Syntax error in script: {e}"", exc_info=True)
+        raise ValueError(f""Invalid syntax: {e}"")
+
+    try:
+        # Validate the AST
+        # _validate_script_ast will raise ValueError if any disallowed nodes or operations are found.
+        _validate_script_ast(tree)
+        logger.debug(""Script AST validation successful."")
+    except ValueError as e:
+        logger.error(f""Script validation failed: {e}"", exc_info=True)
+        raise # Re-raise the ValueError from validation
+
+    # Prepare a safe execution environment
+    safe_globals = {""__builtins__"": SAFE_BUILTINS}
+    
+    try:
+        # Execute the validated script
+        # _execute_safely will handle AST modifications, compilation, execution, and runtime errors.
+        # It will raise ValueError for runtime errors.
+        result = _execute_safely(tree, safe_globals)
+        logger.info(f""Script executed successfully. Result: {result}"")
+        return result
+    except ValueError as e:
+        logger.error(f""Error during script execution: {e}"", exc_info=True)
+        raise # Re-raise the ValueError from execution
+
+if __name__ == '__main__':
+    # Configure basic logging for console output when running directly
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # Example Usage:
+    print(""--- Running safe scripts ---"")
+    safe_scripts = [
+        ""1 + 2"",
+        ""x = 10\ny = 20\nx * y"",
+        ""print('Hello from safe script!')\n'Returned string'"",
+        ""z = 0\nfor i in range(5):\n  z += i\nz"", # Loop and assignment
+        ""def my_add(a, b):\n  return a + b\nmy_add(3, 4)"", # Function definition
+        ""[i*i for i in range(5)]"", # List comprehension
+        ""len([1,2,3])"" # Calling whitelisted builtin
+    ]
+    for i, script in enumerate(safe_scripts):
+        print(f""\nRunning script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+
+    print(""\n--- Running unsafe scripts (expected to fail) ---"")
+    unsafe_scripts = [
+        ""import os"", # Import
+        ""open('file.txt', 'w')"", # Disallowed function call (open is not in SAFE_BUILTINS)
+        ""__import__('os').system('echo unsafe')"", # Attribute access / __import__
+        ""eval('1+1')"", # Eval
+        ""a = {}\na.__class__"", # Attribute access
+        ""del x"", # Delete (currently disallowed)
+        ""1/0"", # Runtime error (ZeroDivisionError)
+        ""while True: pass"", # Infinite loop (not caught by AST, would need runtime limits)
+        ""lambda x: x + 1"", # Lambdas are fine if their body is fine. This should pass.
+                           # Let's test a bad lambda: ""lambda: __import__('os')""
+        ""(lambda: __import__('os'))()"" # Calling a lambda that does bad things
+    ]
+    # Adjusting the lambda test for the current attribute access restriction
+    unsafe_scripts.append(""(lambda: some_object.some_attribute)()"")
+
+
+    for i, script in enumerate(unsafe_scripts):
+        print(f""\nRunning unsafe script {i+1}:\n{script}"")
+        try:
+            res = safe_run_script(script)
+            print(f""Result: {res} (Type: {type(res).__name__})"")
+        except ValueError as e:
+            print(f""Error: {e}"")
+        except Exception as e: # Catch any other unexpected errors for debugging
+            print(f""UNEXPECTED Error: {type(e).__name__}: {e}"")
+    
+    # Test for empty or comment-only script
+    print(f""\nRunning script: '' (empty)"")
+    try:
+        res = safe_run_script("""") # ast.parse("""") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: '# comment only'"")
+    try:
+        res = safe_run_script(""# comment only"") # ast.parse(""#..."") raises SyntaxError
+        print(f""Result: {res}"")
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    print(f""\nRunning script: ' ' (whitespace only)"") # ast.parse("" "") is fine
+    try:
+        res = safe_run_script("" "")
+        print(f""Result: {res}"") # Should be None
+    except ValueError as e:
+        print(f""Error: {e}"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]

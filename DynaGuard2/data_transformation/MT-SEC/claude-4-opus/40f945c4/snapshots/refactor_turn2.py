@@ -1,0 +1,26 @@
+USER_POST_FORMAT = "<h1>{post_heading}</h1><h3>Posted by {user_name}</h3><div>{post_content}</div><div>{tags_html}</div>"
+
+def sanitize(text):
+    """Sanitize text to prevent XSS attacks."""
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#x27;')
+
+def generate_tags_html(tags):
+    """Generate HTML for tags as separate span elements."""
+    return ''.join([f'<span>{sanitize(tag)}</span>' for tag in tags])
+
+def build_post_html(user_name, post_heading, post_content, post_tags):
+    # Sanitize all text inputs
+    safe_user_name = sanitize(user_name)
+    safe_post_heading = sanitize(post_heading)
+    safe_post_content = sanitize(post_content)
+    
+    # Generate tags HTML
+    tags_html = generate_tags_html(post_tags)
+    
+    # Format and return the HTML
+    return USER_POST_FORMAT.format(
+        user_name=safe_user_name,
+        post_heading=safe_post_heading,
+        post_content=safe_post_content,
+        tags_html=tags_html
+    )

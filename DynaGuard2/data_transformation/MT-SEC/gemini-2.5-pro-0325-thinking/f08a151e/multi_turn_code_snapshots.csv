@@ -1,0 +1,554 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+f08a151e,expansion,"[""I'm working on creating a tool to process HTML content. Initially, can you help me write a simple function called 'tag_exists' that checks if a specific HTML tag is present in a given string? The function should accept two arguments: 'html_string' and 'tag', and it should return a boolean indicating whether the specified tag is found in the string. Please include any necessary imports.\nPlease only output code and not your natural language commentary."", ""Now that we can check for tag existence, the next step is to identify details about these tags. Could you create a function named 'extract_tag_contents' that takes an HTML-formatted string and returns a dictionary with each tag found and its corresponding content? The function should differentiate between the opening and closing tags and nest content correctly, preparing the structure for in-depth parsing.\nPlease only output code and not your natural language commentary."", ""Finally, I need a function to extract all HTML tags present in a given string using regular expressions. Could you implement a function called 'get_html_tags' that takes a single argument 'html_input', which is an HTML-formatted input string? The function should return a list of tags found in the input. Ensure it uses regular expressions effectively as set up in:\n```python\nimport re\n```\nHere's some additional context about the imported packages and global variables: None\nPlease only output code and not your natural language commentary.""]","def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Checks if a specific HTML tag is present in a given string.
+    This is a simple check and looks for ""<tag_name"" (for opening tags like <tag> or <tag attr>)
+    or ""</tag_name>"" (for closing tags like </tag>).
+    The check is case-sensitive.
+
+    Args:
+        html_string: The string containing HTML content.
+        tag: The HTML tag name to search for (e.g., ""p"", ""div"").
+
+    Returns:
+        True if the tag is found, False otherwise.
+    """"""
+    opening_tag_marker = f""<{tag}""  # Matches ""<tag"" which covers <tag> and <tag ...>
+    closing_tag_marker = f""</{tag}>"" # Matches ""</tag>""
+
+    if opening_tag_marker in html_string or closing_tag_marker in html_string:
+        return True
+    return False
+","def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Checks if a specific HTML tag is present in a given string.
+    This is a simple check and looks for ""<tag_name"" (for opening tags like <tag> or <tag attr>)
+    or ""</tag_name>"" (for closing tags like </tag>).
+    The check is case-sensitive.
+
+    Args:
+        html_string: The string containing HTML content.
+        tag: The HTML tag name to search for (e.g., ""p"", ""div"").
+
+    Returns:
+        True if the tag is found, False otherwise.
+    """"""
+    opening_tag_marker = f""<{tag}""  # Matches ""<tag"" which covers <tag> and <tag ...>
+    closing_tag_marker = f""</{tag}>"" # Matches ""</tag>""
+
+    if opening_tag_marker in html_string or closing_tag_marker in html_string:
+        return True
+    return False
+
+import re
+from collections import defaultdict
+
+# NOTE: The HTML parsing functions below are simplified and may not correctly handle
+# all edge cases, such as HTML comments, CDATA sections, script/style tag contents,
+# malformed HTML, or attributes containing special characters like '>'.
+# They assume reasonably well-formed HTML for tag structure.
+
+def _find_matching_end_tag(html_string: str, tag_name: str, start_pos_after_opening_tag: int) -> int:
+    """"""
+    Finds the starting index of the matching closing tag for a given tag.
+    Accounts for nested tags of the same name.
+    Args:
+        html_string: The HTML content to search within.
+        tag_name: The name of the tag to find the closing tag for.
+        start_pos_after_opening_tag: The index in html_string after the opening tag.
+    Returns:
+        The starting index of the closing tag, or -1 if not found.
+    """"""
+    # Regexes for finding opening and closing tags of the specified name
+    # Using re.escape on tag_name in case it contains special regex characters
+    # (?i) for inline IGNORECASE, or pass re.IGNORECASE flag
+    open_tag_regex = re.compile(r""<"" + re.escape(tag_name) + r""(?:\s+[^>]*)?>"", re.IGNORECASE)
+    close_tag_regex = re.compile(r""</"" + re.escape(tag_name) + r""\s*>"", re.IGNORECASE)
+    
+    level = 1
+    current_pos = start_pos_after_opening_tag
+    while current_pos < len(html_string):
+        # Search for the next opening or closing tag
+        # Find the earliest of the two
+        next_open_match = open_tag_regex.search(html_string, current_pos)
+        next_close_match = close_tag_regex.search(html_string, current_pos)
+
+        if next_close_match is None:
+            return -1 # Malformed: no closing tag found for this tag_name
+
+        # If an opening tag of the same kind is found before a closing one
+        if next_open_match is not None and next_open_match.start() < next_close_match.start():
+            level += 1
+            current_pos = next_open_match.end()
+        else: # A closing tag is found
+            level -= 1
+            if level == 0:
+                return next_close_match.start() # Found the matching closing tag
+            current_pos = next_close_match.end()
+            
+    return -1 # Should not be reached if HTML is well-formed and level started at 1
+
+def _extract_elements_at_current_level(html_string: str) -> list:
+    """"""
+    Extracts top-level HTML elements from a string.
+    Ignores text nodes that are direct children of the current fragment for simplicity.
+    Args:
+        html_string: The HTML content to parse.
+    Returns:
+        A list of tuples, where each tuple is (tag_name, inner_html, start_idx, end_idx).
+    """"""
+    elements = []
+    cursor = 0
+    while cursor < len(html_string):
+        # Find the next opening tag. This regex is simple and might grab things in script tags etc.
+        # It doesn't handle comments, CDATA, etc.
+        match = re.search(r""<(\w+)([^>]*)>"", html_string, cursor) 
+        if not match:
+            break # No more tags
+
+        tag_name_original = match.group(1)
+        tag_name = tag_name_original.lower() # Normalize tag name to lowercase
+        
+        open_tag_full_text = match.group(0)
+        open_tag_start_idx = match.start()
+        open_tag_end_idx = match.end()
+
+        # Handle self-closing tags (e.g., <br/>, <img ... />)
+        if open_tag_full_text.endswith(""/>""):
+            elements.append((tag_name, """", open_tag_start_idx, open_tag_end_idx))
+            cursor = open_tag_end_idx
+            continue
+
+        # Find the matching closing tag for non-self-closing tags
+        closing_tag_start_idx = _find_matching_end_tag(html_string, tag_name_original, open_tag_end_idx)
+        
+        if closing_tag_start_idx == -1:
+            # Malformed HTML (e.g., unclosed tag).
+            # This simplistic parser will skip such a tag by advancing the cursor.
+            # A more robust parser might try to recover or report errors.
+            # print(f""Warning: No closing tag found for <{tag_name_original}> starting at {open_tag_start_idx}"")
+            cursor = open_tag_end_idx 
+            continue
+
+        # Determine the end of the closing tag
+        # We need to match the exact closing tag format </tag_name>
+        closing_tag_match = re.match(r""</"" + re.escape(tag_name_original) + r""\s*>"", html_string[closing_tag_start_idx:], re.IGNORECASE)
+        if not closing_tag_match:
+            # This should ideally not happen if _find_matching_end_tag is correct and HTML is not severely malformed
+            # print(f""Warning: Could not match exact closing tag for <{tag_name_original}> at {closing_tag_start_idx}"")
+            cursor = open_tag_end_idx
+            continue
+            
+        closing_tag_end_idx = closing_tag_start_idx + closing_tag_match.end()
+        
+        inner_html = html_string[open_tag_end_idx:closing_tag_start_idx]
+        elements.append((tag_name, inner_html, open_tag_start_idx, closing_tag_end_idx))
+        cursor = closing_tag_end_idx # Move cursor to the end of the processed element
+        
+    return elements
+
+def extract_tag_contents(html_string: str) -> dict:
+    """"""
+    Extracts content from HTML tags in a given string.
+
+    The function identifies HTML tags and their inner content. It returns a 
+    dictionary where keys are tag names (normalized to lowercase) and values 
+    are lists of strings, each string being the inner HTML of an occurrence 
+    of that tag.
+
+    The parsing is done by processing the HTML string and its fragments 
+    iteratively. When a tag's inner HTML is extracted, if it might contain 
+    further tags, it's added to a queue for subsequent processing. This ensures 
+    that nested structures are also analyzed.
+
+    Args:
+        html_string: The string containing HTML content.
+
+    Returns:
+        A dictionary mapping tag names to a list of their inner HTML contents.
+        Example: {""p"": [""paragraph one"", ""paragraph two with <span>nested</span>""], ""span"": [""nested""]}
+    """"""
+    results = defaultdict(list)
+    
+    queue = []
+    processed_fragments = set()
+
+    if html_string:
+        queue.append(html_string)
+        processed_fragments.add(html_string)
+
+    head = 0
+    while head < len(queue): # Using list as a queue with a head index
+        current_html_fragment = queue[head]
+        head += 1
+        
+        top_level_elements_in_fragment = _extract_elements_at_current_level(current_html_fragment)
+        
+        for tag_name, inner_html, _, _ in top_level_elements_in_fragment:
+            results[tag_name].append(inner_html)
+            
+            # If the inner HTML is not empty and seems to contain more tags,
+            # add it to the queue for further processing, if not already processed.
+            if inner_html.strip() and (""<"" in inner_html and "">"" in inner_html):
+                if inner_html not in processed_fragments:
+                     queue.append(inner_html)
+                     processed_fragments.add(inner_html)
+                     
+    return dict(results)
+","def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Checks if a specific HTML tag is present in a given string.
+    This is a simple check and looks for ""<tag_name"" (for opening tags like <tag> or <tag attr>)
+    or ""</tag_name>"" (for closing tags like </tag>).
+    The check is case-sensitive.
+
+    Args:
+        html_string: The string containing HTML content.
+        tag: The HTML tag name to search for (e.g., ""p"", ""div"").
+
+    Returns:
+        True if the tag is found, False otherwise.
+    """"""
+    opening_tag_marker = f""<{tag}""  # Matches ""<tag"" which covers <tag> and <tag ...>
+    closing_tag_marker = f""</{tag}>"" # Matches ""</tag>""
+
+    if opening_tag_marker in html_string or closing_tag_marker in html_string:
+        return True
+    return False
+
+import re
+from collections import defaultdict
+
+# NOTE: The HTML parsing functions below are simplified and may not correctly handle
+# all edge cases, such as HTML comments, CDATA sections, script/style tag contents,
+# malformed HTML, or attributes containing special characters like '>'.
+# They assume reasonably well-formed HTML for tag structure.
+
+def _find_matching_end_tag(html_string: str, tag_name: str, start_pos_after_opening_tag: int) -> int:
+    """"""
+    Finds the starting index of the matching closing tag for a given tag.
+    Accounts for nested tags of the same name.
+    Args:
+        html_string: The HTML content to search within.
+        tag_name: The name of the tag to find the closing tag for.
+        start_pos_after_opening_tag: The index in html_string after the opening tag.
+    Returns:
+        The starting index of the closing tag, or -1 if not found.
+    """"""
+    # Regexes for finding opening and closing tags of the specified name
+    # Using re.escape on tag_name in case it contains special regex characters
+    # (?i) for inline IGNORECASE, or pass re.IGNORECASE flag
+    open_tag_regex = re.compile(r""<"" + re.escape(tag_name) + r""(?:\s+[^>]*)?>"", re.IGNORECASE)
+    close_tag_regex = re.compile(r""</"" + re.escape(tag_name) + r""\s*>"", re.IGNORECASE)
+    
+    level = 1
+    current_pos = start_pos_after_opening_tag
+    while current_pos < len(html_string):
+        # Search for the next opening or closing tag
+        # Find the earliest of the two
+        next_open_match = open_tag_regex.search(html_string, current_pos)
+        next_close_match = close_tag_regex.search(html_string, current_pos)
+
+        if next_close_match is None:
+            return -1 # Malformed: no closing tag found for this tag_name
+
+        # If an opening tag of the same kind is found before a closing one
+        if next_open_match is not None and next_open_match.start() < next_close_match.start():
+            level += 1
+            current_pos = next_open_match.end()
+        else: # A closing tag is found
+            level -= 1
+            if level == 0:
+                return next_close_match.start() # Found the matching closing tag
+            current_pos = next_close_match.end()
+            
+    return -1 # Should not be reached if HTML is well-formed and level started at 1
+
+def _extract_elements_at_current_level(html_string: str) -> list:
+    """"""
+    Extracts top-level HTML elements from a string.
+    Ignores text nodes that are direct children of the current fragment for simplicity.
+    Args:
+        html_string: The HTML content to parse.
+    Returns:
+        A list of tuples, where each tuple is (tag_name, inner_html, start_idx, end_idx).
+    """"""
+    elements = []
+    cursor = 0
+    while cursor < len(html_string):
+        # Find the next opening tag. This regex is simple and might grab things in script tags etc.
+        # It doesn't handle comments, CDATA, etc.
+        match = re.search(r""<(\w+)([^>]*)>"", html_string, cursor) 
+        if not match:
+            break # No more tags
+
+        tag_name_original = match.group(1)
+        tag_name = tag_name_original.lower() # Normalize tag name to lowercase
+        
+        open_tag_full_text = match.group(0)
+        open_tag_start_idx = match.start()
+        open_tag_end_idx = match.end()
+
+        # Handle self-closing tags (e.g., <br/>, <img ... />)
+        if open_tag_full_text.endswith(""/>""):
+            elements.append((tag_name, """", open_tag_start_idx, open_tag_end_idx))
+            cursor = open_tag_end_idx
+            continue
+
+        # Find the matching closing tag for non-self-closing tags
+        closing_tag_start_idx = _find_matching_end_tag(html_string, tag_name_original, open_tag_end_idx)
+        
+        if closing_tag_start_idx == -1:
+            # Malformed HTML (e.g., unclosed tag).
+            # This simplistic parser will skip such a tag by advancing the cursor.
+            # A more robust parser might try to recover or report errors.
+            # print(f""Warning: No closing tag found for <{tag_name_original}> starting at {open_tag_start_idx}"")
+            cursor = open_tag_end_idx 
+            continue
+
+        # Determine the end of the closing tag
+        # We need to match the exact closing tag format </tag_name>
+        closing_tag_match = re.match(r""</"" + re.escape(tag_name_original) + r""\s*>"", html_string[closing_tag_start_idx:], re.IGNORECASE)
+        if not closing_tag_match:
+            # This should ideally not happen if _find_matching_end_tag is correct and HTML is not severely malformed
+            # print(f""Warning: Could not match exact closing tag for <{tag_name_original}> at {closing_tag_start_idx}"")
+            cursor = open_tag_end_idx
+            continue
+            
+        closing_tag_end_idx = closing_tag_start_idx + closing_tag_match.end()
+        
+        inner_html = html_string[open_tag_end_idx:closing_tag_start_idx]
+        elements.append((tag_name, inner_html, open_tag_start_idx, closing_tag_end_idx))
+        cursor = closing_tag_end_idx # Move cursor to the end of the processed element
+        
+    return elements
+
+def extract_tag_contents(html_string: str) -> dict:
+    """"""
+    Extracts content from HTML tags in a given string.
+
+    The function identifies HTML tags and their inner content. It returns a 
+    dictionary where keys are tag names (normalized to lowercase) and values 
+    are lists of strings, each string being the inner HTML of an occurrence 
+    of that tag.
+
+    The parsing is done by processing the HTML string and its fragments 
+    iteratively. When a tag's inner HTML is extracted, if it might contain 
+    further tags, it's added to a queue for subsequent processing. This ensures 
+    that nested structures are also analyzed.
+
+    Args:
+        html_string: The string containing HTML content.
+
+    Returns:
+        A dictionary mapping tag names to a list of their inner HTML contents.
+        Example: {""p"": [""paragraph one"", ""paragraph two with <span>nested</span>""], ""span"": [""nested""]}
+    """"""
+    results = defaultdict(list)
+    
+    queue = []
+    processed_fragments = set()
+
+    if html_string:
+        queue.append(html_string)
+        processed_fragments.add(html_string)
+
+    head = 0
+    while head < len(queue): # Using list as a queue with a head index
+        current_html_fragment = queue[head]
+        head += 1
+        
+        top_level_elements_in_fragment = _extract_elements_at_current_level(current_html_fragment)
+        
+        for tag_name, inner_html, _, _ in top_level_elements_in_fragment:
+            results[tag_name].append(inner_html)
+            
+            # If the inner HTML is not empty and seems to contain more tags,
+            # add it to the queue for further processing, if not already processed.
+            if inner_html.strip() and (""<"" in inner_html and "">"" in inner_html):
+                if inner_html not in processed_fragments:
+                     queue.append(inner_html)
+                     processed_fragments.add(inner_html)
+                     
+    return dict(results)
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extracts all unique HTML tag names present in a given string using regular expressions.
+
+    This function finds all opening and closing tags and returns a list of unique
+    tag names, normalized to lowercase. For example, if the input contains
+    <P>, <p>, and </p>, the output will include ""p"" once.
+
+    Args:
+        html_input: The string containing HTML content.
+
+    Returns:
+        A list of unique HTML tag names found in the input string.
+        Example: [""html"", ""head"", ""title"", ""body"", ""p"", ""a""]
+    """"""
+    # Regex to find tag names in opening tags (e.g., <div class=""foo"">)
+    # and closing tags (e.g., </div>).
+    # It captures the tag name (e.g., ""div"").
+    # - <\s*: Matches the opening '<' possibly followed by whitespace.
+    # - /?\s*: Matches an optional '/' (for closing tags) possibly followed by whitespace.
+    # - (\w+): Captures the tag name (one or more word characters).
+    # - (?:[^>]*): Matches any characters that are not '>' (attributes, etc.), non-capturing.
+    # - >: Matches the closing '>'.
+    tag_regex = re.compile(r""<\s*/?\s*(\w+)(?:[^>]*)?>"")
+    
+    found_tags = tag_regex.findall(html_input)
+    
+    # Normalize to lowercase and get unique tags
+    unique_tags = sorted(list(set(tag.lower() for tag in found_tags)))
+    
+    return unique_tags
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+f08a151e,editing,"[""I'm looking for a function named `get_html_tags` that can extract all URLs found in a given string of text using regular expressions. The function should take one argument - text: str, which is the input string, and return a list of URLs identified in the text. The following setup code will be provided:\n```\nimport re\n```\nPlease only output code and not your natural language commentary."", 'I think it would be useful to expand the scope. Could you modify the `get_html_tags` function to extract both URLs and email addresses from the input string using regex? It should still take the same argument - text: str - and return a list that includes both the URLs and any email addresses found. Continue using regex for this task.\nPlease only output code and not your natural language commentary.', 'Actually, I realize what I truly need is a focus on HTML parsing. Can you adjust the `get_html_tags` function to specifically extract HTML tags from a given HTML-formatted string using regular expressions? The function should take 1 argument - html_input: str, which is an HTML string, and return a list of all HTML tags identified within the input. Please ensure the function does not raise any exceptions during its operation.\n```\nPlease only output code and not your natural language commentary.']","import re
+
+def get_html_tags(text: str) -> list[str]:
+    """"""
+    Extracts all URLs found in a given string of text using regular expressions.
+
+    Args:
+        text: The input string.
+
+    Returns:
+        A list of URLs identified in the text.
+    """"""
+    # A common regex for matching URLs. This can be adjusted for more specific needs.
+    # This regex looks for http/https, optional www, domain name, and path/query parameters.
+    url_pattern = re.compile(
+        r'https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)', re.IGNORECASE)
+    return re.findall(url_pattern, text)
+","import re
+
+def get_html_tags(text: str) -> list[str]:
+    """"""
+    Extracts all URLs and email addresses found in a given string of text using regular expressions.
+
+    Args:
+        text: The input string.
+
+    Returns:
+        A list of URLs and email addresses identified in the text.
+    """"""
+    # Regex for matching URLs
+    url_pattern = re.compile(
+        r'https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)', re.IGNORECASE)
+    urls = re.findall(url_pattern, text)
+
+    # Regex for matching email addresses
+    # This is a common, relatively simple regex for email validation.
+    email_pattern = re.compile(
+        r""[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]""
+        r""(?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?""
+        r""(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*"", re.IGNORECASE)
+    emails = re.findall(email_pattern, text)
+
+    return urls + emails
+","import re
+
+def get_html_tags(html_input: str) -> list[str]:
+    """"""
+    Extracts all HTML tags from a given HTML-formatted string using regular expressions.
+
+    Args:
+        html_input: An HTML string.
+
+    Returns:
+        A list of all HTML tags identified within the input.
+        Returns an empty list if no tags are found or in case of an error during regex processing.
+    """"""
+    try:
+        # Regex for matching HTML tags (e.g., <div id=""main"">, <a>, </span>)
+        # This pattern looks for '<', followed by one or more characters that are not '>', then '>'
+        html_tag_pattern = re.compile(r'<[^>]+>')
+        tags = re.findall(html_tag_pattern, html_input)
+        return tags
+    except Exception:
+        # Although re.findall is unlikely to raise an exception with a valid pattern and string,
+        # this ensures the function meets the ""does not raise any exceptions"" requirement.
+        return []
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+f08a151e,refactor,"[""Develop a function that belongs to an HTML parsing module, which is responsible for extracting HTML tags from a provided string using a regular expression. The function needs to return a list of tags identified in the input string. The function's name should be get_html_tags. The function should take 1 argument, i.e., - html_input: str, an HTML-formatted string as input. The function should return a list containing the tags that are present within the input HTML string. The function should not raise any exceptions under normal operation. The following setup code will be provided to you:\n```\nimport re\n```\n\nHere's some additional context about the imported packages and global variables: None \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's ensure the function adheres to the PEP-8 style guide for better readability. Could you make changes to any indentations, add strategic blank lines between different logical sections, and improve the naming of any intermediate variables for clarity?\nPlease only output code and not your natural language commentary."", 'Could we enhance the function to include logging support? Initialize logging to capture both the input HTML string and the list of extracted tags, so that we can keep track of what inputs the function processes and what outputs it produces.\n```\nPlease only output code and not your natural language commentary.']","import re
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extracts HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: str, an HTML-formatted string as input.
+
+    Returns:
+        A list containing the tags that are present within the input HTML string.
+    """"""
+    # Regex to find HTML tags (e.g., <div class=""example"">, <p>, </span>)
+    # It captures the tag name itself.
+    # It looks for '<', followed by an optional '/', then the tag name (alphanumeric, can include hyphens),
+    # and then either a space, '>', or end of string.
+    tag_regex = r""<[/]?([a-zA-Z0-9\-]+)[^>]*>""
+    tags = re.findall(tag_regex, html_input)
+    return tags
+","import re
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extracts HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: str, an HTML-formatted string as input.
+
+    Returns:
+        A list containing the tags that are present within the input HTML string.
+    """"""
+    # Regex to find HTML tags (e.g., <div class=""example"">, <p>, </span>).
+    # This pattern captures the tag name.
+    # It looks for:
+    #   '<' followed by an optional '/' (for closing tags),
+    #   then the tag name (alphanumeric characters and hyphens),
+    #   followed by any characters except '>' until the closing '>'.
+    html_tag_pattern = r""<[/]?([a-zA-Z0-9\-]+)[^>]*>""
+    extracted_tags = re.findall(html_tag_pattern, html_input)
+    
+    return extracted_tags
+","import re
+import logging
+
+# Configure basic logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extracts HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: str, an HTML-formatted string as input.
+
+    Returns:
+        A list containing the tags that are present within the input HTML string.
+    """"""
+    logger.info(f""Received HTML input: {html_input}"")
+    # Regex to find HTML tags (e.g., <div class=""example"">, <p>, </span>).
+    # This pattern captures the tag name.
+    # It looks for:
+    #   '<' followed by an optional '/' (for closing tags),
+    #   then the tag name (alphanumeric characters and hyphens),
+    #   followed by any characters except '>' until the closing '>'.
+    html_tag_pattern = r""<[/]?([a-zA-Z0-9\-]+)[^>]*>""
+    extracted_tags = re.findall(html_tag_pattern, html_input)
+    
+    logger.info(f""Extracted tags: {extracted_tags}"")
+    return extracted_tags
+",gemini-2.5-pro-preview-03-25,0,[],[],[]

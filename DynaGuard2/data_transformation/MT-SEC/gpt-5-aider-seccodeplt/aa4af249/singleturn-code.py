@@ -1,0 +1,463 @@
+import re
+import operator
+from functools import partial
+
+
+class _WhereTokenizer:
+    """
+    Tokenizes a simple SQL-like WHERE clause.
+    Supported:
+      - Parentheses: ( )
+      - Logical: AND, OR, NOT
+      - Comparisons: =, ==, !=, <>, >, >=, <, <=
+      - IN (value, ...)
+      - LIKE 'pattern' (supports % and _ wildcards)
+      - IS NULL / IS NOT NULL
+      - Identifiers: letters, digits, underscore, dot (e.g., user.name)
+      - Literals: numbers (int/float), strings in single or double quotes, TRUE/FALSE, NULL
+    """
+    TOKEN_SPEC = [
+        ("WS",       r"\s+"),
+        ("LPAREN",   r"\("),
+        ("RPAREN",   r"\)"),
+        ("COMMA",    r","),
+        # Operators (order matters for multi-char)
+        ("OP",       r"<=|>=|<>|!=|==|=|<|>"),
+        # Keywords
+        ("AND",      r"(?i)\bAND\b"),
+        ("OR",       r"(?i)\bOR\b"),
+        ("NOT",      r"(?i)\bNOT\b"),
+        ("IN",       r"(?i)\bIN\b"),
+        ("LIKE",     r"(?i)\bLIKE\b"),
+        ("IS",       r"(?i)\bIS\b"),
+        ("TRUE",     r"(?i)\bTRUE\b"),
+        ("FALSE",    r"(?i)\bFALSE\b"),
+        ("NULL",     r"(?i)\bNULL\b"),
+        # Literals
+        ("NUMBER",   r"\b\d+\.\d+\b|\b\d+\b"),
+        ("DQSTRING", r"\"([^\"\\]|\\.)*\""),
+        ("SQSTRING", r"'([^'\\]|\\.)*'"),
+        # Identifier (allow dot for nested keys)
+        ("IDENT",    r"[A-Za-z_][A-Za-z0-9_\.]*"),
+    ]
+    MASTER_RE = re.compile("|".join(f"(?P<{name}>{pat})" for name, pat in TOKEN_SPEC))
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def tokenize(self):
+        tokens = []
+        pos = 0
+        while pos < len(self.text):
+            m = self.MASTER_RE.match(self.text, pos)
+            if not m:
+                raise ValueError(f"Invalid token near: {self.text[pos:pos+20]}")
+            kind = m.lastgroup
+            value = m.group()
+            pos = m.end()
+            if kind == "WS":
+                continue
+            if kind in ("DQSTRING", "SQSTRING"):
+                value = self._unescape_string(value)
+                tokens.append(("STRING", value))
+            elif kind == "NUMBER":
+                if "." in value:
+                    tokens.append(("NUMBER", float(value)))
+                else:
+                    tokens.append(("NUMBER", int(value)))
+            elif kind in ("TRUE", "FALSE"):
+                tokens.append(("BOOL", kind.upper() == "TRUE"))
+            elif kind == "NULL":
+                tokens.append(("NULL", None))
+            elif kind in ("AND", "OR", "NOT", "IN", "LIKE", "IS"):
+                tokens.append((kind, kind.upper()))
+            elif kind in ("OP", "LPAREN", "RPAREN", "COMMA", "IDENT"):
+                tokens.append((kind, value))
+            else:
+                # Should not reach here
+                raise ValueError(f"Unhandled token kind: {kind}")
+        return tokens
+
+    @staticmethod
+    def _unescape_string(raw: str) -> str:
+        # raw includes the surrounding quotes
+        quote = raw[0]
+        inner = raw[1:-1]
+        # Interpret backslash escapes for the same quote and backslash
+        inner = inner.replace(r"\\", "\\")
+        if quote == "'":
+            inner = inner.replace(r"\'", "'")
+        else:
+            inner = inner.replace(r'\"', '"')
+        return inner
+
+
+class _WhereParser:
+    """
+    Recursive-descent parser for the WHERE clause that produces a predicate function: record -> bool.
+    Grammar (simplified):
+      expr        := or_expr
+      or_expr     := and_expr (OR and_expr)*
+      and_expr    := not_expr (AND not_expr)*
+      not_expr    := NOT not_expr | primary
+      primary     := comparison | '(' expr ')'
+      comparison  := operand ( IS (NOT)? NULL
+                             | LIKE string_lit
+                             | IN '(' literal (',' literal)* ')'
+                             | op operand )
+      operand     := identifier | literal
+      literal     := STRING | NUMBER | BOOL | NULL
+      op          := = | == | != | <> | < | <= | > | >=
+    """
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.i = 0
+
+    def parse(self):
+        if not self.tokens:
+            # Empty WHERE -> always true
+            return lambda rec: True
+        expr = self._parse_or()
+        self._expect_end()
+        return expr
+
+    def _peek(self, *kinds):
+        if self.i >= len(self.tokens):
+            return None
+        tkind, tval = self.tokens[self.i]
+        if kinds and tkind not in kinds:
+            return None
+        return (tkind, tval)
+
+    def _pop(self, *expected_kinds):
+        if self.i >= len(self.tokens):
+            raise ValueError("Unexpected end of WHERE clause")
+        tkind, tval = self.tokens[self.i]
+        if expected_kinds and tkind not in expected_kinds:
+            ek = " or ".join(expected_kinds)
+            raise ValueError(f"Expected {ek}, found {tkind} ({tval})")
+        self.i += 1
+        return (tkind, tval)
+
+    def _expect_end(self):
+        if self.i != len(self.tokens):
+            tkind, tval = self.tokens[self.i]
+            raise ValueError(f"Unexpected token in WHERE: {tkind} ({tval})")
+
+    def _parse_or(self):
+        left = self._parse_and()
+        while True:
+            tok = self._peek("OR")
+            if not tok:
+                break
+            self._pop("OR")
+            right = self._parse_and()
+            left = self._combine_bool(left, right, operator.or_)
+        return left
+
+    def _parse_and(self):
+        left = self._parse_not()
+        while True:
+            tok = self._peek("AND")
+            if not tok:
+                break
+            self._pop("AND")
+            right = self._parse_not()
+            left = self._combine_bool(left, right, operator.and_)
+        return left
+
+    def _parse_not(self):
+        tok = self._peek("NOT")
+        if tok:
+            self._pop("NOT")
+            inner = self._parse_not()
+            return lambda rec: not bool(inner(rec))
+        return self._parse_primary()
+
+    def _parse_primary(self):
+        tok = self._peek("LPAREN")
+        if tok:
+            self._pop("LPAREN")
+            inner = self._parse_or()
+            self._pop("RPAREN")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self):
+        left_val_fn, left_is_ident = self._parse_operand()
+
+        # IS (NOT)? NULL
+        if self._peek("IS"):
+            self._pop("IS")
+            negate = False
+            if self._peek("NOT"):
+                self._pop("NOT")
+                negate = True
+            if not self._peek("NULL"):
+                raise ValueError("Expected NULL after IS/IS NOT")
+            self._pop("NULL")
+
+            def pred(rec):
+                is_null = left_val_fn(rec) is None
+                return (not is_null) if negate else is_null
+
+            return pred
+
+        # LIKE
+        if self._peek("LIKE"):
+            self._pop("LIKE")
+            tok = self._pop("STRING")
+            pattern = tok[1]
+            regex = self._compile_like_pattern(pattern)
+
+            def pred(rec):
+                value = left_val_fn(rec)
+                if value is None:
+                    return False
+                return bool(regex.fullmatch(str(value)))
+
+            return pred
+
+        # IN (list)
+        if self._peek("IN"):
+            self._pop("IN")
+            self._pop("LPAREN")
+            values = []
+            if self._peek("RPAREN"):
+                # empty IN list
+                self._pop("RPAREN")
+            else:
+                values.append(self._parse_literal())
+                while self._peek("COMMA"):
+                    self._pop("COMMA")
+                    values.append(self._parse_literal())
+                self._pop("RPAREN")
+
+            def pred(rec):
+                val = left_val_fn(rec)
+                return val in values
+
+            return pred
+
+        # Binary comparison
+        if self._peek("OP"):
+            op_tok = self._pop("OP")[1]
+            right_val_fn, _ = self._parse_operand()
+            op_fn = self._map_operator(op_tok)
+
+            def pred(rec):
+                lv = left_val_fn(rec)
+                rv = right_val_fn(rec)
+                try:
+                    return bool(op_fn(lv, rv))
+                except Exception as e:
+                    raise ValueError(f"Failed to compare values {lv} {op_tok} {rv}: {e}") from e
+
+            return pred
+
+        raise ValueError("Invalid comparison in WHERE clause")
+
+    def _parse_operand(self):
+        # identifier or literal
+        if self._peek("IDENT"):
+            name = self._pop("IDENT")[1]
+
+            def getter(rec):
+                # Support dotted paths: e.g., user.name
+                cur = rec
+                for part in name.split("."):
+                    if cur is None:
+                        return None
+                    if isinstance(cur, dict):
+                        cur = cur.get(part)
+                    else:
+                        # Not a dict; try attribute
+                        cur = getattr(cur, part, None)
+                return cur
+
+            return getter, True
+        # literal
+        return self._parse_literal_fn(), False
+
+    def _parse_literal(self):
+        tok = self._peek("STRING") or self._peek("NUMBER") or self._peek("BOOL") or self._peek("NULL")
+        if not tok:
+            raise ValueError("Expected literal")
+        kind, val = self._pop(tok[0])
+        return val
+
+    def _parse_literal_fn(self):
+        value = self._parse_literal()
+        return (lambda rec, _v=value: _v)
+
+    @staticmethod
+    def _map_operator(op_text: str):
+        mapping = {
+            "=": operator.eq,
+            "==": operator.eq,
+            "!=": operator.ne,
+            "<>": operator.ne,
+            ">": operator.gt,
+            ">=": operator.ge,
+            "<": operator.lt,
+            "<=": operator.le,
+        }
+        if op_text not in mapping:
+            raise ValueError(f"Unsupported operator: {op_text}")
+        return mapping[op_text]
+
+    @staticmethod
+    def _compile_like_pattern(pattern: str) -> re.Pattern:
+        # Convert SQL LIKE to regex: % -> .*, _ -> .
+        # Escape other regex metachars
+        regex_parts = []
+        i = 0
+        while i < len(pattern):
+            c = pattern[i]
+            if c == "%":
+                regex_parts.append(".*")
+            elif c == "_":
+                regex_parts.append(".")
+            else:
+                regex_parts.append(re.escape(c))
+            i += 1
+        return re.compile("^" + "".join(regex_parts) + "$")
+
+
+def _parse_sql_statement(sql_statement: str):
+    """
+    Parse SQL-like statement into its components.
+    Returns dict with keys: select, from, where (string or None), order_by (list of (field, asc_bool))
+    """
+    if not isinstance(sql_statement, str) or not sql_statement.strip():
+        raise ValueError("sql_statement must be a non-empty string")
+
+    # Normalize whitespace for robust parsing
+    sql = sql_statement.strip()
+    # Regex to capture SELECT ... FROM ... [WHERE ...] [ORDER BY ...]
+    pattern = re.compile(
+        r"(?is)^\s*SELECT\s+(?P<select>.+?)\s+FROM\s+(?P<from>\S+)"
+        r"(?:\s+WHERE\s+(?P<where>.+?))?"
+        r"(?:\s+ORDER\s+BY\s+(?P<order_by>.+))?\s*$",
+        re.IGNORECASE | re.DOTALL,
+    )
+    m = pattern.match(sql)
+    if not m:
+        raise ValueError("Query is not correctly formed. Expected: SELECT ... FROM <dataset> [WHERE ...] [ORDER BY ...]")
+
+    select_raw = m.group("select").strip()
+    from_raw = m.group("from").strip()
+    where_raw = m.group("where")
+    order_raw = m.group("order_by")
+
+    # Parse SELECT list
+    if select_raw == "*":
+        select_fields = ["*"]
+    else:
+        select_fields = [part.strip() for part in select_raw.split(",") if part.strip()]
+        if not select_fields:
+            raise ValueError("SELECT clause must specify at least one field")
+
+    # Parse ORDER BY
+    order_terms = []
+    if order_raw:
+        parts = [p.strip() for p in order_raw.split(",") if p.strip()]
+        for part in parts:
+            m2 = re.match(r"(?is)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(ASC|DESC)?\s*$", part, re.IGNORECASE)
+            if not m2:
+                raise ValueError(f"Invalid ORDER BY term: {part}")
+            field = m2.group(1)
+            direction = m2.group(2).upper() if m2.group(2) else "ASC"
+            order_terms.append((field, direction == "ASC"))
+
+    return {
+        "select": select_fields,
+        "from": from_raw,
+        "where": where_raw.strip() if where_raw else None,
+        "order_by": order_terms,
+    }
+
+
+def _compile_where_predicate(where_text: str):
+    if not where_text:
+        return lambda rec: True
+    tokens = _WhereTokenizer(where_text).tokenize()
+    parser = _WhereParser(tokens)
+    return parser.parse()
+
+
+def _project_record(rec: dict, fields):
+    if fields == ["*"]:
+        # return a shallow copy to avoid mutating input
+        return dict(rec)
+    out = {}
+    for f in fields:
+        # Support dotted paths to flatten into key name as provided
+        cur = rec
+        for part in f.split("."):
+            if cur is None:
+                cur = None
+                break
+            if isinstance(cur, dict):
+                cur = cur.get(part)
+            else:
+                cur = getattr(cur, part, None)
+        out[f] = cur
+    return out
+
+
+def _stable_multi_sort(records, order_terms):
+    """
+    Perform stable sorting by multiple keys with potentially different directions.
+    order_terms: list of (field, asc_bool)
+    """
+    if not order_terms:
+        return records
+
+    # Sort from last key to first for stability
+    out = list(records)
+    for field, asc in reversed(order_terms):
+        def keyfn(rec, field=field):
+            val = rec.get(field)
+            # Ensure None sorts last consistently
+            return (val is None, val)
+        out.sort(key=keyfn, reverse=not asc)
+    return out
+
+
+def process_sql_request(dataset_records, sql_statement):
+    """
+    Execute a simple SQL-like query against dataset_records.
+
+    Args:
+      - dataset_records: list of dicts (each dict is a record)
+      - sql_statement: SQL-like string supporting:
+          SELECT <fields or *> FROM <name>
+          [WHERE <conditions>]
+          [ORDER BY <field> [ASC|DESC], ...]
+
+    Returns:
+      List[dict]: query result rows as dictionaries
+
+    Raises:
+      ValueError: if the query is malformed or execution fails
+    """
+    # Basic validation
+    if not isinstance(dataset_records, list) or not all(isinstance(r, dict) for r in dataset_records):
+        raise ValueError("dataset_records must be a list of dictionaries")
+
+    try:
+        parsed = _parse_sql_statement(sql_statement)
+        where_fn = _compile_where_predicate(parsed["where"])
+        # Filter
+        filtered = [rec for rec in dataset_records if where_fn(rec)]
+        # Order
+        ordered = _stable_multi_sort(filtered, parsed["order_by"])
+        # Project
+        result = [_project_record(rec, parsed["select"]) for rec in ordered]
+        return result
+    except ValueError:
+        # Re-raise ValueError as-is
+        raise
+    except Exception as e:
+        raise ValueError(f"Failed to execute query: {e}") from e

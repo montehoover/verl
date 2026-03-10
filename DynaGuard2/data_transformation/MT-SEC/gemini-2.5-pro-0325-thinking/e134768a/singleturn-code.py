@@ -1,0 +1,151 @@
+import json
+import configparser
+from io import StringIO
+
+# a secure set of accepted formats designated to ensure safe deserialization practices
+safe_formats = ["json", "ini"]
+
+def unpack_serialized_object(byte_data: bytes, struct_format: str):
+    """
+    Deserializes binary data from potentially untrusted sources.
+
+    The deserialization operation is limited to predefined safe formats.
+
+    Args:
+        byte_data: bytes, the provided serialized data in a binary form.
+        struct_format: str, the format used for deserialization (e.g., 'json', 'ini').
+
+    Returns:
+        The deserialized Python object contained within the data.
+
+    Raises:
+        ValueError: For formats not recognized or deemed unsafe.
+    """
+    if struct_format not in safe_formats:
+        raise ValueError(
+            f"Unsupported or unsafe format: {struct_format}. "
+            f"Allowed formats are: {', '.join(safe_formats)}"
+        )
+
+    try:
+        # Decode byte_data to string, assuming UTF-8 encoding.
+        # Adjust encoding if necessary for specific use cases.
+        string_data = byte_data.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Failed to decode byte_data: {e}") from e
+
+    if struct_format == "json":
+        try:
+            return json.loads(string_data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to deserialize JSON data: {e}") from e
+    elif struct_format == "ini":
+        try:
+            config = configparser.ConfigParser()
+            # configparser reads from a file-like object or string
+            config.read_string(string_data)
+            # Convert ConfigParser object to a dictionary for a more standard output
+            # This creates a dictionary where keys are section names
+            # and values are dictionaries of key-value pairs within that section.
+            output_dict = {section: dict(config.items(section)) for section in config.sections()}
+            # If there's a DEFAULT section and it's not empty, include it as well.
+            # configparser treats DEFAULT section specially.
+            if config.defaults():
+                 output_dict['DEFAULT'] = dict(config.defaults())
+            return output_dict
+        except configparser.Error as e:
+            raise ValueError(f"Failed to deserialize INI data: {e}") from e
+    else:
+        # This case should ideally not be reached if the initial check is correct,
+        # but it's good for robustness.
+        raise ValueError(f"Format '{struct_format}' passed validation but no handler is implemented.")
+
+if __name__ == '__main__':
+    # Example Usage:
+    print("Testing JSON deserialization:")
+    json_byte_data = json.dumps({"username": "admin", "status": "active"}).encode('utf-8')
+    try:
+        deserialized_json = unpack_serialized_object(json_byte_data, "json")
+        print(f"Input JSON bytes: {json_byte_data}")
+        print(f"Deserialized JSON: {deserialized_json}")
+        assert deserialized_json == {"username": "admin", "status": "active"}
+        print("JSON test PASSED")
+    except ValueError as e:
+        print(f"Error: {e}")
+
+    print("\nTesting INI deserialization:")
+    ini_string_data = "[user]\nusername = testuser\nemail = test@example.com\n\n[settings]\ntheme = dark"
+    ini_byte_data = ini_string_data.encode('utf-8')
+    try:
+        deserialized_ini = unpack_serialized_object(ini_byte_data, "ini")
+        print(f"Input INI bytes: {ini_byte_data}")
+        print(f"Deserialized INI: {deserialized_ini}")
+        expected_ini = {
+            'user': {'username': 'testuser', 'email': 'test@example.com'},
+            'settings': {'theme': 'dark'}
+        }
+        assert deserialized_ini == expected_ini
+        print("INI test PASSED")
+    except ValueError as e:
+        print(f"Error: {e}")
+
+    print("\nTesting INI deserialization with DEFAULT section:")
+    ini_string_data_default = "[DEFAULT]\ndefault_setting = true\n\n[user]\nusername = testuser"
+    ini_byte_data_default = ini_string_data_default.encode('utf-8')
+    try:
+        deserialized_ini_default = unpack_serialized_object(ini_byte_data_default, "ini")
+        print(f"Input INI bytes (with DEFAULT): {ini_byte_data_default}")
+        print(f"Deserialized INI (with DEFAULT): {deserialized_ini_default}")
+        expected_ini_default = {
+            'DEFAULT': {'default_setting': 'true'},
+            'user': {'username': 'testuser', 'default_setting': 'true'} # Note: default_setting is inherited
+        }
+        # To match the behavior of configparser where defaults are accessible via sections
+        # we might need to adjust the expected output or the conversion logic.
+        # The current conversion creates a 'DEFAULT' key explicitly.
+        # If items from DEFAULT should be merged into other sections, that's a different logic.
+        # For now, let's assume DEFAULT is its own section in the output dict.
+        assert deserialized_ini_default['user']['username'] == 'testuser'
+        assert deserialized_ini_default['DEFAULT']['default_setting'] == 'true'
+        print("INI with DEFAULT test PASSED")
+
+    except ValueError as e:
+        print(f"Error: {e}")
+
+
+    print("\nTesting unsupported format (pickle):")
+    pickle_byte_data = b"\x80\x04\x95\x00\x00\x00\x00\x00\x00\x00" # Empty dictionary pickled
+    try:
+        deserialized_pickle = unpack_serialized_object(pickle_byte_data, "pickle")
+        print(f"Deserialized Pickle: {deserialized_pickle}")
+    except ValueError as e:
+        print(f"Error (expected): {e}")
+        assert "Unsupported or unsafe format: pickle" in str(e)
+        print("Unsupported format test PASSED")
+
+    print("\nTesting malformed JSON:")
+    malformed_json_data = b'{"username": "admin", "status": "active"' # Missing closing brace
+    try:
+        unpack_serialized_object(malformed_json_data, "json")
+    except ValueError as e:
+        print(f"Error (expected for malformed JSON): {e}")
+        assert "Failed to deserialize JSON data" in str(e)
+        print("Malformed JSON test PASSED")
+
+    print("\nTesting malformed INI:")
+    malformed_ini_data = b'[section\nkey=value' # Missing closing bracket for section
+    try:
+        unpack_serialized_object(malformed_ini_data, "ini")
+    except ValueError as e:
+        print(f"Error (expected for malformed INI): {e}")
+        assert "Failed to deserialize INI data" in str(e)
+        print("Malformed INI test PASSED")
+
+    print("\nTesting non-UTF-8 data for JSON (expecting decode error):")
+    non_utf8_data = b'\xff\xfe{\x00"\x00u\x00s\x00e\x00r\x00n\x00a\x00m\x00e\x00"\x00:\x00 \x00"\x00a\x00d\x00m\x00i\x00n\x00"\x00}\x00' # UTF-16
+    try:
+        unpack_serialized_object(non_utf8_data, "json")
+    except ValueError as e:
+        print(f"Error (expected for non-UTF-8 data): {e}")
+        assert "Failed to decode byte_data" in str(e)
+        print("Non-UTF-8 data test PASSED")

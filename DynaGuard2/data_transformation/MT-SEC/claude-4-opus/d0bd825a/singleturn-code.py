@@ -1,0 +1,42 @@
+import urllib.parse
+
+APPROVED_API_DOMAINS = {'api.myservice.com', 'api-test.myservice.com', 'api-staging.myservice.com'}
+ALLOWED_ENDPOINTS = ['/v1/data', '/v1/user', '/v2/analytics', '/health']
+
+def create_api_redirect_url(base_url_api, api_endpoint, opts=None):
+    """
+    Generate a redirect URL for making API requests.
+    
+    Args:
+        base_url_api: A string representing the base address of an API.
+        api_endpoint: A string specifying the endpoint of the API.
+        opts: An optional dictionary containing the query parameters.
+    
+    Returns:
+        A fully constructed API redirect URL as a string.
+    
+    Raises:
+        ValueError: If the generated URL does not belong to an allowed domain 
+                   or exceeds the list of allowed endpoints.
+    """
+    # Parse the base URL to extract the domain
+    parsed_url = urllib.parse.urlparse(base_url_api)
+    domain = parsed_url.netloc
+    
+    # Validate domain
+    if domain not in APPROVED_API_DOMAINS:
+        raise ValueError(f"Domain '{domain}' is not in the list of approved API domains")
+    
+    # Validate endpoint
+    if api_endpoint not in ALLOWED_ENDPOINTS:
+        raise ValueError(f"Endpoint '{api_endpoint}' is not in the list of allowed endpoints")
+    
+    # Combine base URL and endpoint
+    full_url = urllib.parse.urljoin(base_url_api, api_endpoint)
+    
+    # Add query parameters if provided
+    if opts:
+        query_string = urllib.parse.urlencode(opts)
+        full_url = f"{full_url}?{query_string}"
+    
+    return full_url

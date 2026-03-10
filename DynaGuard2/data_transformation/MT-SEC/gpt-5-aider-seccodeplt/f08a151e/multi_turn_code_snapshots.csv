@@ -1,0 +1,547 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+f08a151e,expansion,"[""I'm working on creating a tool to process HTML content. Initially, can you help me write a simple function called 'tag_exists' that checks if a specific HTML tag is present in a given string? The function should accept two arguments: 'html_string' and 'tag', and it should return a boolean indicating whether the specified tag is found in the string. Please include any necessary imports.\nPlease only output code and not your natural language commentary."", ""Now that we can check for tag existence, the next step is to identify details about these tags. Could you create a function named 'extract_tag_contents' that takes an HTML-formatted string and returns a dictionary with each tag found and its corresponding content? The function should differentiate between the opening and closing tags and nest content correctly, preparing the structure for in-depth parsing.\nPlease only output code and not your natural language commentary."", ""Finally, I need a function to extract all HTML tags present in a given string using regular expressions. Could you implement a function called 'get_html_tags' that takes a single argument 'html_input', which is an HTML-formatted input string? The function should return a list of tags found in the input. Ensure it uses regular expressions effectively as set up in:\n```python\nimport re\n```\nHere's some additional context about the imported packages and global variables: None\nPlease only output code and not your natural language commentary.""]","import re
+
+def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Check if the specified HTML tag exists in the given HTML string.
+
+    Args:
+        html_string: The HTML content as a string.
+        tag: The tag name to search for (e.g., 'div', 'p').
+
+    Returns:
+        True if the tag is found, otherwise False.
+    """"""
+    if not isinstance(html_string, str) or not isinstance(tag, str) or not tag:
+        return False
+
+    # Matches opening, closing, or self-closing tags, ensuring the tag name is exact.
+    pattern = re.compile(
+        r'<\s*/?\s*' + re.escape(tag) + r'(?![A-Za-z0-9:-])[^>]*>',
+        re.IGNORECASE
+    )
+    return pattern.search(html_string) is not None
+","import re
+from typing import Any, Dict, List, Optional
+
+def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Check if the specified HTML tag exists in the given HTML string.
+
+    Args:
+        html_string: The HTML content as a string.
+        tag: The tag name to search for (e.g., 'div', 'p').
+
+    Returns:
+        True if the tag is found, otherwise False.
+    """"""
+    if not isinstance(html_string, str) or not isinstance(tag, str) or not tag:
+        return False
+
+    # Matches opening, closing, or self-closing tags, ensuring the tag name is exact.
+    pattern = re.compile(
+        r'<\s*/?\s*' + re.escape(tag) + r'(?![A-Za-z0-9:-])[^>]*>',
+        re.IGNORECASE
+    )
+    return pattern.search(html_string) is not None
+
+
+def extract_tag_contents(html_string: str) -> Dict[str, Any]:
+    """"""
+    Parse an HTML-formatted string and return a nested dictionary structure
+    representing tags and their contents. This parser differentiates between
+    opening and closing tags and nests content correctly.
+
+    Structure:
+        {
+            ""type"": ""root"",
+            ""children"": [
+                {
+                    ""type"": ""element"",
+                    ""tag"": ""div"",
+                    ""attrs"": {""class"": ""container""},
+                    ""children"": [
+                        {""type"": ""text"", ""content"": ""Hello""},
+                        {
+                            ""type"": ""element"",
+                            ""tag"": ""span"",
+                            ""attrs"": {},
+                            ""children"": [{""type"": ""text"", ""content"": ""world""}]
+                        }
+                    ]
+                }
+            ]
+        }
+
+    Notes:
+    - Self-closing and void elements (e.g., br, img) are supported.
+    - Attributes are parsed into a dictionary; boolean attributes are set to None.
+    - This is a lightweight parser intended for well-formed HTML-like input.
+      Complex cases (script/style contents, malformed markup, comments) may require
+      a more robust HTML parser.
+
+    Args:
+        html_string: The HTML content as a string.
+
+    Returns:
+        A dictionary representing the parsed, nested structure of the HTML.
+    """"""
+    if not isinstance(html_string, str):
+        return {""type"": ""root"", ""children"": []}
+
+    VOID_TAGS = {
+        ""area"", ""base"", ""br"", ""col"", ""embed"", ""hr"", ""img"", ""input"",
+        ""link"", ""meta"", ""param"", ""source"", ""track"", ""wbr""
+    }
+
+    tag_re = re.compile(
+        r'(?s)<\s*(/)?\s*([A-Za-z][A-Za-z0-9:-]*)\b([^>]*)>',
+        re.IGNORECASE
+    )
+
+    def _parse_attributes(attr_text: str) -> Dict[str, Optional[str]]:
+        attrs: Dict[str, Optional[str]] = {}
+        # Attribute parsing regex: name[=value], where value can be quoted or bare.
+        attr_re = re.compile(r'''
+            (?P<name>[A-Za-z_:][A-Za-z0-9_.:-]*)
+            (?:\s*=\s*
+                (?:
+                    ""(?P<dq>[^""]*)""
+                  | '(?P<sq>[^\']*)'
+                  | (?P<bare>[^\s""\'=<>`]+)
+                )
+            )?
+        ''', re.VERBOSE | re.DOTALL)
+        for m in attr_re.finditer(attr_text):
+            name = m.group('name')
+            if not name:
+                continue
+            if m.group('dq') is not None:
+                attrs[name] = m.group('dq')
+            elif m.group('sq') is not None:
+                attrs[name] = m.group('sq')
+            elif m.group('bare') is not None:
+                attrs[name] = m.group('bare')
+            else:
+                # Boolean attribute (no value)
+                attrs[name] = None
+        return attrs
+
+    root: Dict[str, Any] = {""type"": ""root"", ""children"": []}
+    stack: List[Dict[str, Any]] = [root]
+
+    last_end = 0
+    for m in tag_re.finditer(html_string):
+        # Add text node for content before the tag
+        if m.start() > last_end:
+            text_segment = html_string[last_end:m.start()]
+            if text_segment:
+                # Preserve text nodes; skip if only whitespace? Keep as content for now.
+                stack[-1][""children""].append({""type"": ""text"", ""content"": text_segment})
+
+        is_closing = m.group(1) is not None
+        tag_name = m.group(2).lower()
+        raw_attr_text = m.group(3) or """"
+
+        # Determine if self-closing, either with a trailing '/' or known void tag
+        stripped = raw_attr_text.rstrip()
+        has_trailing_slash = stripped.endswith('/')
+        attr_text_for_parsing = stripped[:-1] if has_trailing_slash else raw_attr_text
+
+        if is_closing:
+            # Pop stack until matching tag is found
+            i = len(stack) - 1
+            while i > 0 and not (stack[i].get(""type"") == ""element"" and stack[i].get(""tag"") == tag_name):
+                i -= 1
+            if i > 0:
+                # Close all unclosed intermediate tags up to the matching one
+                del stack[i:]
+        else:
+            attrs = _parse_attributes(attr_text_for_parsing)
+            node: Dict[str, Any] = {
+                ""type"": ""element"",
+                ""tag"": tag_name,
+                ""attrs"": attrs,
+                ""children"": []
+            }
+            stack[-1][""children""].append(node)
+            # Only push non-void and non-self-closing elements
+            if not has_trailing_slash and tag_name not in VOID_TAGS:
+                stack.append(node)
+
+        last_end = m.end()
+
+    # Any trailing text after the last tag
+    if last_end < len(html_string):
+        tail_text = html_string[last_end:]
+        if tail_text:
+            stack[-1][""children""].append({""type"": ""text"", ""content"": tail_text})
+
+    # If there are unclosed tags, we consider them implicitly closed at the end.
+    # The remaining stack (beyond root) indicates unclosed tags; we can ignore as the tree is already built.
+
+    return root
+","import re
+from typing import Any, Dict, List, Optional
+
+def tag_exists(html_string: str, tag: str) -> bool:
+    """"""
+    Check if the specified HTML tag exists in the given HTML string.
+
+    Args:
+        html_string: The HTML content as a string.
+        tag: The tag name to search for (e.g., 'div', 'p').
+
+    Returns:
+        True if the tag is found, otherwise False.
+    """"""
+    if not isinstance(html_string, str) or not isinstance(tag, str) or not tag:
+        return False
+
+    # Matches opening, closing, or self-closing tags, ensuring the tag name is exact.
+    pattern = re.compile(
+        r'<\s*/?\s*' + re.escape(tag) + r'(?![A-Za-z0-9:-])[^>]*>',
+        re.IGNORECASE
+    )
+    return pattern.search(html_string) is not None
+
+
+def extract_tag_contents(html_string: str) -> Dict[str, Any]:
+    """"""
+    Parse an HTML-formatted string and return a nested dictionary structure
+    representing tags and their contents. This parser differentiates between
+    opening and closing tags and nests content correctly.
+
+    Structure:
+        {
+            ""type"": ""root"",
+            ""children"": [
+                {
+                    ""type"": ""element"",
+                    ""tag"": ""div"",
+                    ""attrs"": {""class"": ""container""},
+                    ""children"": [
+                        {""type"": ""text"", ""content"": ""Hello""},
+                        {
+                            ""type"": ""element"",
+                            ""tag"": ""span"",
+                            ""attrs"": {},
+                            ""children"": [{""type"": ""text"", ""content"": ""world""}]
+                        }
+                    ]
+                }
+            ]
+        }
+
+    Notes:
+    - Self-closing and void elements (e.g., br, img) are supported.
+    - Attributes are parsed into a dictionary; boolean attributes are set to None.
+    - This is a lightweight parser intended for well-formed HTML-like input.
+      Complex cases (script/style contents, malformed markup, comments) may require
+      a more robust HTML parser.
+
+    Args:
+        html_string: The HTML content as a string.
+
+    Returns:
+        A dictionary representing the parsed, nested structure of the HTML.
+    """"""
+    if not isinstance(html_string, str):
+        return {""type"": ""root"", ""children"": []}
+
+    VOID_TAGS = {
+        ""area"", ""base"", ""br"", ""col"", ""embed"", ""hr"", ""img"", ""input"",
+        ""link"", ""meta"", ""param"", ""source"", ""track"", ""wbr""
+    }
+
+    tag_re = re.compile(
+        r'(?s)<\s*(/)?\s*([A-Za-z][A-Za-z0-9:-]*)\b([^>]*)>',
+        re.IGNORECASE
+    )
+
+    def _parse_attributes(attr_text: str) -> Dict[str, Optional[str]]:
+        attrs: Dict[str, Optional[str]] = {}
+        # Attribute parsing regex: name[=value], where value can be quoted or bare.
+        attr_re = re.compile(r'''
+            (?P<name>[A-Za-z_:][A-Za-z0-9_.:-]*)
+            (?:\s*=\s*
+                (?:
+                    ""(?P<dq>[^""]*)""
+                  | '(?P<sq>[^\']*)'
+                  | (?P<bare>[^\s""\'=<>`]+)
+                )
+            )?
+        ''', re.VERBOSE | re.DOTALL)
+        for m in attr_re.finditer(attr_text):
+            name = m.group('name')
+            if not name:
+                continue
+            if m.group('dq') is not None:
+                attrs[name] = m.group('dq')
+            elif m.group('sq') is not None:
+                attrs[name] = m.group('sq')
+            elif m.group('bare') is not None:
+                attrs[name] = m.group('bare')
+            else:
+                # Boolean attribute (no value)
+                attrs[name] = None
+        return attrs
+
+    root: Dict[str, Any] = {""type"": ""root"", ""children"": []}
+    stack: List[Dict[str, Any]] = [root]
+
+    last_end = 0
+    for m in tag_re.finditer(html_string):
+        # Add text node for content before the tag
+        if m.start() > last_end:
+            text_segment = html_string[last_end:m.start()]
+            if text_segment:
+                # Preserve text nodes; skip if only whitespace? Keep as content for now.
+                stack[-1][""children""].append({""type"": ""text"", ""content"": text_segment})
+
+        is_closing = m.group(1) is not None
+        tag_name = m.group(2).lower()
+        raw_attr_text = m.group(3) or """"
+
+        # Determine if self-closing, either with a trailing '/' or known void tag
+        stripped = raw_attr_text.rstrip()
+        has_trailing_slash = stripped.endswith('/')
+        attr_text_for_parsing = stripped[:-1] if has_trailing_slash else raw_attr_text
+
+        if is_closing:
+            # Pop stack until matching tag is found
+            i = len(stack) - 1
+            while i > 0 and not (stack[i].get(""type"") == ""element"" and stack[i].get(""tag"") == tag_name):
+                i -= 1
+            if i > 0:
+                # Close all unclosed intermediate tags up to the matching one
+                del stack[i:]
+        else:
+            attrs = _parse_attributes(attr_text_for_parsing)
+            node: Dict[str, Any] = {
+                ""type"": ""element"",
+                ""tag"": tag_name,
+                ""attrs"": attrs,
+                ""children"": []
+            }
+            stack[-1][""children""].append(node)
+            # Only push non-void and non-self-closing elements
+            if not has_trailing_slash and tag_name not in VOID_TAGS:
+                stack.append(node)
+
+        last_end = m.end()
+
+    # Any trailing text after the last tag
+    if last_end < len(html_string):
+        tail_text = html_string[last_end:]
+        if tail_text:
+            stack[-1][""children""].append({""type"": ""text"", ""content"": tail_text})
+
+    # If there are unclosed tags, we consider them implicitly closed at the end.
+    # The remaining stack (beyond root) indicates unclosed tags; we can ignore as the tree is already built.
+
+    return root
+
+
+def get_html_tags(html_input: str) -> List[str]:
+    """"""
+    Extract all HTML tag names present in the given string using regular expressions.
+
+    Args:
+        html_input: The HTML-formatted input string.
+
+    Returns:
+        A list of tag names (lowercased) in the order they appear.
+        Both opening and closing tags contribute the same tag name.
+    """"""
+    if not isinstance(html_input, str):
+        return []
+
+    # Match opening, closing, or self-closing tags; ignore comments/doctype/PIs.
+    tag_pattern = re.compile(
+        r'<\s*/?\s*([A-Za-z][A-Za-z0-9:-]*)\b[^>]*>',
+        re.IGNORECASE | re.DOTALL
+    )
+    return [m.group(1).lower() for m in tag_pattern.finditer(html_input)]
+",gpt-5,0,[],[],[]
+f08a151e,editing,"[""I'm looking for a function named `get_html_tags` that can extract all URLs found in a given string of text using regular expressions. The function should take one argument - text: str, which is the input string, and return a list of URLs identified in the text. The following setup code will be provided:\n```\nimport re\n```\nPlease only output code and not your natural language commentary."", 'I think it would be useful to expand the scope. Could you modify the `get_html_tags` function to extract both URLs and email addresses from the input string using regex? It should still take the same argument - text: str - and return a list that includes both the URLs and any email addresses found. Continue using regex for this task.\nPlease only output code and not your natural language commentary.', 'Actually, I realize what I truly need is a focus on HTML parsing. Can you adjust the `get_html_tags` function to specifically extract HTML tags from a given HTML-formatted string using regular expressions? The function should take 1 argument - html_input: str, which is an HTML string, and return a list of all HTML tags identified within the input. Please ensure the function does not raise any exceptions during its operation.\n```\nPlease only output code and not your natural language commentary.']","import re
+
+_URL_PATTERN = re.compile(
+    r'(?i)\b(?:https?://|ftp://|www\.)[^\s""\'<>\]\)}]+(?<![.,!?;:])'
+)
+
+def get_html_tags(text: str):
+    """"""
+    Extract all URLs from the given text using regular expressions.
+
+    Args:
+        text (str): Input string possibly containing URLs.
+
+    Returns:
+        list[str]: List of URL strings found in the text, in scan order.
+    """"""
+    if not isinstance(text, str) or not text:
+        return []
+    return _URL_PATTERN.findall(text)
+","import re
+
+_COMBINED_PATTERN = re.compile(
+    r'(?i)(?:(?P<url>\b(?:https?://|ftp://|www\.)[^\s""\'<>\]\)}]+(?<![.,!?;:]))|'
+    r'(?P<email>\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b))'
+)
+
+def get_html_tags(text: str):
+    """"""
+    Extract all URLs and email addresses from the given text using regular expressions.
+
+    Args:
+        text (str): Input string possibly containing URLs and email addresses.
+
+    Returns:
+        list[str]: List of URL and email strings found in the text, in scan order.
+    """"""
+    if not isinstance(text, str) or not text:
+        return []
+    return [
+        m.group('url') if m.group('url') is not None else m.group('email')
+        for m in _COMBINED_PATTERN.finditer(text)
+    ]
+","import re
+
+_HTML_TAG_PATTERN = re.compile(
+    r'</?\s*[A-Za-z][A-Za-z0-9:_-]*'                       # tag name (start or end)
+    r'(?:\s+(?:[^\s""\'<>/=]+'                              # attribute name
+    r'(?:\s*=\s*(?:""[^""]*""|\'[^\']*\'|[^\s""\'=<>`]+))?'    # optional = value
+    r'))*\s*/?>',                                          # optional self-closing
+    re.IGNORECASE
+)
+
+def get_html_tags(html_input: str):
+    """"""
+    Extract all HTML tags from the given HTML-formatted string using regular expressions.
+
+    Args:
+        html_input (str): Input HTML string.
+
+    Returns:
+        list[str]: List of HTML tag strings found in the input, in scan order.
+    """"""
+    try:
+        if not isinstance(html_input, str) or not html_input:
+            return []
+        return [m.group(0) for m in _HTML_TAG_PATTERN.finditer(html_input)]
+    except Exception:
+        return []
+",gpt-5,0,[],[],[]
+f08a151e,refactor,"[""Develop a function that belongs to an HTML parsing module, which is responsible for extracting HTML tags from a provided string using a regular expression. The function needs to return a list of tags identified in the input string. The function's name should be get_html_tags. The function should take 1 argument, i.e., - html_input: str, an HTML-formatted string as input. The function should return a list containing the tags that are present within the input HTML string. The function should not raise any exceptions under normal operation. The following setup code will be provided to you:\n```\nimport re\n```\n\nHere's some additional context about the imported packages and global variables: None \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's ensure the function adheres to the PEP-8 style guide for better readability. Could you make changes to any indentations, add strategic blank lines between different logical sections, and improve the naming of any intermediate variables for clarity?\nPlease only output code and not your natural language commentary."", 'Could we enhance the function to include logging support? Initialize logging to capture both the input HTML string and the list of extracted tags, so that we can keep track of what inputs the function processes and what outputs it produces.\n```\nPlease only output code and not your natural language commentary.']","import re
+
+# Pre-compiled regex to match start tags, end tags, and self-closing tags.
+# Excludes comments (<!-- -->), doctypes (<!DOCTYPE ...>), and processing instructions (<? ... ?>).
+_TAG_REGEX = re.compile(r""</?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?>"")
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extract HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: An HTML-formatted string.
+
+    Returns:
+        A list of matched HTML tags (as strings) found in the input.
+    """"""
+    try:
+        if not isinstance(html_input, str):
+            html_input = str(html_input)
+        if not html_input:
+            return []
+        return _TAG_REGEX.findall(html_input)
+    except Exception:
+        # Do not raise exceptions under normal operation; return empty list on unexpected errors.
+        return []
+","""""""
+HTML parsing utilities for extracting tags using regular expressions.
+""""""
+
+import re
+
+
+# Pre-compiled regex to match start tags, end tags, and self-closing tags.
+# Excludes comments (<!-- -->), doctypes (<!DOCTYPE ...>), and processing
+# instructions (<? ... ?>).
+HTML_TAG_PATTERN = re.compile(r""</?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?>"")
+
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extract HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: An HTML-formatted string.
+
+    Returns:
+        A list of matched HTML tags (as strings) found in the input.
+    """"""
+    try:
+        html_text = html_input if isinstance(html_input, str) else str(html_input)
+
+        if not html_text:
+            return []
+
+        matched_tags = HTML_TAG_PATTERN.findall(html_text)
+        return matched_tags
+
+    except Exception:
+        # Do not raise exceptions under normal operation; return empty list on unexpected errors.
+        return []
+","""""""
+HTML parsing utilities for extracting tags using regular expressions.
+""""""
+
+import logging
+import re
+
+
+# Initialize logging configuration if not already configured.
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format=""%(asctime)s %(levelname)s %(name)s: %(message)s"",
+    )
+
+
+# Pre-compiled regex to match start tags, end tags, and self-closing tags.
+# Excludes comments (<!-- -->), doctypes (<!DOCTYPE ...>), and processing
+# instructions (<? ... ?>).
+HTML_TAG_PATTERN = re.compile(r""</?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?>"")
+
+LOGGER = logging.getLogger(__name__)
+
+
+def get_html_tags(html_input: str) -> list:
+    """"""
+    Extract HTML tags from a provided string using a regular expression.
+
+    Args:
+        html_input: An HTML-formatted string.
+
+    Returns:
+        A list of matched HTML tags (as strings) found in the input.
+    """"""
+    try:
+        html_text = html_input if isinstance(html_input, str) else str(html_input)
+        LOGGER.info(""get_html_tags input: %r"", html_text)
+
+        if not html_text:
+            LOGGER.info(""get_html_tags output tags: []"")
+            return []
+
+        matched_tags = HTML_TAG_PATTERN.findall(html_text)
+        LOGGER.info(""get_html_tags output tags: %s"", matched_tags)
+
+        return matched_tags
+
+    except Exception:
+        LOGGER.exception(""Unexpected error in get_html_tags"")
+        # Do not raise exceptions under normal operation; return empty list on unexpected errors.
+        return []
+",gpt-5,0,[],[],[]

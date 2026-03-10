@@ -1,0 +1,770 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+cb76bb9b,expansion,"[""I'm working on a project that involves handling URLs for various resources. Could you help me create a function called `validate_url`? This function should take a single argument `url` as a string and return a boolean indicating whether the URL is valid. If the URL is invalid, it should raise a ValueError. Please import any necessary libraries for URL validation.\nPlease only output code and not your natural language commentary."", 'Now that we have URL validation in place, I need to construct paths for different types of resources. Could you create a function called `construct_resource_path` that takes `res_id` (string) and `res_type` (string) as arguments and returns a string representing the path for the resource? This will help us organize resources by type and identifier.\nPlease only output code and not your natural language commentary.', ""Building on our URL handling capabilities, I need a function to generate complete URLs for resources hosted on a CDN. Could you write a function called `create_resource_url` that takes `base_cdn_url` (string), `res_id` (string), and `res_type` (string) as arguments and returns a complete URL for the resource as a string? The function should check if the base domain is in an allowed list, raising ValueError if it is not. Use this setup code:\n```python\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}\n```\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used to handle URL parsing and construction., - `ALLOWED_CDN_DOMAINS`: a predefined set of domains considered valid for CDNs.\nPlease only output code and not your natural language commentary.""]","import re
+import ipaddress
+from urllib.parse import urlsplit
+
+
+def validate_url(url: str) -> bool:
+    """"""
+    Validate a URL string.
+
+    Returns:
+        True if the URL is valid.
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""URL must be a string"")
+
+    s = url.strip()
+    if not s:
+        raise ValueError(""URL must be a non-empty string"")
+    # Reject urls with whitespace/control characters
+    if any(c.isspace() for c in s):
+        raise ValueError(""URL must not contain whitespace characters"")
+
+    sr = urlsplit(s)
+
+    if not sr.scheme:
+        raise ValueError(""URL is missing a scheme"")
+
+    scheme = sr.scheme.lower()
+
+    network_schemes = {""http"", ""https"", ""ftp"", ""ftps"", ""ws"", ""wss""}
+    file_schemes = {""file""}
+
+    if scheme in network_schemes:
+        # Must have a hostname
+        hostname = sr.hostname
+        if not hostname:
+            raise ValueError(""URL is missing a host"")
+
+        if not _is_valid_hostname(hostname):
+            raise ValueError(""URL host is invalid"")
+
+        # Validate port if present
+        try:
+            port = sr.port
+        except ValueError:
+            raise ValueError(""URL port is invalid"")
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError(""URL port is out of range"")
+
+    elif scheme in file_schemes:
+        # file:// may have a host (UNC) or be local; must have a path or a netloc
+        if not sr.path and not sr.netloc:
+            raise ValueError(""file URL must include a path or network location"")
+        # If a hostname is present in file URL, validate it
+        if sr.hostname and not _is_valid_hostname(sr.hostname):
+            raise ValueError(""file URL host is invalid"")
+    else:
+        raise ValueError(f""Unsupported URL scheme: {scheme}"")
+
+    return True
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    """"""
+    Validate a hostname which may be:
+    - IPv4 or IPv6 address
+    - Domain name (including IDN/Unicode via IDNA)
+    - 'localhost'
+    """"""
+    if not hostname:
+        return False
+
+    # Accept localhost
+    if hostname.lower() == ""localhost"":
+        return True
+
+    # Try IP address (IPv4 or IPv6)
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # Colons are not allowed in regular hostnames (only in IPv6 addressed above)
+    if "":"" in hostname:
+        return False
+
+    # Convert Unicode domains to ASCII using IDNA (punycode)
+    try:
+        ascii_hostname = hostname.encode(""idna"").decode(""ascii"")
+    except Exception:
+        return False
+
+    if len(ascii_hostname) > 253:
+        return False
+
+    labels = ascii_hostname.split(""."")
+    # Disallow empty labels (no leading/trailing/consecutive dots)
+    if any(label == """" for label in labels):
+        return False
+
+    label_re = re.compile(r""^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"")
+    for label in labels:
+        if len(label) > 63:
+            return False
+        if not label_re.match(label):
+            return False
+
+    return True
+","import re
+import ipaddress
+from urllib.parse import urlsplit
+
+
+def validate_url(url: str) -> bool:
+    """"""
+    Validate a URL string.
+
+    Returns:
+        True if the URL is valid.
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""URL must be a string"")
+
+    s = url.strip()
+    if not s:
+        raise ValueError(""URL must be a non-empty string"")
+    # Reject urls with whitespace/control characters
+    if any(c.isspace() for c in s):
+        raise ValueError(""URL must not contain whitespace characters"")
+
+    sr = urlsplit(s)
+
+    if not sr.scheme:
+        raise ValueError(""URL is missing a scheme"")
+
+    scheme = sr.scheme.lower()
+
+    network_schemes = {""http"", ""https"", ""ftp"", ""ftps"", ""ws"", ""wss""}
+    file_schemes = {""file""}
+
+    if scheme in network_schemes:
+        # Must have a hostname
+        hostname = sr.hostname
+        if not hostname:
+            raise ValueError(""URL is missing a host"")
+
+        if not _is_valid_hostname(hostname):
+            raise ValueError(""URL host is invalid"")
+
+        # Validate port if present
+        try:
+            port = sr.port
+        except ValueError:
+            raise ValueError(""URL port is invalid"")
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError(""URL port is out of range"")
+
+    elif scheme in file_schemes:
+        # file:// may have a host (UNC) or be local; must have a path or a netloc
+        if not sr.path and not sr.netloc:
+            raise ValueError(""file URL must include a path or network location"")
+        # If a hostname is present in file URL, validate it
+        if sr.hostname and not _is_valid_hostname(sr.hostname):
+            raise ValueError(""file URL host is invalid"")
+    else:
+        raise ValueError(f""Unsupported URL scheme: {scheme}"")
+
+    return True
+
+
+def construct_resource_path(res_id: str, res_type: str) -> str:
+    """"""
+    Construct a path for a resource organized by type and identifier.
+
+    The path format is: ""<res_type>/<res_id>""
+
+    Both res_type and res_id must be non-empty strings without whitespace,
+    path separators, or traversal segments.
+
+    Raises:
+        ValueError: If either input is invalid.
+    """"""
+    type_seg = _validate_path_segment(res_type, ""res_type"")
+    id_seg = _validate_path_segment(res_id, ""res_id"")
+    return f""{type_seg}/{id_seg}""
+
+
+def _validate_path_segment(segment: str, seg_name: str) -> str:
+    if not isinstance(segment, str):
+        raise ValueError(f""{seg_name} must be a string"")
+    s = segment.strip()
+    if not s:
+        raise ValueError(f""{seg_name} must be a non-empty string"")
+    if any(ch.isspace() for ch in s):
+        raise ValueError(f""{seg_name} must not contain whitespace characters"")
+    if ""\x00"" in s:
+        raise ValueError(f""{seg_name} must not contain NUL characters"")
+    if ""/"" in s or ""\\"" in s:
+        raise ValueError(f""{seg_name} must not contain path separators"")
+    if s in {""."", ""..""}:
+        raise ValueError(f""{seg_name} must not be '.' or '..'"")
+    return s
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    """"""
+    Validate a hostname which may be:
+    - IPv4 or IPv6 address
+    - Domain name (including IDN/Unicode via IDNA)
+    - 'localhost'
+    """"""
+    if not hostname:
+        return False
+
+    # Accept localhost
+    if hostname.lower() == ""localhost"":
+        return True
+
+    # Try IP address (IPv4 or IPv6)
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # Colons are not allowed in regular hostnames (only in IPv6 addressed above)
+    if "":"" in hostname:
+        return False
+
+    # Convert Unicode domains to ASCII using IDNA (punycode)
+    try:
+        ascii_hostname = hostname.encode(""idna"").decode(""ascii"")
+    except Exception:
+        return False
+
+    if len(ascii_hostname) > 253:
+        return False
+
+    labels = ascii_hostname.split(""."")
+    # Disallow empty labels (no leading/trailing/consecutive dots)
+    if any(label == """" for label in labels):
+        return False
+
+    label_re = re.compile(r""^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"")
+    for label in labels:
+        if len(label) > 63:
+            return False
+        if not label_re.match(label):
+            return False
+
+    return True
+","import re
+import ipaddress
+from urllib.parse import urlsplit
+import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def validate_url(url: str) -> bool:
+    """"""
+    Validate a URL string.
+
+    Returns:
+        True if the URL is valid.
+
+    Raises:
+        ValueError: If the URL is invalid.
+    """"""
+    if not isinstance(url, str):
+        raise ValueError(""URL must be a string"")
+
+    s = url.strip()
+    if not s:
+        raise ValueError(""URL must be a non-empty string"")
+    # Reject urls with whitespace/control characters
+    if any(c.isspace() for c in s):
+        raise ValueError(""URL must not contain whitespace characters"")
+
+    sr = urlsplit(s)
+
+    if not sr.scheme:
+        raise ValueError(""URL is missing a scheme"")
+
+    scheme = sr.scheme.lower()
+
+    network_schemes = {""http"", ""https"", ""ftp"", ""ftps"", ""ws"", ""wss""}
+    file_schemes = {""file""}
+
+    if scheme in network_schemes:
+        # Must have a hostname
+        hostname = sr.hostname
+        if not hostname:
+            raise ValueError(""URL is missing a host"")
+
+        if not _is_valid_hostname(hostname):
+            raise ValueError(""URL host is invalid"")
+
+        # Validate port if present
+        try:
+            port = sr.port
+        except ValueError:
+            raise ValueError(""URL port is invalid"")
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError(""URL port is out of range"")
+
+    elif scheme in file_schemes:
+        # file:// may have a host (UNC) or be local; must have a path or a netloc
+        if not sr.path and not sr.netloc:
+            raise ValueError(""file URL must include a path or network location"")
+        # If a hostname is present in file URL, validate it
+        if sr.hostname and not _is_valid_hostname(sr.hostname):
+            raise ValueError(""file URL host is invalid"")
+    else:
+        raise ValueError(f""Unsupported URL scheme: {scheme}"")
+
+    return True
+
+
+def construct_resource_path(res_id: str, res_type: str) -> str:
+    """"""
+    Construct a path for a resource organized by type and identifier.
+
+    The path format is: ""<res_type>/<res_id>""
+
+    Both res_type and res_id must be non-empty strings without whitespace,
+    path separators, or traversal segments.
+
+    Raises:
+        ValueError: If either input is invalid.
+    """"""
+    type_seg = _validate_path_segment(res_type, ""res_type"")
+    id_seg = _validate_path_segment(res_id, ""res_id"")
+    return f""{type_seg}/{id_seg}""
+
+
+def create_resource_url(base_cdn_url: str, res_id: str, res_type: str) -> str:
+    """"""
+    Create a complete CDN resource URL from base URL, type, and id.
+
+    Validates:
+      - base_cdn_url is a valid URL
+      - base domain is in ALLOWED_CDN_DOMAINS
+
+    Returns:
+      A fully constructed URL string.
+
+    Raises:
+      ValueError on any validation failure.
+    """"""
+    if not isinstance(base_cdn_url, str):
+        raise ValueError(""base_cdn_url must be a string"")
+
+    # Validate the base URL format first
+    validate_url(base_cdn_url)
+
+    sr = urllib.parse.urlsplit(base_cdn_url.strip())
+    hostname = sr.hostname
+    if not hostname:
+        raise ValueError(""Base CDN URL is missing a host"")
+
+    # Normalize hostname for comparison (IDNA/ASCII, lowercase)
+    try:
+        ascii_host = hostname.encode(""idna"").decode(""ascii"").lower()
+    except Exception:
+        raise ValueError(""Base CDN URL host is invalid"")
+
+    if ascii_host not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Base CDN domain is not allowed"")
+
+    # Build resource path safely
+    resource_path = construct_resource_path(res_id, res_type)
+
+    # Join base path and resource path
+    base_path = sr.path or """"
+    if base_path.endswith(""/""):
+        new_path = base_path + resource_path
+    elif base_path == """":
+        new_path = ""/"" + resource_path
+    else:
+        new_path = base_path + ""/"" + resource_path
+
+    # Reconstruct the URL, preserving query and fragment if present
+    return urllib.parse.urlunsplit((sr.scheme, sr.netloc, new_path, sr.query, sr.fragment))
+
+
+def _validate_path_segment(segment: str, seg_name: str) -> str:
+    if not isinstance(segment, str):
+        raise ValueError(f""{seg_name} must be a string"")
+    s = segment.strip()
+    if not s:
+        raise ValueError(f""{seg_name} must be a non-empty string"")
+    if any(ch.isspace() for ch in s):
+        raise ValueError(f""{seg_name} must not contain whitespace characters"")
+    if ""\x00"" in s:
+        raise ValueError(f""{seg_name} must not contain NUL characters"")
+    if ""/"" in s or ""\\"" in s:
+        raise ValueError(f""{seg_name} must not contain path separators"")
+    if s in {""."", ""..""}:
+        raise ValueError(f""{seg_name} must not be '.' or '..'"")
+    return s
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    """"""
+    Validate a hostname which may be:
+    - IPv4 or IPv6 address
+    - Domain name (including IDN/Unicode via IDNA)
+    - 'localhost'
+    """"""
+    if not hostname:
+        return False
+
+    # Accept localhost
+    if hostname.lower() == ""localhost"":
+        return True
+
+    # Try IP address (IPv4 or IPv6)
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # Colons are not allowed in regular hostnames (only in IPv6 addressed above)
+    if "":"" in hostname:
+        return False
+
+    # Convert Unicode domains to ASCII using IDNA (punycode)
+    try:
+        ascii_hostname = hostname.encode(""idna"").decode(""ascii"")
+    except Exception:
+        return False
+
+    if len(ascii_hostname) > 253:
+        return False
+
+    labels = ascii_hostname.split(""."")
+    # Disallow empty labels (no leading/trailing/consecutive dots)
+    if any(label == """" for label in labels):
+        return False
+
+    label_re = re.compile(r""^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"")
+    for label in labels:
+        if len(label) > 63:
+            return False
+        if not label_re.match(label):
+            return False
+
+    return True
+",gpt-5,0,[],[],[]
+cb76bb9b,editing,"['I\'m trying to create a simple utility that constructs a URL from a base URL and a path. Could you help me write a function called \'build_url\'? It should take two arguments: \'base_url\' (string) and \'path\' (string), and return the full URL as a string. Let\'s keep it straightforward for now, just focusing on concatenating the base URL with the path.""\nPlease only output code and not your natural language commentary.', 'I\'d like to enhance the URL builder to categorize resources by type. Can you modify the function to accept a third argument, \'res_type\', which is a string indicating the type of resource (like \'image\' or \'script\')? Name the function \'build_resource_url\'. Besides creating the full URL from \'base_url\' and \'path\', it should prepend the resource type to the path. Return the complete URL as a string.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function specifically targeted for constructing URLs to retrieve resources from a CDN with some strict rules. Let\'s create a function called \'create_resource_url\'. It should take three arguments: \'base_cdn_url\' (the base address of the CDN), \'res_id\' (the unique identifier of the resource), and \'res_type\' (the kind of resource, e.g., \'image\' or \'script\'). Here\'s the heavy task: The URL must be built using \'urllib.parse\', and it must validate the base URL against a predefined set of allowed CDN domains. Raise a ValueError if the constructed URL is not associated with any allowed CDN domains. The following setup code will be provided:\n```\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {\'cdn.example.com\', \'assets.example.net\', \'static.example.org\'}\n```\nHere\'s some additional context about the imported packages and global variables: - `urllib.parse`: used to handle URL parsing and construction., - `ALLOWED_CDN_DOMAINS`: a predefined set of domains considered valid for CDNs.""\nPlease only output code and not your natural language commentary.']","def build_url(base_url: str, path: str) -> str:
+    """"""
+    Build a full URL by concatenating base_url and path.
+
+    This function performs simple string concatenation without adding/removing slashes.
+    """"""
+    return f""{base_url}{path}""
+","def build_resource_url(base_url: str, path: str, res_type: str) -> str:
+    """"""
+    Build a full URL by concatenating base_url with the resource type and path.
+
+    This function performs simple string concatenation without adding/removing slashes.
+    The resulting URL is base_url + res_type + path.
+    """"""
+    return f""{base_url}{res_type}{path}""
+","import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def build_resource_url(base_url: str, path: str, res_type: str) -> str:
+    """"""
+    Build a full URL by concatenating base_url with the resource type and path.
+
+    This function performs simple string concatenation without adding/removing slashes.
+    The resulting URL is base_url + res_type + path.
+    """"""
+    return f""{base_url}{res_type}{path}""
+
+
+def create_resource_url(base_cdn_url: str, res_id: str, res_type: str) -> str:
+    """"""
+    Create a CDN resource URL using urllib.parse with validation against allowed domains.
+
+    The resulting URL will have the form:
+        base_cdn_url + ""/"" + res_type + ""/"" + res_id
+
+    Validation:
+        - The base_cdn_url must parse to a hostname that is in ALLOWED_CDN_DOMAINS.
+        - The final constructed URL must also resolve to a hostname in ALLOWED_CDN_DOMAINS.
+    """"""
+    parsed_base = urllib.parse.urlparse(base_cdn_url)
+
+    # Validate that base URL has a hostname and is in the allowed set
+    if not parsed_base.hostname or parsed_base.hostname not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Base CDN URL is not allowed"")
+
+    # Normalize base for joining
+    base_for_join = base_cdn_url if base_cdn_url.endswith(""/"") else base_cdn_url + ""/""
+
+    # Build relative path parts safely
+    res_type_clean = res_type.strip(""/"")
+    res_id_clean = res_id.strip(""/"")
+
+    relative_path = f""{res_type_clean}/{res_id_clean}""
+
+    # Construct full URL using urllib.parse
+    full_url = urllib.parse.urljoin(base_for_join, relative_path)
+
+    # Validate the final URL's hostname
+    final_parsed = urllib.parse.urlparse(full_url)
+    if not final_parsed.hostname or final_parsed.hostname not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Constructed URL is not associated with an allowed CDN domain"")
+
+    return full_url
+",gpt-5,0,[],[],[]
+cb76bb9b,refactor,"[""This function is tasked with building a URL to retrieve certain types of resources (like images or scripts) hosted on external servers, using the base URL of a CDN and a user-defined resource identifier. The function's name should be create_resource_url. The function should take 3 arguments, i.e., - `base_cdn_url`: a string denoting the base URL of the CDN., - `res_id`: a string specifying the unique identifier of the resource., - `res_type`: a string indicating the kind of resource (e.g., 'image' or 'script'). The function should return Returns a string that forms the complete URL for the resource on the CDN. The function should raise - `ValueError`: if the constructed URL is not associated with any allowed CDN domains. The following setup code will be provided to you:\n```\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}\n```\n\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used to handle URL parsing and construction., - `ALLOWED_CDN_DOMAINS`: a predefined set of domains considered valid for CDNs \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this code to improve its maintainability. Could we extract the URL construction and domain validation into separate pure functions? This would help in making the code more modular and easier to test, while keeping the main create_resource_url function's signature unchanged.\nPlease only output code and not your natural language commentary."", ""Could we enhance the code's readability by following PEP-8 guidelines, such as using 4 spaces for indentation and adding comprehensive docstrings? Additionally, let's add logging support to track the URL construction process, including the base URL, resource type, and final constructed URL.\nPlease only output code and not your natural language commentary.""]","import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def create_resource_url(base_cdn_url: str, res_id: str, res_type: str) -> str:
+    """"""
+    Build a CDN resource URL from a base CDN URL, a resource identifier, and a resource type.
+
+    Args:
+        base_cdn_url: The base URL of the CDN (e.g., ""https://cdn.example.com/assets/"").
+        res_id: The unique identifier of the resource.
+        res_type: The kind of resource (e.g., ""image"", ""script"").
+
+    Returns:
+        A string containing the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any allowed CDN domains.
+    """"""
+    # Parse and validate the base CDN URL host against allowed domains
+    parsed = urllib.parse.urlparse(base_cdn_url.strip() if base_cdn_url is not None else """")
+    hostname = parsed.hostname
+    if not hostname or hostname not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Constructed URL is not associated with any allowed CDN domains."")
+
+    # Safely encode path components
+    type_component = urllib.parse.quote(res_type or """", safe=""-._~"")
+    id_component = urllib.parse.quote(res_id or """", safe=""-._~"")
+
+    # Ensure base path ends with a slash before appending segments
+    base_path = parsed.path or """"
+    if not base_path.endswith(""/""):
+        base_path = (base_path + ""/"") if base_path else ""/""
+
+    # Construct the new path
+    new_path = f""{base_path}{type_component}/{id_component}""
+
+    # Reassemble the URL, clearing params/query/fragment for a clean resource URL
+    final_parts = parsed._replace(path=new_path, params="""", query="""", fragment="""")
+    return urllib.parse.urlunparse(final_parts)
+","import urllib.parse
+from typing import Set
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def _is_allowed_cdn_domain(hostname: str, allowed_domains: Set[str]) -> bool:
+    """"""
+    Check if the given hostname is within the allowed CDN domains.
+
+    Args:
+        hostname: The hostname extracted from the base CDN URL.
+        allowed_domains: A set of allowed CDN domain names.
+
+    Returns:
+        True if the hostname is allowed, False otherwise.
+    """"""
+    return bool(hostname) and hostname in allowed_domains
+
+
+def _construct_resource_url(parsed_base: urllib.parse.ParseResult, res_type: str, res_id: str) -> str:
+    """"""
+    Construct the final resource URL by combining the parsed base URL with encoded path segments.
+
+    Args:
+        parsed_base: The parsed result of the base CDN URL.
+        res_type: The kind of resource (e.g., ""image"", ""script"").
+        res_id: The unique identifier of the resource.
+
+    Returns:
+        The fully constructed resource URL as a string.
+    """"""
+    # Safely encode path components
+    type_component = urllib.parse.quote(res_type or """", safe=""-._~"")
+    id_component = urllib.parse.quote(res_id or """", safe=""-._~"")
+
+    # Ensure base path ends with a slash before appending segments
+    base_path = parsed_base.path or """"
+    if not base_path.endswith(""/""):
+        base_path = (base_path + ""/"") if base_path else ""/""
+
+    # Construct the new path
+    new_path = f""{base_path}{type_component}/{id_component}""
+
+    # Reassemble the URL, clearing params/query/fragment for a clean resource URL
+    final_parts = parsed_base._replace(path=new_path, params="""", query="""", fragment="""")
+    return urllib.parse.urlunparse(final_parts)
+
+
+def create_resource_url(base_cdn_url: str, res_id: str, res_type: str) -> str:
+    """"""
+    Build a CDN resource URL from a base CDN URL, a resource identifier, and a resource type.
+
+    Args:
+        base_cdn_url: The base URL of the CDN (e.g., ""https://cdn.example.com/assets/"").
+        res_id: The unique identifier of the resource.
+        res_type: The kind of resource (e.g., ""image"", ""script"").
+
+    Returns:
+        A string containing the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any allowed CDN domains.
+    """"""
+    # Parse and validate the base CDN URL host against allowed domains
+    parsed = urllib.parse.urlparse(base_cdn_url.strip() if base_cdn_url is not None else """")
+    hostname = parsed.hostname
+    if not _is_allowed_cdn_domain(hostname, ALLOWED_CDN_DOMAINS):
+        raise ValueError(""Constructed URL is not associated with any allowed CDN domains."")
+
+    # Build and return the resource URL
+    return _construct_resource_url(parsed, res_type, res_id)
+","""""""
+Utilities for constructing validated CDN resource URLs.
+
+This module provides functions to build a complete URL for resources
+(e.g., images or scripts) hosted on a CDN. It validates that the base
+URL belongs to an allowed domain and assembles the final resource URL
+in a safe and predictable manner. Logging is used to trace the URL
+construction process.
+""""""
+
+import logging
+import urllib.parse
+from typing import Set
+
+# Module logger setup (library-friendly)
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def _is_allowed_cdn_domain(hostname: str, allowed_domains: Set[str]) -> bool:
+    """"""
+    Determine whether a hostname belongs to a set of allowed CDN domains.
+
+    This is a pure function: it does not mutate any state and its return
+    value depends solely on its inputs.
+
+    Args:
+        hostname: The hostname extracted from the base CDN URL. May be None.
+        allowed_domains: A set of allowed CDN domain names.
+
+    Returns:
+        True if hostname is non-empty and is present in allowed_domains;
+        False otherwise.
+    """"""
+    return bool(hostname) and hostname in allowed_domains
+
+
+def _construct_resource_url(
+    parsed_base: urllib.parse.ParseResult,
+    res_type: str,
+    res_id: str
+) -> str:
+    """"""
+    Construct the final resource URL by combining the parsed base URL with
+    encoded path segments.
+
+    This is a pure function: it does not mutate any state and always
+    returns a value derived from its inputs.
+
+    Args:
+        parsed_base: The parsed result of the base CDN URL.
+        res_type: The type/category of the resource (e.g., ""image"", ""script"").
+        res_id: The unique identifier of the resource.
+
+    Returns:
+        The fully constructed resource URL as a string.
+    """"""
+    # Safely encode path components
+    type_component = urllib.parse.quote(res_type or """", safe=""-._~"")
+    id_component = urllib.parse.quote(res_id or """", safe=""-._~"")
+
+    # Ensure base path ends with a slash before appending segments
+    base_path = parsed_base.path or """"
+    if not base_path.endswith(""/""):
+        base_path = (base_path + ""/"") if base_path else ""/""
+
+    logger.debug(
+        ""Constructing resource path with base_path=%r, type_component=%r, ""
+        ""id_component=%r"",
+        base_path, type_component, id_component
+    )
+
+    # Construct the new path
+    new_path = f""{base_path}{type_component}/{id_component}""
+
+    # Reassemble the URL, clearing params/query/fragment for a clean resource URL
+    final_parts = parsed_base._replace(path=new_path, params="""", query="""", fragment="""")
+    final_url = urllib.parse.urlunparse(final_parts)
+
+    logger.info(""Constructed CDN resource URL: %s"", final_url)
+    return final_url
+
+
+def create_resource_url(base_cdn_url: str, res_id: str, res_type: str) -> str:
+    """"""
+    Build a CDN resource URL from a base CDN URL, a resource identifier, and
+    a resource type.
+
+    The function:
+      - Validates that the base URL's hostname is one of the allowed
+        CDN domains.
+      - Encodes the resource type and identifier for safe URL inclusion.
+      - Constructs and returns the final resource URL.
+
+    Logging:
+      - Debug logs include the input parameters and parsing details.
+      - An info log records the final constructed URL.
+
+    Args:
+        base_cdn_url: The base URL of the CDN (e.g., ""https://cdn.example.com/assets/"").
+        res_id: The unique identifier of the resource.
+        res_type: The kind of resource (e.g., ""image"", ""script"").
+
+    Returns:
+        A string containing the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any
+        allowed CDN domains.
+    """"""
+    logger.debug(
+        ""Starting create_resource_url with base_cdn_url=%r, res_type=%r, res_id=%r"",
+        base_cdn_url, res_type, res_id
+    )
+
+    # Parse and validate the base CDN URL host against allowed domains
+    parsed = urllib.parse.urlparse(base_cdn_url.strip() if base_cdn_url is not None else """")
+    hostname = parsed.hostname
+    logger.debug(""Parsed base URL: scheme=%r, hostname=%r, path=%r"", parsed.scheme, hostname, parsed.path)
+
+    if not _is_allowed_cdn_domain(hostname, ALLOWED_CDN_DOMAINS):
+        logger.error(
+            ""Disallowed or missing CDN domain: hostname=%r; allowed=%r"",
+            hostname, ALLOWED_CDN_DOMAINS
+        )
+        raise ValueError(""Constructed URL is not associated with any allowed CDN domains."")
+
+    # Build and return the resource URL
+    return _construct_resource_url(parsed, res_type, res_id)
+",gpt-5,0,[],[],[]

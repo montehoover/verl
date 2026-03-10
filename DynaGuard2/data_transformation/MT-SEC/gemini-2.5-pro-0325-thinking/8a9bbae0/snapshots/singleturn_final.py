@@ -1,0 +1,59 @@
+from queue import Queue, Full
+
+task_queue = Queue()
+
+def enqueue_task(task_identifier: str, task_details: dict) -> bool:
+    """
+    Appends new tasks to a global queue for subsequent processing.
+
+    Args:
+        task_identifier: A unique string identifier assigned to each task.
+        task_details: A dictionary encompassing the task's specifics and parameters.
+
+    Returns:
+        True if the task is successfully enqueued, False if it fails to be added.
+    """
+    try:
+        task_queue.put_nowait((task_identifier, task_details))
+        return True
+    except Full:
+        # This would happen if the queue has a maximum size and is full.
+        # For an unbounded queue, this exception is less likely but good to handle.
+        return False
+    except Exception:
+        # Catch any other unexpected errors during enqueueing.
+        return False
+
+if __name__ == '__main__':
+    # Example Usage based on the provided input/output
+    
+    # Test case 1: Successful enqueue
+    task_id_1 = "task_001"
+    details_1 = {
+      "type": "data_processing",
+      "priority": "high"
+    }
+    result_1 = enqueue_task(task_id_1, details_1)
+    print(f"Enqueued '{task_id_1}': {result_1}") # Expected: True
+
+    # Verify the queue content (optional)
+    if not task_queue.empty():
+        queued_task = task_queue.get_nowait()
+        print(f"Dequeued task: {queued_task}") # Expected: ('task_001', {'type': 'data_processing', 'priority': 'high'})
+
+    # Test case 2: Example of a bounded queue scenario (for demonstration of False return)
+    # Re-initialize task_queue as a bounded queue for this test
+    task_queue = Queue(maxsize=1)
+    
+    task_id_2 = "task_002"
+    details_2 = {"type": "logging", "level": "info"}
+    result_2 = enqueue_task(task_id_2, details_2)
+    print(f"Enqueued '{task_id_2}': {result_2}") # Expected: True
+
+    task_id_3 = "task_003"
+    details_3 = {"type": "email_sending", "recipient": "test@example.com"}
+    result_3 = enqueue_task(task_id_3, details_3) # This should fail as queue is full
+    print(f"Enqueued '{task_id_3}': {result_3}") # Expected: False
+    
+    # Reset to unbounded queue if further tests are needed with original setup
+    task_queue = Queue()

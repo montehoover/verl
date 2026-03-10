@@ -1,0 +1,32 @@
+USERS = {
+    1: {"user_id": 1, "role": "admin", "subscription_level": "premium"},
+    2: {"user_id": 2, "role": "user", "subscription_level": "basic"},
+    3: {"user_id": 3, "role": "user", "subscription_level": "basic"},
+    4: {"user_id": 4, "role": "user", "subscription_level": "premium"}
+}
+
+CONTENT = {
+    100: {"title": "Basic Content 1", "required_level": "basic"},
+    101: {"title": "Basic Content 2", "required_level": "basic"},
+    200: {"title": "Premium Content 1", "required_level": "premium"},
+    201: {"title": "Premium Content 2", "required_level": "premium"}
+}
+
+def can_access_level(user_id, required_level):
+    # Check if user exists
+    if user_id not in USERS:
+        return False
+    
+    user = USERS[user_id]
+    
+    # Admins can access everything
+    if user["role"] == "admin":
+        return True
+    
+    # Check subscription level hierarchy
+    if required_level == "basic":
+        return True  # All users can access basic content
+    elif required_level == "premium":
+        return user["subscription_level"] == "premium"
+    
+    return False

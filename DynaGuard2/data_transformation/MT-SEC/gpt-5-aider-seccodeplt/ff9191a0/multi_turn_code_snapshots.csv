@@ -1,0 +1,1184 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+ff9191a0,expansion,"[""I'm working on a project that involves processing mathematical expressions. Could you help me write a function called parse_expression that takes a string representing a mathematical expression and returns a list of tokens, including numbers, operators, and variable names? This will help in breaking down the expression for further processing. Please include the necessary import for regular expressions:\n\n```python\nimport re\n```\nPlease only output code and not your natural language commentary."", 'Thanks for setting up the expression parsing. Now, I want to add functionality to substitute variables in the expression with their corresponding values. Could you create a function called substitute_variables that takes a list of tokens and a dictionary mapping variable names to their values, then returns a new list of tokens with variables replaced by their values? Please add the necessary import for handling data types:\n\n```python\nfrom typing import List, Dict, Union\n```\nPlease only output code and not your natural language commentary.', ""To complete the expression processing tool, I need a function that can evaluate and simplify the entire expression securely. Could you develop a function named evaluate_expression_safely that takes a mathematical expression as a string and a dictionary mapping variables to their values, then returns the computed result as a string? It should raise a ValueError if the expression is invalid or computation fails. Below is the required setup code:\n\n```python\nimport re\nimport operator\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: - Relevant modules: re, operator for basic string parsing and mathematical operations, - AST (Abstract Syntax Tree) module for securely parsing expressions\nPlease only output code and not your natural language commentary.""]","import re
+from typing import List
+
+# Precompiled regular expression for tokenizing mathematical expressions.
+# Tokens include:
+# - NUMBER: integers, decimals, and scientific notation (e.g., 3, 3.14, .5, 1e-3)
+# - IDENTIFIER: variable/function names (e.g., x, alpha1, _temp)
+# - OP: operators and punctuation (e.g., +, -, *, /, ^, %, (, ), ,, =, <, >, <=, >=, ==, !=, &&, ||)
+# - WS: whitespace (ignored)
+_TOKEN_REGEX = re.compile(
+    r""""""
+    (?P<NUMBER>
+        (?:
+            (?:\d+\.\d*|\d*\.\d+|\d+)
+            (?:[eE][+\-]?\d+)?
+        )
+    )
+    | (?P<IDENTIFIER>[A-Za-z_][A-Za-z_0-9]*)
+    | (?P<OP>
+        (?:<=|>=|==|!=|&&|\|\|)
+        | [+\-*/^%=(),<>]
+      )
+    | (?P<WS>\s+)
+    | (?P<MISMATCH>.)
+    """""",
+    re.VERBOSE,
+)
+
+
+def parse_expression(expr: str) -> List[str]:
+    """"""
+    Tokenize a mathematical expression string into a list of tokens.
+
+    The returned tokens include:
+    - Numbers (as strings), supporting integers, decimals, and scientific notation.
+    - Identifiers (variable or function names).
+    - Operators and punctuation: + - * / ^ % ( ) , = < > <= >= == != && ||
+
+    Whitespace is ignored. Raises ValueError on unexpected characters.
+    """"""
+    tokens: List[str] = []
+    for match in _TOKEN_REGEX.finditer(expr):
+        kind = match.lastgroup
+        value = match.group()
+        if kind == ""WS"":
+            continue
+        elif kind in (""NUMBER"", ""IDENTIFIER"", ""OP""):
+            tokens.append(value)
+        elif kind == ""MISMATCH"":
+            pos = match.start()
+            raise ValueError(f""Unexpected character {value!r} at position {pos}"")
+    return tokens
+","import re
+from typing import List, Dict, Union
+
+# Precompiled regular expression for tokenizing mathematical expressions.
+# Tokens include:
+# - NUMBER: integers, decimals, and scientific notation (e.g., 3, 3.14, .5, 1e-3)
+# - IDENTIFIER: variable/function names (e.g., x, alpha1, _temp)
+# - OP: operators and punctuation (e.g., +, -, *, /, ^, %, (, ), ,, =, <, >, <=, >=, ==, !=, &&, ||)
+# - WS: whitespace (ignored)
+_TOKEN_REGEX = re.compile(
+    r""""""
+    (?P<NUMBER>
+        (?:
+            (?:\d+\.\d*|\d*\.\d+|\d+)
+            (?:[eE][+\-]?\d+)?
+        )
+    )
+    | (?P<IDENTIFIER>[A-Za-z_][A-Za-z_0-9]*)
+    | (?P<OP>
+        (?:<=|>=|==|!=|&&|\|\|)
+        | [+\-*/^%=(),<>]
+      )
+    | (?P<WS>\s+)
+    | (?P<MISMATCH>.)
+    """""",
+    re.VERBOSE,
+)
+
+# Identifier pattern used to detect variable tokens (not numbers or operators)
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z_0-9]*$')
+
+
+def parse_expression(expr: str) -> List[str]:
+    """"""
+    Tokenize a mathematical expression string into a list of tokens.
+
+    The returned tokens include:
+    - Numbers (as strings), supporting integers, decimals, and scientific notation.
+    - Identifiers (variable or function names).
+    - Operators and punctuation: + - * / ^ % ( ) , = < > <= >= == != && ||
+
+    Whitespace is ignored. Raises ValueError on unexpected characters.
+    """"""
+    tokens: List[str] = []
+    for match in _TOKEN_REGEX.finditer(expr):
+        kind = match.lastgroup
+        value = match.group()
+        if kind == ""WS"":
+            continue
+        elif kind in (""NUMBER"", ""IDENTIFIER"", ""OP""):
+            tokens.append(value)
+        elif kind == ""MISMATCH"":
+            pos = match.start()
+            raise ValueError(f""Unexpected character {value!r} at position {pos}"")
+    return tokens
+
+
+def substitute_variables(tokens: List[str], values: Dict[str, Union[int, float, str]]) -> List[str]:
+    """"""
+    Substitute identifier tokens with their corresponding values.
+
+    - Only tokens that are identifiers and are present as keys in 'values' are replaced.
+    - Numeric values (int/float) are converted to tokens using parse_expression(str(value)),
+      ensuring signs are handled consistently (e.g., -5 -> ['-', '5']).
+    - String values are tokenized with parse_expression, allowing substitution with either
+      a single token (e.g., '3.14') or multiple tokens (e.g., '2*x').
+
+    Returns a new list of tokens with substitutions applied.
+    """"""
+    substituted: List[str] = []
+    for tok in tokens:
+        if _IDENTIFIER_RE.match(tok) and tok in values:
+            val = values[tok]
+            if isinstance(val, (int, float)):
+                repl_tokens = parse_expression(str(val))
+            elif isinstance(val, str):
+                repl_tokens = parse_expression(val)
+            else:
+                raise TypeError(f""Unsupported value type for variable '{tok}': {type(val).__name__}"")
+            substituted.extend(repl_tokens)
+        else:
+            substituted.append(tok)
+    return substituted
+","import re
+import operator
+import ast
+from typing import List, Dict, Union
+
+# Precompiled regular expression for tokenizing mathematical expressions.
+# Tokens include:
+# - NUMBER: integers, decimals, and scientific notation (e.g., 3, 3.14, .5, 1e-3)
+# - IDENTIFIER: variable/function names (e.g., x, alpha1, _temp)
+# - OP: operators and punctuation (e.g., +, -, *, /, ^, %, (, ), ,, =, <, >, <=, >=, ==, !=, &&, ||)
+# - WS: whitespace (ignored)
+_TOKEN_REGEX = re.compile(
+    r""""""
+    (?P<NUMBER>
+        (?:
+            (?:\d+\.\d*|\d*\.\d+|\d+)
+            (?:[eE][+\-]?\d+)?
+        )
+    )
+    | (?P<IDENTIFIER>[A-Za-z_][A-Za-z_0-9]*)
+    | (?P<OP>
+        (?:<=|>=|==|!=|&&|\|\|)
+        | [+\-*/^%=(),<>]
+      )
+    | (?P<WS>\s+)
+    | (?P<MISMATCH>.)
+    """""",
+    re.VERBOSE,
+)
+
+# Identifier pattern used to detect variable tokens (not numbers or operators)
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z_0-9]*$')
+
+# Numeric literal pattern for coercing string variable values like ""-3.14"" or ""1e-5""
+_NUMERIC_LITERAL_RE = re.compile(r'^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+\-]?\d+)?$')
+
+
+def parse_expression(expr: str) -> List[str]:
+    """"""
+    Tokenize a mathematical expression string into a list of tokens.
+
+    The returned tokens include:
+    - Numbers (as strings), supporting integers, decimals, and scientific notation.
+    - Identifiers (variable or function names).
+    - Operators and punctuation: + - * / ^ % ( ) , = < > <= >= == != && ||
+
+    Whitespace is ignored. Raises ValueError on unexpected characters.
+    """"""
+    tokens: List[str] = []
+    for match in _TOKEN_REGEX.finditer(expr):
+        kind = match.lastgroup
+        value = match.group()
+        if kind == ""WS"":
+            continue
+        elif kind in (""NUMBER"", ""IDENTIFIER"", ""OP""):
+            tokens.append(value)
+        elif kind == ""MISMATCH"":
+            pos = match.start()
+            raise ValueError(f""Unexpected character {value!r} at position {pos}"")
+    return tokens
+
+
+def substitute_variables(tokens: List[str], values: Dict[str, Union[int, float, str]]) -> List[str]:
+    """"""
+    Substitute identifier tokens with their corresponding values.
+
+    - Only tokens that are identifiers and are present as keys in 'values' are replaced.
+    - Numeric values (int/float) are converted to tokens using parse_expression(str(value)),
+      ensuring signs are handled consistently (e.g., -5 -> ['-', '5']).
+    - String values are tokenized with parse_expression, allowing substitution with either
+      a single token (e.g., '3.14') or multiple tokens (e.g., '2*x').
+
+    Returns a new list of tokens with substitutions applied.
+    """"""
+    substituted: List[str] = []
+    for tok in tokens:
+        if _IDENTIFIER_RE.match(tok) and tok in values:
+            val = values[tok]
+            if isinstance(val, (int, float)):
+                repl_tokens = parse_expression(str(val))
+            elif isinstance(val, str):
+                repl_tokens = parse_expression(val)
+            else:
+                raise TypeError(f""Unsupported value type for variable '{tok}': {type(val).__name__}"")
+            substituted.extend(repl_tokens)
+        else:
+            substituted.append(tok)
+    return substituted
+
+
+def _preprocess_expression(expr: str) -> str:
+    """"""
+    Preprocess the input to align with Python AST parsing:
+    - Replace '^' with '**' for exponentiation.
+    - Replace '&&' with 'and', '||' with 'or'.
+    - Ensure there is no single '=' (assignment) present.
+    """"""
+    # Disallow single '=' (assignment). Allow '==' and '!=', '<=', '>='.
+    if re.search(r'(^|[^=<>!])=(?!=)', expr):
+        raise ValueError(""Assignment '=' is not allowed in expressions."")
+    # Logical operators
+    expr = expr.replace(""&&"", "" and "").replace(""||"", "" or "")
+    # Exponent operator
+    expr = expr.replace(""^"", ""**"")
+    return expr
+
+
+def _coerce_variable_value(value: Union[int, float, bool, str]) -> Union[int, float, bool]:
+    """"""
+    Coerce variable values to allowed runtime types.
+    Allows int, float, bool, or numeric-literal strings.
+    """"""
+    if isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if _NUMERIC_LITERAL_RE.match(s):
+            # Prefer int when possible to preserve integer semantics
+            try:
+                return int(s, 10)
+            except ValueError:
+                return float(s)
+        raise ValueError(f""Variable value string is not a numeric literal: {value!r}"")
+    raise ValueError(f""Unsupported variable value type: {type(value).__name__}"")
+
+
+_BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+_UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+    ast.Not: operator.not_,
+}
+
+_CMP_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def _safe_eval(node: ast.AST, variables: Dict[str, Union[int, float, bool, str]]) -> Union[int, float, bool]:
+    """"""
+    Recursively and safely evaluate an AST node with a restricted set of operations.
+    """"""
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body, variables)
+
+    if isinstance(node, ast.Constant):
+        val = node.value
+        if isinstance(val, (int, float, bool)):
+            return val
+        raise ValueError(f""Unsupported constant type: {type(val).__name__}"")
+
+    # For compatibility with older Python versions where numbers may be ast.Num
+    if hasattr(ast, ""Num"") and isinstance(node, ast.Num):  # type: ignore[attr-defined]
+        val = node.n  # type: ignore[attr-defined]
+        if isinstance(val, (int, float)):
+            return val
+        raise ValueError(f""Unsupported numeric literal type: {type(val).__name__}"")
+
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name not in variables:
+            raise ValueError(f""Undefined variable: {name}"")
+        return _coerce_variable_value(variables[name])
+
+    if isinstance(node, ast.UnaryOp):
+        if type(node.op) not in _UNARY_OPS:
+            raise ValueError(f""Unsupported unary operator: {type(node.op).__name__}"")
+        operand = _safe_eval(node.operand, variables)
+        return _UNARY_OPS[type(node.op)](operand)
+
+    if isinstance(node, ast.BinOp):
+        if type(node.op) not in _BIN_OPS:
+            raise ValueError(f""Unsupported binary operator: {type(node.op).__name__}"")
+        left = _safe_eval(node.left, variables)
+        right = _safe_eval(node.right, variables)
+        return _BIN_OPS[type(node.op)](left, right)
+
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            result = True
+            for v in node.values:
+                result = bool(_safe_eval(v, variables))
+                if not result:  # short-circuit
+                    return False
+            return True
+        elif isinstance(node.op, ast.Or):
+            result = False
+            for v in node.values:
+                result = bool(_safe_eval(v, variables))
+                if result:  # short-circuit
+                    return True
+            return False
+        else:
+            raise ValueError(f""Unsupported boolean operator: {type(node.op).__name__}"")
+
+    if isinstance(node, ast.Compare):
+        left = _safe_eval(node.left, variables)
+        for op, comparator in zip(node.ops, node.comparators):
+            if type(op) not in _CMP_OPS:
+                raise ValueError(f""Unsupported comparison operator: {type(op).__name__}"")
+            right = _safe_eval(comparator, variables)
+            if not _CMP_OPS[type(op)](left, right):
+                return False
+            left = right
+        return True
+
+    # Disallow function calls, attributes, subscripts, comprehensions, lambdas, etc.
+    disallowed = (
+        ast.Call, ast.Attribute, ast.Subscript, ast.List, ast.Tuple, ast.Dict, ast.Set,
+        ast.ListComp, ast.SetComp, ast.DictComp if hasattr(ast, ""DictComp"") else tuple(),
+        ast.GeneratorExp, ast.Lambda, ast.IfExp, ast.Await, ast.Yield, ast.YieldFrom,
+        ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr,
+        ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal,
+        ast.With, ast.For, ast.While, ast.If, ast.Try, ast.Raise, ast.Assert,
+        ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Module,
+        ast.BitAnd, ast.BitOr, ast.BitXor, ast.MatMult, ast.FloorDiv,
+    )
+    if isinstance(node, disallowed):
+        raise ValueError(f""Disallowed expression element: {type(node).__name__}"")
+
+    raise ValueError(f""Unsupported expression element: {type(node).__name__}"")
+
+
+def evaluate_expression_safely(expression: str, variables: Dict[str, Union[int, float, bool, str]]) -> str:
+    """"""
+    Evaluate and simplify a mathematical expression securely.
+
+    - Supports arithmetic: +, -, *, /, %, ^ (as exponent), parentheses.
+    - Supports comparisons: ==, !=, <, <=, >, >=
+    - Supports boolean logic: &&, || (as 'and', 'or'), and 'not'.
+    - Variables are taken from the provided mapping (int, float, bool, or numeric-literal strings).
+    - Raises ValueError for invalid expressions or computation errors.
+
+    Returns:
+        The computed result converted to a string.
+    """"""
+    try:
+        preprocessed = _preprocess_expression(expression)
+        tree = ast.parse(preprocessed, mode=""eval"")
+        result = _safe_eval(tree, variables)
+    except (SyntaxError, ValueError, TypeError, ZeroDivisionError, OverflowError) as e:
+        raise ValueError(f""Invalid expression or computation error: {e}"") from None
+    return str(result)
+",gpt-5,0,[],[],[]
+ff9191a0,editing,"['I need a function that can evaluate simple mathematical expressions given as strings. The function should handle basic arithmetic operations like addition, subtraction, multiplication, and division. Let\'s call this function \'evaluate_simple_expression\'. It should take a single argument, a string representing the expression, and return the computed result as a string. If the expression is invalid or the computation fails, it should raise a ValueError.""\nPlease only output code and not your natural language commentary.', 'Could we enhance the \'evaluate_simple_expression\' function to also handle variables? I want to introduce a second argument, a dictionary that maps variable names to their numeric values. The function should substitute these variables in the expression before evaluating it. The result should still be returned as a string, and it should raise a ValueError if the expression is invalid or if a variable is missing from the mapping.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function called \'evaluate_expression_safely\' that can securely evaluate mathematical expressions with variables. It should take two arguments: \'math_expression\' (a string of the expression) and \'variable_mapping\' (a dictionary mapping variable names to numbers). The function should return the result as a string. Use the following setup code:\n```\nimport re\nimport operator\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: - Relevant modules: re, operator for basic string parsing and mathematical operations, - AST (Abstract Syntax Tree) module for securely parsing expressions. The function should raise a ValueError if the input expression is invalid or the computation fails.""\nPlease only output code and not your natural language commentary.']","import ast
+from typing import Union
+
+
+def evaluate_simple_expression(expression: str) -> str:
+    """"""
+    Evaluate a simple mathematical expression given as a string.
+    Supports: addition (+), subtraction (-), multiplication (*), division (/), and parentheses.
+    Returns the computed result as a string.
+    Raises ValueError if the expression is invalid or computation fails.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+
+    expr = expression.strip()
+    if not expr:
+        raise ValueError(""Expression cannot be empty."")
+
+    try:
+        node = ast.parse(expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(""Invalid expression."") from e
+
+    def _eval(n: ast.AST) -> Union[int, float]:
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+
+        if isinstance(n, ast.BinOp):
+            left = _eval(n.left)
+            right = _eval(n.right)
+            op = n.op
+            if isinstance(op, ast.Add):
+                return left + right
+            if isinstance(op, ast.Sub):
+                return left - right
+            if isinstance(op, ast.Mult):
+                return left * right
+            if isinstance(op, ast.Div):
+                return left / right
+            raise ValueError(""Unsupported operator."")
+
+        if isinstance(n, ast.UnaryOp):
+            operand = _eval(n.operand)
+            if isinstance(n.op, ast.UAdd):
+                return +operand
+            if isinstance(n.op, ast.USub):
+                return -operand
+            raise ValueError(""Unsupported unary operator."")
+
+        # Python 3.8+: ast.Constant; older versions may use ast.Num
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(""Only numeric literals are allowed."")
+        if hasattr(ast, ""Num"") and isinstance(n, getattr(ast, ""Num"")):
+            return n.n  # type: ignore[attr-defined]
+
+        # Disallow names, calls, attributes, etc.
+        raise ValueError(""Invalid expression content."")
+
+    try:
+        result = _eval(node)
+    except Exception as e:
+        raise ValueError(""Computation failed."") from e
+
+    return str(result)
+","import ast
+from typing import Union, Dict, Optional
+
+
+def evaluate_simple_expression(expression: str, variables: Optional[Dict[str, Union[int, float]]] = None) -> str:
+    """"""
+    Evaluate a simple mathematical expression given as a string.
+    Supports: addition (+), subtraction (-), multiplication (*), division (/), and parentheses.
+    Variables can be provided via the 'variables' mapping (dict) where keys are variable names
+    and values are numeric (int or float). All variables used in the expression must be present
+    in the mapping.
+
+    Returns the computed result as a string.
+    Raises ValueError if the expression is invalid, a variable is missing, or computation fails.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+
+    if variables is None:
+        variables = {}
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dictionary."")
+    for k, v in variables.items():
+        if not isinstance(k, str) or not k.isidentifier():
+            raise ValueError(""Variable names must be identifier strings."")
+        # Disallow bools (since bool is a subclass of int) and require numeric values
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(""Variable values must be numeric (int or float)."")
+
+    expr = expression.strip()
+    if not expr:
+        raise ValueError(""Expression cannot be empty."")
+
+    try:
+        node = ast.parse(expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(""Invalid expression."") from e
+
+    def _eval(n: ast.AST) -> Union[int, float]:
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+
+        if isinstance(n, ast.BinOp):
+            left = _eval(n.left)
+            right = _eval(n.right)
+            op = n.op
+            if isinstance(op, ast.Add):
+                return left + right
+            if isinstance(op, ast.Sub):
+                return left - right
+            if isinstance(op, ast.Mult):
+                return left * right
+            if isinstance(op, ast.Div):
+                return left / right
+            raise ValueError(""Unsupported operator."")
+
+        if isinstance(n, ast.UnaryOp):
+            operand = _eval(n.operand)
+            if isinstance(n.op, ast.UAdd):
+                return +operand
+            if isinstance(n.op, ast.USub):
+                return -operand
+            raise ValueError(""Unsupported unary operator."")
+
+        if isinstance(n, ast.Name):
+            name = n.id
+            if name not in variables:
+                raise ValueError(f""Missing variable: {name}"")
+            value = variables[name]
+            # value type already validated
+            return value  # type: ignore[return-value]
+
+        # Python 3.8+: ast.Constant; older versions may use ast.Num
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(""Only numeric literals are allowed."")
+        if hasattr(ast, ""Num"") and isinstance(n, getattr(ast, ""Num"")):
+            return n.n  # type: ignore[attr-defined]
+
+        # Disallow names, calls, attributes, subscripts, etc.
+        raise ValueError(""Invalid expression content."")
+
+    try:
+        result = _eval(node)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(""Computation failed."") from e
+
+    return str(result)
+","import re
+import operator
+import ast
+from typing import Union, Dict, Optional
+
+
+def evaluate_simple_expression(expression: str, variables: Optional[Dict[str, Union[int, float]]] = None) -> str:
+    """"""
+    Evaluate a simple mathematical expression given as a string.
+    Supports: addition (+), subtraction (-), multiplication (*), division (/), and parentheses.
+    Variables can be provided via the 'variables' mapping (dict) where keys are variable names
+    and values are numeric (int or float). All variables used in the expression must be present
+    in the mapping.
+
+    Returns the computed result as a string.
+    Raises ValueError if the expression is invalid, a variable is missing, or computation fails.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+
+    if variables is None:
+        variables = {}
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dictionary."")
+    for k, v in variables.items():
+        if not isinstance(k, str) or not k.isidentifier():
+            raise ValueError(""Variable names must be identifier strings."")
+        # Disallow bools (since bool is a subclass of int) and require numeric values
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(""Variable values must be numeric (int or float)."")
+
+    expr = expression.strip()
+    if not expr:
+        raise ValueError(""Expression cannot be empty."")
+
+    try:
+        node = ast.parse(expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(""Invalid expression."") from e
+
+    def _eval(n: ast.AST) -> Union[int, float]:
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+
+        if isinstance(n, ast.BinOp):
+            left = _eval(n.left)
+            right = _eval(n.right)
+            op = n.op
+            if isinstance(op, ast.Add):
+                return left + right
+            if isinstance(op, ast.Sub):
+                return left - right
+            if isinstance(op, ast.Mult):
+                return left * right
+            if isinstance(op, ast.Div):
+                return left / right
+            raise ValueError(""Unsupported operator."")
+
+        if isinstance(n, ast.UnaryOp):
+            operand = _eval(n.operand)
+            if isinstance(n.op, ast.UAdd):
+                return +operand
+            if isinstance(n.op, ast.USub):
+                return -operand
+            raise ValueError(""Unsupported unary operator."")
+
+        if isinstance(n, ast.Name):
+            name = n.id
+            if name not in variables:
+                raise ValueError(f""Missing variable: {name}"")
+            value = variables[name]
+            # value type already validated
+            return value  # type: ignore[return-value]
+
+        # Python 3.8+: ast.Constant; older versions may use ast.Num
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(""Only numeric literals are allowed."")
+        if hasattr(ast, ""Num"") and isinstance(n, getattr(ast, ""Num"")):
+            return n.n  # type: ignore[attr-defined]
+
+        # Disallow names, calls, attributes, subscripts, etc.
+        raise ValueError(""Invalid expression content."")
+
+    try:
+        result = _eval(node)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(""Computation failed."") from e
+
+    return str(result)
+
+
+def evaluate_expression_safely(math_expression: str, variable_mapping: Dict[str, Union[int, float]]) -> str:
+    """"""
+    Securely evaluate a mathematical expression with variables.
+
+    Args:
+        math_expression: The expression string to evaluate.
+        variable_mapping: Dict mapping variable names (identifiers) to numeric values (int or float).
+
+    Returns:
+        The result of the expression as a string.
+
+    Raises:
+        ValueError: If the expression is invalid, contains unsupported constructs,
+                    references missing variables, or computation fails.
+    """"""
+    if not isinstance(math_expression, str):
+        raise ValueError(""Expression must be a string."")
+
+    if not isinstance(variable_mapping, dict):
+        raise ValueError(""Variables must be provided as a dictionary."")
+
+    # Validate variables: names must be identifiers, values must be numeric (int or float), and not bool.
+    for name, value in variable_mapping.items():
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError(""Variable names must be identifier strings."")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(""Variable values must be numeric (int or float)."")
+
+    expr = math_expression.strip()
+    if not expr:
+        raise ValueError(""Expression cannot be empty."")
+
+    # Operator maps for supported operations
+    bin_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+    unary_ops = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
+
+    try:
+        tree = ast.parse(expr, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(""Invalid expression."") from e
+
+    def _eval(node: ast.AST) -> Union[int, float]:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            op_type = type(node.op)
+            if op_type in bin_ops:
+                return bin_ops[op_type](left, right)
+            raise ValueError(""Unsupported operator."")
+
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            op_type = type(node.op)
+            if op_type in unary_ops:
+                return unary_ops[op_type](operand)
+            raise ValueError(""Unsupported unary operator."")
+
+        if isinstance(node, ast.Name):
+            name = node.id
+            if name not in variable_mapping:
+                raise ValueError(f""Missing variable: {name}"")
+            return variable_mapping[name]
+
+        # Numeric literals
+        if isinstance(node, ast.Constant):
+            val = node.value
+            if isinstance(val, bool):
+                raise ValueError(""Booleans are not allowed."")
+            if isinstance(val, (int, float)):
+                return val
+            raise ValueError(""Only numeric literals are allowed."")
+
+        if hasattr(ast, ""Num"") and isinstance(node, getattr(ast, ""Num"")):
+            return node.n  # type: ignore[attr-defined]
+
+        # Disallow everything else: calls, attributes, subscripts, comprehensions, etc.
+        raise ValueError(""Invalid expression content."")
+
+    try:
+        result = _eval(tree)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(""Computation failed."") from e
+
+    return str(result)
+",gpt-5,0,[],[],[]
+ff9191a0,refactor,"[""Implement a function that takes a mathematical expression as a string, potentially containing variables, and outputs the computed, simplified expression as a string. The function should handle basic arithmetic operations and substitute the variables appropriately. The function's name should be evaluate_expression_safely. The function should take 2 arguments, i.e., - math_expression (str): A string representing a mathematical expression, - variable_mapping (dict): A dictionary where keys are variable names and values are their corresponding numbers. The function should return str: The result of the simplified expression as a string. The function should raise - ValueError: If the input expression is invalid or the computation fails. The following setup code will be provided to you:\n```\nimport re\nimport operator\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: - Relevant modules: re, operator for basic string parsing and mathematical operations, - AST (Abstract Syntax Tree) module for securely parsing expressions \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this using the pipeline pattern. Could we extract the parsing and evaluation logic into separate pure functions while maintaining the main evaluate_expression_safely function's signature? This would make the code more modular and easier to test.\nPlease only output code and not your natural language commentary."", 'Can you add logging support to the function to track the evaluation process? This should include logging the initial expression, the variable substitutions, and the final result. Ensure that the logging is clear and informative for future debugging and analysis.\nPlease only output code and not your natural language commentary.']","import re
+import operator
+import ast
+
+def evaluate_expression_safely(math_expression: str, variable_mapping: dict) -> str:
+    """"""
+    Evaluate a mathematical expression with variables safely and return the result as a string.
+
+    Args:
+        math_expression (str): A string representing a mathematical expression.
+        variable_mapping (dict): A dictionary where keys are variable names and values are their corresponding numbers.
+
+    Returns:
+        str: The result of the simplified expression as a string.
+
+    Raises:
+        ValueError: If the input expression is invalid or the computation fails.
+    """"""
+    if not isinstance(math_expression, str) or not math_expression.strip():
+        raise ValueError(""Expression must be a non-empty string."")
+    if not isinstance(variable_mapping, dict):
+        raise ValueError(""variable_mapping must be a dict."")
+
+    # Validate variable names and values in mapping
+    varname_re = re.compile(r""^[A-Za-z_]\w*$"")
+    for k, v in variable_mapping.items():
+        if not isinstance(k, str) or not varname_re.match(k):
+            raise ValueError(f""Invalid variable name: {k!r}"")
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f""Invalid value for variable {k!r}: expected a number."")
+
+    try:
+        tree = ast.parse(math_expression, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+    # Allowed operators
+    BIN_OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+    UNARY_OPS = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
+
+    def _ensure_number(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(""Only real numbers are allowed."")
+        return value
+
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.Num):  # for very old Python versions
+            return _ensure_number(node.n)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+                return node.value
+            raise ValueError(""Only numeric constants are allowed."")
+
+        if isinstance(node, ast.Name):
+            if node.id not in variable_mapping:
+                raise ValueError(f""Undefined variable: {node.id}"")
+            return _ensure_number(variable_mapping[node.id])
+
+        if isinstance(node, ast.BinOp):
+            if type(node.op) not in BIN_OPS:
+                raise ValueError(f""Operator not allowed: {type(node.op).__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            op_func = BIN_OPS[type(node.op)]
+            try:
+                result = op_func(left, right)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in UNARY_OPS:
+                raise ValueError(f""Unary operator not allowed: {type(node.op).__name__}"")
+            operand = _eval(node.operand)
+            try:
+                result = UNARY_OPS[type(node.op)](operand)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        # Explicitly disallow everything else: calls, attributes, subscripts, compares, etc.
+        raise ValueError(f""Disallowed expression element: {type(node).__name__}"")
+
+    try:
+        result = _eval(tree)
+    except ValueError:
+        # Re-raise our intentional ValueErrors as-is
+        raise
+    except Exception as e:
+        # Wrap any unexpected error
+        raise ValueError(f""Invalid expression: {e}"") from None
+
+    # Convert result to a clean string
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)
+","import re
+import operator
+import ast
+
+# Allowed operators (module-level constants for reusability and testability)
+BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+# Variable name validation regex
+_VARNAME_RE = re.compile(r""^[A-Za-z_]\w*$"")
+
+
+def _ensure_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(""Only real numbers are allowed."")
+    return value
+
+
+def validate_variable_mapping(variable_mapping: dict) -> None:
+    """"""
+    Validate variable names and values.
+    Raises ValueError if any name or value is invalid.
+    """"""
+    for k, v in variable_mapping.items():
+        if not isinstance(k, str) or not _VARNAME_RE.match(k):
+            raise ValueError(f""Invalid variable name: {k!r}"")
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f""Invalid value for variable {k!r}: expected a number."")
+
+
+def parse_expression(math_expression: str) -> ast.Expression:
+    """"""
+    Parse the expression string into an AST Expression node.
+    Raises ValueError on syntax errors.
+    """"""
+    try:
+        tree = ast.parse(math_expression, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+    return tree
+
+
+def evaluate_ast(tree: ast.AST, variable_mapping: dict) -> float | int:
+    """"""
+    Safely evaluate a pre-parsed AST using the provided variables.
+    Only a subset of nodes and operators are allowed.
+    """"""
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.Num):  # compatibility with older Python
+            return _ensure_number(node.n)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+                return node.value
+            raise ValueError(""Only numeric constants are allowed."")
+
+        if isinstance(node, ast.Name):
+            if node.id not in variable_mapping:
+                raise ValueError(f""Undefined variable: {node.id}"")
+            return _ensure_number(variable_mapping[node.id])
+
+        if isinstance(node, ast.BinOp):
+            if type(node.op) not in BIN_OPS:
+                raise ValueError(f""Operator not allowed: {type(node.op).__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            op_func = BIN_OPS[type(node.op)]
+            try:
+                result = op_func(left, right)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in UNARY_OPS:
+                raise ValueError(f""Unary operator not allowed: {type(node.op).__name__}"")
+            operand = _eval(node.operand)
+            try:
+                result = UNARY_OPS[type(node.op)](operand)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        # Disallow all other constructs
+        raise ValueError(f""Disallowed expression element: {type(node).__name__}"")
+
+    try:
+        return _eval(tree)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f""Invalid expression: {e}"") from None
+
+
+def _format_result(result: float | int) -> str:
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)
+
+
+def evaluate_expression_safely(math_expression: str, variable_mapping: dict) -> str:
+    """"""
+    Evaluate a mathematical expression with variables safely and return the result as a string.
+
+    Args:
+        math_expression (str): A string representing a mathematical expression.
+        variable_mapping (dict): A dictionary where keys are variable names and values are their corresponding numbers.
+
+    Returns:
+        str: The result of the simplified expression as a string.
+
+    Raises:
+        ValueError: If the input expression is invalid or the computation fails.
+    """"""
+    if not isinstance(math_expression, str) or not math_expression.strip():
+        raise ValueError(""Expression must be a non-empty string."")
+    if not isinstance(variable_mapping, dict):
+        raise ValueError(""variable_mapping must be a dict."")
+
+    validate_variable_mapping(variable_mapping)
+    tree = parse_expression(math_expression)
+    result = evaluate_ast(tree, variable_mapping)
+    return _format_result(result)
+","import re
+import operator
+import ast
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Allowed operators (module-level constants for reusability and testability)
+BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+# Variable name validation regex
+_VARNAME_RE = re.compile(r""^[A-Za-z_]\w*$"")
+
+
+def _ensure_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(""Only real numbers are allowed."")
+    return value
+
+
+def validate_variable_mapping(variable_mapping: dict) -> None:
+    """"""
+    Validate variable names and values.
+    Raises ValueError if any name or value is invalid.
+    """"""
+    for k, v in variable_mapping.items():
+        if not isinstance(k, str) or not _VARNAME_RE.match(k):
+            raise ValueError(f""Invalid variable name: {k!r}"")
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f""Invalid value for variable {k!r}: expected a number."")
+
+
+def parse_expression(math_expression: str) -> ast.Expression:
+    """"""
+    Parse the expression string into an AST Expression node.
+    Raises ValueError on syntax errors.
+    """"""
+    try:
+        tree = ast.parse(math_expression, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+    return tree
+
+
+def collect_variable_names(tree: ast.AST) -> list[str]:
+    """"""
+    Collect unique variable names referenced in the AST.
+    """"""
+    return sorted({node.id for node in ast.walk(tree) if isinstance(node, ast.Name)})
+
+
+def evaluate_ast(tree: ast.AST, variable_mapping: dict) -> float | int:
+    """"""
+    Safely evaluate a pre-parsed AST using the provided variables.
+    Only a subset of nodes and operators are allowed.
+    """"""
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.Num):  # compatibility with older Python
+            return _ensure_number(node.n)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+                return node.value
+            raise ValueError(""Only numeric constants are allowed."")
+
+        if isinstance(node, ast.Name):
+            if node.id not in variable_mapping:
+                raise ValueError(f""Undefined variable: {node.id}"")
+            return _ensure_number(variable_mapping[node.id])
+
+        if isinstance(node, ast.BinOp):
+            if type(node.op) not in BIN_OPS:
+                raise ValueError(f""Operator not allowed: {type(node.op).__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            op_func = BIN_OPS[type(node.op)]
+            try:
+                result = op_func(left, right)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in UNARY_OPS:
+                raise ValueError(f""Unary operator not allowed: {type(node.op).__name__}"")
+            operand = _eval(node.operand)
+            try:
+                result = UNARY_OPS[type(node.op)](operand)
+            except Exception as e:
+                raise ValueError(f""Computation error: {e}"") from None
+            if isinstance(result, complex):
+                raise ValueError(""Complex results are not supported."")
+            return _ensure_number(result)
+
+        # Disallow all other constructs
+        raise ValueError(f""Disallowed expression element: {type(node).__name__}"")
+
+    try:
+        return _eval(tree)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f""Invalid expression: {e}"") from None
+
+
+def _format_result(result: float | int) -> str:
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)
+
+
+def _format_substitutions(var_names: list[str], variable_mapping: dict) -> str:
+    if not var_names:
+        return ""(none)""
+    parts = []
+    for name in var_names:
+        if name in variable_mapping:
+            parts.append(f""{name}={variable_mapping[name]}"")
+    return "", "".join(parts) if parts else ""(none)""
+
+
+def evaluate_expression_safely(math_expression: str, variable_mapping: dict) -> str:
+    """"""
+    Evaluate a mathematical expression with variables safely and return the result as a string.
+
+    Args:
+        math_expression (str): A string representing a mathematical expression.
+        variable_mapping (dict): A dictionary where keys are variable names and values are their corresponding numbers.
+
+    Returns:
+        str: The result of the simplified expression as a string.
+
+    Raises:
+        ValueError: If the input expression is invalid or the computation fails.
+    """"""
+    if not isinstance(math_expression, str) or not math_expression.strip():
+        raise ValueError(""Expression must be a non-empty string."")
+    if not isinstance(variable_mapping, dict):
+        raise ValueError(""variable_mapping must be a dict."")
+
+    logger.info(""Evaluating expression: %s"", math_expression)
+
+    validate_variable_mapping(variable_mapping)
+
+    try:
+        tree = parse_expression(math_expression)
+    except ValueError as e:
+        logger.error(""Failed to parse expression '%s': %s"", math_expression, e)
+        raise
+
+    # Log variable substitutions discovered in the expression
+    names_in_expr = collect_variable_names(tree)
+    missing = [n for n in names_in_expr if n not in variable_mapping]
+    substitutions_str = _format_substitutions(names_in_expr, variable_mapping)
+    logger.info(""Variable substitutions: %s"", substitutions_str)
+    if missing:
+        logger.warning(""Missing variable values for: %s"", "", "".join(missing))
+
+    try:
+        result = evaluate_ast(tree, variable_mapping)
+    except ValueError as e:
+        logger.error(""Failed to evaluate expression '%s': %s"", math_expression, e)
+        raise
+
+    formatted = _format_result(result)
+    logger.info(""Final result: %s"", formatted)
+    return formatted
+",gpt-5,0,[],[],[]

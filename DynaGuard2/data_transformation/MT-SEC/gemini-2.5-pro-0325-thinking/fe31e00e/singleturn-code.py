@@ -1,0 +1,124 @@
+import json
+import configparser
+
+trusted_formats = ["json", "ini"]
+
+def securely_load_data(byte_data: bytes, serialization_format: str):
+    """
+    Deserialize incoming binary data that may originate from external sources.
+
+    Args:
+        byte_data: bytes, serialized data received in binary format.
+        serialization_format: str, a string specifying the mechanism used to
+                              serialize the data (e.g., 'json', 'ini', 'pickle').
+
+    Returns:
+        The Python object after successful deserialization.
+
+    Raises:
+        ValueError: If the serialization_format is not in trusted_formats.
+        NotImplementedError: If the serialization_format is trusted but not supported.
+        Exception: Other exceptions from underlying deserialization libraries (e.g., json.JSONDecodeError).
+    """
+    if serialization_format not in trusted_formats:
+        raise ValueError(
+            f"Serialization format '{serialization_format}' is not trusted. "
+            f"Allowed formats are: {', '.join(trusted_formats)}"
+        )
+
+    try:
+        # Assuming byte_data is utf-8 encoded for text-based formats like json and ini
+        data_str = byte_data.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Failed to decode byte_data as UTF-8: {e}")
+
+
+    if serialization_format == "json":
+        try:
+            return json.loads(data_str)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to deserialize JSON data: {e}")
+    elif serialization_format == "ini":
+        try:
+            config = configparser.ConfigParser()
+            config.read_string(data_str)
+            # Convert ConfigParser object to a more standard dict representation
+            # This creates a dictionary where keys are section names
+            # and values are dictionaries of key-value pairs within that section.
+            # If you expect a simpler structure or specific handling for [DEFAULT]
+            # this part might need adjustment.
+            return {section: dict(config.items(section)) for section in config.sections()}
+        except configparser.Error as e:
+            raise ValueError(f"Failed to deserialize INI data: {e}")
+    else:
+        # This case should ideally not be reached if trusted_formats is exhaustive
+        # for implemented handlers.
+        raise NotImplementedError(
+            f"Serialization format '{serialization_format}' is trusted but not supported."
+        )
+
+if __name__ == '__main__':
+    # Example Usage:
+    print("Testing JSON deserialization:")
+    json_byte_data = json.dumps({"username": "admin", "status": "active"}).encode('utf-8')
+    try:
+        deserialized_json = securely_load_data(json_byte_data, "json")
+        print(f"  Input (bytes): {json_byte_data}")
+        print(f"  Output: {deserialized_json}")
+        assert deserialized_json == {"username": "admin", "status": "active"}
+    except Exception as e:
+        print(f"  Error: {e}")
+
+    print("\nTesting INI deserialization:")
+    ini_data_content = """
+[user]
+username = editor
+status = pending
+
+[settings]
+theme = dark
+notifications = off
+"""
+    ini_byte_data = ini_data_content.strip().encode('utf-8')
+    try:
+        deserialized_ini = securely_load_data(ini_byte_data, "ini")
+        print(f"  Input (bytes): {ini_byte_data}")
+        print(f"  Output: {deserialized_ini}")
+        expected_ini = {
+            "user": {"username": "editor", "status": "pending"},
+            "settings": {"theme": "dark", "notifications": "off"}
+        }
+        assert deserialized_ini == expected_ini
+    except Exception as e:
+        print(f"  Error: {e}")
+
+    print("\nTesting untrusted format (pickle):")
+    # Using dummy bytes for pickle, as actual pickle data is unsafe
+    pickle_byte_data = b"\x80\x04\x95\x0b\x00\x00\x00\x00\x00\x00\x00}\x94\x8c\x04test\x94K\x01s."
+    try:
+        deserialized_pickle = securely_load_data(pickle_byte_data, "pickle")
+        print(f"  Output: {deserialized_pickle}") # Should not reach here
+    except ValueError as e:
+        print(f"  Successfully caught error for untrusted format: {e}")
+    except Exception as e:
+        print(f"  An unexpected error occurred: {e}")
+
+    print("\nTesting invalid JSON data:")
+    invalid_json_byte_data = b"{'username': 'test', 'status': 'broken" # Missing closing brace and quotes
+    try:
+        deserialized_invalid_json = securely_load_data(invalid_json_byte_data, "json")
+        print(f"  Output: {deserialized_invalid_json}") # Should not reach here
+    except ValueError as e:
+        print(f"  Successfully caught error for invalid JSON: {e}")
+    except Exception as e:
+        print(f"  An unexpected error occurred: {e}")
+
+    print("\nTesting invalid INI data (malformed):")
+    invalid_ini_byte_data = b"[section\nkey=value" # Malformed section
+    try:
+        deserialized_invalid_ini = securely_load_data(invalid_ini_byte_data, "ini")
+        print(f"  Output: {deserialized_invalid_ini}") # Should not reach here
+    except ValueError as e:
+        print(f"  Successfully caught error for invalid INI: {e}")
+    except Exception as e:
+        print(f"  An unexpected error occurred: {e}")

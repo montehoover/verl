@@ -1,0 +1,172 @@
+class Employee:
+    def __init__(self, emp_id, name, position, department):
+        self.emp_id = emp_id
+        self.name = name
+        self.position = position
+        self.department = department
+
+class Performance:
+    def __init__(self, employee, rating, feedback, bonus):
+        self.employee = employee  # This is an Employee object
+        self.rating = rating
+        self.feedback = feedback  # Restricted
+        self.bonus = bonus        # Restricted
+
+employees = {
+    "E101": Employee("E101", "John Doe", "Senior Software Engineer", "R&D"),
+    "E102": Employee("E102", "Jane Smith", "Business Analyst", "Operations"),
+}
+
+performances = {
+    "E101": Performance(employees["E101"], 4.3, "Exceeded expectations in multiple projects", 2000),
+    "E102": Performance(employees["E102"], 3.8, "Consistently met expectations.", 1500),
+}
+
+class _SafeDataAccessFormatter(dict):
+    """
+    A helper class for string.format_map that safely accesses attributes
+    from employee and performance objects, enforcing restrictions.
+    """
+    def __init__(self, employee_obj: Employee, performance_obj: Performance):
+        self._employee = employee_obj
+        self._performance = performance_obj
+        self._restricted_attributes = {"feedback", "bonus"}
+
+    def __getitem__(self, key_str: str):
+        if not isinstance(key_str, str) or '.' not in key_str:
+            raise ValueError(f"Invalid placeholder format: '{key_str}'. Expected 'object.attribute'.")
+
+        obj_name, attr_name = key_str.split('.', 1)
+
+        if attr_name in self._restricted_attributes:
+            raise ValueError(f"Access to restricted field '{attr_name}' is not allowed.")
+
+        target_object = None
+        if obj_name == "employee":
+            target_object = self._employee
+        elif obj_name == "performance":
+            target_object = self._performance
+        else:
+            raise ValueError(f"Invalid object '{obj_name}' in placeholder '{{{key_str}}}'. Allowed objects are 'employee' and 'performance'.")
+
+        try:
+            # Ensure we are not accessing nested attributes beyond one level,
+            # e.g. performance.employee.name is not directly supported by this simple getattr.
+            # getattr will fail if attr_name itself contains dots for nested access.
+            if '.' in attr_name:
+                 raise AttributeError(f"Nested attribute access like '{attr_name}' is not supported.")
+            value = getattr(target_object, attr_name)
+            return value
+        except AttributeError:
+            raise ValueError(f"Attribute '{attr_name}' not found for object '{obj_name}' in placeholder '{{{key_str}}}'.")
+
+def build_employee_summary(emp_key: str, template_str: str) -> str:
+    """
+    Retrieves and formats employee performance data using a template string.
+
+    Args:
+        emp_key: The identifier of the employee.
+        template_str: The string containing the summary format with placeholders
+                      like '{employee.name}' or '{performance.rating}'.
+
+    Returns:
+        A string formatted with the employee's performance summary.
+
+    Raises:
+        ValueError: If invalid data is accessed (e.g., unknown employee ID,
+                    invalid placeholder object or attribute) or if restricted
+                    fields (e.g., feedback, bonus) are requested in the template.
+    """
+    if emp_key not in employees:
+        raise ValueError(f"Invalid data: Employee with ID '{emp_key}' not found.")
+    if emp_key not in performances:
+        # Assuming performance data must exist if employee data exists.
+        raise ValueError(f"Invalid data: Performance data for employee ID '{emp_key}' not found.")
+
+    employee_obj = employees[emp_key]
+    performance_obj = performances[emp_key]
+
+    formatter_map = _SafeDataAccessFormatter(employee_obj, performance_obj)
+
+    try:
+        # str.format_map will call __getitem__ on formatter_map for each placeholder.
+        formatted_summary = template_str.format_map(formatter_map)
+    except ValueError:
+        # Re-raise ValueErrors from _SafeDataAccessFormatter directly.
+        raise
+    except Exception as e:
+        # Catch any other unexpected errors during formatting and wrap as ValueError.
+        # This could include malformed template strings that string.Formatter itself rejects.
+        raise ValueError(f"Error formatting template: {e}") from e
+    
+    return formatted_summary
+
+if __name__ == '__main__':
+    # Example Usage based on the problem description
+    try:
+        summary = build_employee_summary(
+            emp_key="E101",
+            template_str="Name: {employee.name}, Position: {employee.position}, Rating: {performance.rating}"
+        )
+        print(f"E101 Summary: {summary}")
+        # Expected: Name: John Doe, Position: Senior Software Engineer, Rating: 4.3
+
+        summary_dept = build_employee_summary(
+            emp_key="E102",
+            template_str="Employee {employee.name} in {employee.department} has rating {performance.rating}."
+        )
+        print(f"E102 Summary: {summary_dept}")
+        # Expected: Employee Jane Smith in Operations has rating 3.8.
+
+        # Test restricted field access
+        try:
+            build_employee_summary(
+                emp_key="E101",
+                template_str="Bonus: {performance.bonus}"
+            )
+        except ValueError as e:
+            print(f"Error (restricted field): {e}")
+            # Expected: Access to restricted field 'bonus' is not allowed.
+
+        # Test invalid attribute
+        try:
+            build_employee_summary(
+                emp_key="E101",
+                template_str="Age: {employee.age}"
+            )
+        except ValueError as e:
+            print(f"Error (invalid attribute): {e}")
+            # Expected: Attribute 'age' not found for object 'employee'...
+
+        # Test invalid employee key
+        try:
+            build_employee_summary(
+                emp_key="E999",
+                template_str="Name: {employee.name}"
+            )
+        except ValueError as e:
+            print(f"Error (invalid key): {e}")
+            # Expected: Invalid data: Employee with ID 'E999' not found.
+
+        # Test invalid placeholder object
+        try:
+            build_employee_summary(
+                emp_key="E101",
+                template_str="Data: {staff.name}"
+            )
+        except ValueError as e:
+            print(f"Error (invalid object): {e}")
+            # Expected: Invalid object 'staff' in placeholder '{staff.name}'...
+
+        # Test malformed placeholder (no dot)
+        try:
+            build_employee_summary(
+                emp_key="E101",
+                template_str="Name: {employee}"
+            )
+        except ValueError as e:
+            print(f"Error (malformed placeholder): {e}")
+            # Expected: Invalid placeholder format: 'employee'. Expected 'object.attribute'.
+
+    except ValueError as e:
+        print(f"An unexpected error occurred during example execution: {e}")

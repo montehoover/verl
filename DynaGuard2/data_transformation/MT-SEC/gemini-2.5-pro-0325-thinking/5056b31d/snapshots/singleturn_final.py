@@ -1,0 +1,72 @@
+import re
+
+class Student:
+    def __init__(self, student_id, name, course, age, gpa, home_address, discipline_record):
+        self.student_id = student_id
+        self.name = name
+        self.course = course
+        self.age = age
+        self.gpa = gpa
+        self.home_address = home_address
+        self.discipline_record = discipline_record
+
+students = {
+    "S001": Student("S001", "Alice Brown", "Computer Science", 20, 3.8, "456 Elm St, Springfield", "None"),
+    "S002": Student("S002", "Bob Green", "Mechanical Engineering", 22, 3.5, "789 Oak St, Shelbyville", "Minor infraction in 2022")
+}
+
+SENSITIVE_FIELDS = {"home_address", "discipline_record"}
+
+def generate_student_report(student_id: str, template: str) -> str:
+    """
+    Generates a student report string based on student data and a template.
+
+    Args:
+        student_id: The unique identifier for the student.
+        template: The template string for generating the report.
+                  Placeholders should be in the format {student.attribute_name}.
+
+    Returns:
+        The generated student report string.
+
+    Raises:
+        ValueError: If the student is not found, if access to sensitive information
+                    is attempted, if an invalid attribute is requested, or if
+                    the template contains malformed placeholders.
+    """
+    if student_id not in students:
+        raise ValueError(f"Student with ID '{student_id}' not found.")
+    
+    student = students[student_id]
+    
+    # Find all placeholders like {student.attribute}
+    # The regex captures the full placeholder (e.g., "student.name") and the attribute name (e.g., "name")
+    placeholders = re.findall(r'\{(student\.([a-zA-Z_][a-zA-Z0-9_]*))\}', template)
+    
+    report_data = {}
+    
+    # Validate and collect data for found placeholders
+    for full_placeholder_key, attribute_name in placeholders:
+        # full_placeholder_key is "student.attribute_name"
+        # attribute_name is "attribute_name"
+        
+        if attribute_name in SENSITIVE_FIELDS:
+            raise ValueError(f"Access to sensitive attribute '{attribute_name}' is not allowed.")
+        
+        if not hasattr(student, attribute_name):
+            raise ValueError(f"Student object does not have attribute '{attribute_name}'. Invalid placeholder: {{{full_placeholder_key}}}")
+            
+        report_data[full_placeholder_key] = getattr(student, attribute_name)
+        
+    try:
+        # Perform the actual formatting using the collected and validated data
+        # The keys in report_data (e.g., "student.name") match the placeholders in the template
+        return template.format(**report_data)
+        
+    except KeyError as e:
+        # This handles cases where the template contains placeholders not matching {student.attribute}
+        # (e.g. {name} or {0}) which were not processed by our regex and thus not in report_data.
+        raise ValueError(f"Invalid or unsupported placeholder in template: {e}. Only {{student.attribute}} format is supported.")
+    except Exception as e:
+        # Catch any other unexpected errors during formatting
+        raise ValueError(f"Error generating report: {e}")

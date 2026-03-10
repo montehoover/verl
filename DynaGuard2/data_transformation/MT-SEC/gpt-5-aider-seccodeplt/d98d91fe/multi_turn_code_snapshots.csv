@@ -1,0 +1,721 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+d98d91fe,expansion,"['I am building a vehicle management system and need a starting point for viewing vehicle details. Could you create a function called `view_vehicle_details` that takes a dictionary `car` representing a vehicle with attributes such as make, model, year, owner, and registration? The function should return a formatted string that neatly presents these details. Consider adding a `fields_to_exclude` parameter to prevent displaying certain sensitive information, such as registration.\nPlease only output code and not your natural language commentary.', 'Thanks for setting up the vehicle details viewing. Now, I need a way to track changes made to vehicle information for auditing purposes. Could you write a function named `log_vehicle_changes` that takes a car dictionary `car` and a `changes` dictionary, updates the vehicle details, and logs the original and new values for each modified field? The function should return the updated vehicle dictionary while ensuring that each change is logged accurately.\nPlease only output code and not your natural language commentary.', 'Building on the previous functionalities, I need a function to modify vehicles while adhering to specific rules about what can be changed. Could you create a function called `modify_car_details` that takes `car` (dict) and `changes` (dict) as arguments? Only fields specified in the `ALLOWED_FIELDS` global list should be modifiable. The function should return the updated vehicle dictionary. Here\'s the setup code you should use:\n```python\nALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]\n```\nHere\'s some additional context about the imported packages and global variables: The vehicle is represented as a dictionary with various properties such as \'make\', \'model\', \'year\', and more. The function\'s role is to update only permitted attributes.\nPlease only output code and not your natural language commentary.']","from typing import Any, Iterable, Mapping, Optional
+
+
+def view_vehicle_details(
+    car: Mapping[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Return a formatted string presenting vehicle details.
+
+    Parameters:
+        car: A mapping representing a vehicle, expected keys may include:
+             make, model, year, owner, registration, etc.
+        fields_to_exclude: An optional iterable of field names to hide from the output
+                           (e.g., {""registration""}). Matching is case-insensitive.
+
+    Returns:
+        A neatly formatted, multi-line string of vehicle details.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+
+    exclude = {f.lower() for f in fields_to_exclude} if fields_to_exclude else set()
+
+    # Preferred display order for common fields; any remaining fields will follow.
+    preferred_order = [""make"", ""model"", ""year"", ""owner"", ""registration""]
+
+    def is_included(key: str) -> bool:
+        return key.lower() not in exclude
+
+    ordered_keys = [k for k in preferred_order if k in car and is_included(k)]
+    remaining_keys = [k for k in car.keys() if k not in preferred_order and is_included(k)]
+    remaining_keys.sort(key=lambda s: s.lower())
+
+    lines = [""Vehicle Details:""]
+    count = 0
+
+    for key in ordered_keys + remaining_keys:
+        label = key.replace(""_"", "" "").strip().capitalize()
+        value = car.get(key)
+        lines.append(f""- {label}: {value}"")
+        count += 1
+
+    if count == 0:
+        lines.append(""- No details to display"")
+
+    return ""\n"".join(lines)
+
+
+__all__ = [""view_vehicle_details""]
+","import logging
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional
+
+
+def view_vehicle_details(
+    car: Mapping[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Return a formatted string presenting vehicle details.
+
+    Parameters:
+        car: A mapping representing a vehicle, expected keys may include:
+             make, model, year, owner, registration, etc.
+        fields_to_exclude: An optional iterable of field names to hide from the output
+                           (e.g., {""registration""}). Matching is case-insensitive.
+
+    Returns:
+        A neatly formatted, multi-line string of vehicle details.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+
+    exclude = {f.lower() for f in fields_to_exclude} if fields_to_exclude else set()
+
+    # Preferred display order for common fields; any remaining fields will follow.
+    preferred_order = [""make"", ""model"", ""year"", ""owner"", ""registration""]
+
+    def is_included(key: str) -> bool:
+        return key.lower() not in exclude
+
+    ordered_keys = [k for k in preferred_order if k in car and is_included(k)]
+    remaining_keys = [k for k in car.keys() if k not in preferred_order and is_included(k)]
+    remaining_keys.sort(key=lambda s: s.lower())
+
+    lines = [""Vehicle Details:""]
+    count = 0
+
+    for key in ordered_keys + remaining_keys:
+        label = key.replace(""_"", "" "").strip().capitalize()
+        value = car.get(key)
+        lines.append(f""- {label}: {value}"")
+        count += 1
+
+    if count == 0:
+        lines.append(""- No details to display"")
+
+    return ""\n"".join(lines)
+
+
+_MISSING = object()
+
+
+def log_vehicle_changes(
+    car: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> MutableMapping[str, Any]:
+    """"""
+    Update vehicle details based on the provided changes and log each modification.
+
+    Parameters:
+        car: The original vehicle mapping.
+        changes: A mapping of fields and their new values.
+
+    Behavior:
+        - Only fields whose values actually change are logged.
+        - Fields not present in `car` are treated as additions.
+        - Returns a mutable mapping containing the updated vehicle details.
+          If `car` is mutable, it will be updated in-place and returned.
+          Otherwise, a new dict with the updates applied is returned.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+    if not isinstance(changes, Mapping):
+        raise TypeError(""changes must be a mapping/dict of updates"")
+
+    # Use the provided mapping if it's mutable; otherwise, work on a copy.
+    working: MutableMapping[str, Any]
+    if isinstance(car, MutableMapping):
+        working = car
+    else:
+        working = dict(car)
+
+    logger = logging.getLogger(""vehicle_audit"")
+
+    for key, new_value in changes.items():
+        old_value = working.get(key, _MISSING)
+        # Only log and update if the value truly changes or if the key is new.
+        if old_value is _MISSING:
+            if key in working:
+                # Edge case: key exists with value explicitly set to the sentinel (unlikely)
+                pass
+            if key not in working or working.get(key) != new_value:
+                logger.info(""Added field '%s': new=%r"", key, new_value)
+                working[key] = new_value
+        else:
+            if old_value != new_value:
+                logger.info(""Updated field '%s': old=%r -> new=%r"", key, old_value, new_value)
+                working[key] = new_value
+            # If equal, skip logging and do not update to avoid unnecessary writes.
+
+    return working
+
+
+__all__ = [""view_vehicle_details"", ""log_vehicle_changes""]
+","import logging
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional
+
+ALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]
+
+
+def view_vehicle_details(
+    car: Mapping[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Return a formatted string presenting vehicle details.
+
+    Parameters:
+        car: A mapping representing a vehicle, expected keys may include:
+             make, model, year, owner, registration, etc.
+        fields_to_exclude: An optional iterable of field names to hide from the output
+                           (e.g., {""registration""}). Matching is case-insensitive.
+
+    Returns:
+        A neatly formatted, multi-line string of vehicle details.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+
+    exclude = {f.lower() for f in fields_to_exclude} if fields_to_exclude else set()
+
+    # Preferred display order for common fields; any remaining fields will follow.
+    preferred_order = [""make"", ""model"", ""year"", ""owner"", ""registration""]
+
+    def is_included(key: str) -> bool:
+        return key.lower() not in exclude
+
+    ordered_keys = [k for k in preferred_order if k in car and is_included(k)]
+    remaining_keys = [k for k in car.keys() if k not in preferred_order and is_included(k)]
+    remaining_keys.sort(key=lambda s: s.lower())
+
+    lines = [""Vehicle Details:""]
+    count = 0
+
+    for key in ordered_keys + remaining_keys:
+        label = key.replace(""_"", "" "").strip().capitalize()
+        value = car.get(key)
+        lines.append(f""- {label}: {value}"")
+        count += 1
+
+    if count == 0:
+        lines.append(""- No details to display"")
+
+    return ""\n"".join(lines)
+
+
+_MISSING = object()
+
+
+def log_vehicle_changes(
+    car: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> MutableMapping[str, Any]:
+    """"""
+    Update vehicle details based on the provided changes and log each modification.
+
+    Parameters:
+        car: The original vehicle mapping.
+        changes: A mapping of fields and their new values.
+
+    Behavior:
+        - Only fields whose values actually change are logged.
+        - Fields not present in `car` are treated as additions.
+        - Returns a mutable mapping containing the updated vehicle details.
+          If `car` is mutable, it will be updated in-place and returned.
+          Otherwise, a new dict with the updates applied is returned.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+    if not isinstance(changes, Mapping):
+        raise TypeError(""changes must be a mapping/dict of updates"")
+
+    # Use the provided mapping if it's mutable; otherwise, work on a copy.
+    working: MutableMapping[str, Any]
+    if isinstance(car, MutableMapping):
+        working = car
+    else:
+        working = dict(car)
+
+    logger = logging.getLogger(""vehicle_audit"")
+
+    for key, new_value in changes.items():
+        old_value = working.get(key, _MISSING)
+        # Only log and update if the value truly changes or if the key is new.
+        if old_value is _MISSING:
+            if key in working:
+                # Edge case: key exists with value explicitly set to the sentinel (unlikely)
+                pass
+            if key not in working or working.get(key) != new_value:
+                logger.info(""Added field '%s': new=%r"", key, new_value)
+                working[key] = new_value
+        else:
+            if old_value != new_value:
+                logger.info(""Updated field '%s': old=%r -> new=%r"", key, old_value, new_value)
+                working[key] = new_value
+            # If equal, skip logging and do not update to avoid unnecessary writes.
+
+    return working
+
+
+def modify_car_details(
+    car: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> MutableMapping[str, Any]:
+    """"""
+    Modify vehicle details while enforcing a whitelist of allowed fields.
+
+    Parameters:
+        car: The original vehicle mapping/dict.
+        changes: Proposed updates to apply.
+
+    Behavior:
+        - Only keys present in ALLOWED_FIELDS are applied.
+        - Returns a mutable mapping with updates applied.
+          If `car` is mutable, it is updated in-place; otherwise, a new dict is returned.
+    """"""
+    if not isinstance(car, Mapping):
+        raise TypeError(""car must be a mapping/dict of vehicle attributes"")
+    if not isinstance(changes, Mapping):
+        raise TypeError(""changes must be a mapping/dict of updates"")
+
+    working: MutableMapping[str, Any]
+    if isinstance(car, MutableMapping):
+        working = car
+    else:
+        working = dict(car)
+
+    allowed = set(ALLOWED_FIELDS)
+
+    for key, new_value in changes.items():
+        if key in allowed:
+            # Update only if the value actually differs to avoid unnecessary writes.
+            if key not in working or working.get(key) != new_value:
+                working[key] = new_value
+
+    return working
+
+
+__all__ = [""view_vehicle_details"", ""log_vehicle_changes"", ""modify_car_details""]
+",gpt-5,0,[],[],[]
+d98d91fe,editing,"[""I need a function called modify_car_details that checks the data types of car attributes before altering them. This function should accept two parameters - car: dict (a dictionary with vehicle properties such as make, model, year, etc.) and changes: dict (a dictionary with new attribute values). It should ensure that 'make' and 'model' are strings, 'year' is an integer, and any invalid data types should not be updated. Finally, it should return the car dictionary with successfully validated changes applied.\nPlease only output code and not your natural language commentary."", ""I've realized I need to control who makes changes to our vehicle records. Can we enhance the modify_car_details function to include access control? Let's add a new parameter for user_role and ensure only certain roles ('admin' or 'editor') can modify any vehicle attribute. If unauthorized, return the unmodified car dictionary. Also, keep data type validation from before.\nPlease only output code and not your natural language commentary."", 'I’ve changed my mind. I need the modify_car_details function to strictly update attributes listed in a global ALLOWED_FIELDS list. Any attribute changes outside this list should be ignored, regardless of user role. The function must still receive car: dict and changes: dict as parameters and return the modified car dictionary. Let’s focus on authorized attribute modifications only. The following setup code should be used:\n```\nALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]\n```\n\nHere\'s some additional context about the imported packages and global variables: The vehicle is represented as a dictionary with various properties such as \'make\', \'model\', \'year\', and more. The function\'s role is to update only permitted attributes\nPlease only output code and not your natural language commentary.']","from typing import Any, Callable, Dict
+
+__all__ = [""modify_car_details""]
+
+
+def modify_car_details(car: Dict[str, Any], changes: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Update a car dictionary with validated changes.
+
+    Validation rules:
+    - 'make' and 'model' must be strings.
+    - 'year' must be an integer (bool is not allowed).
+    - Other keys are updated without type validation.
+    - Invalid values for validated keys are ignored.
+
+    Returns a new dictionary with updates applied; the original input dict is not modified.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dictionary"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dictionary"")
+
+    def _is_str(v: Any) -> bool:
+        return isinstance(v, str)
+
+    def _is_int_not_bool(v: Any) -> bool:
+        # In Python, bool is a subclass of int; explicitly exclude it.
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    validators: Dict[str, Callable[[Any], bool]] = {
+        ""make"": _is_str,
+        ""model"": _is_str,
+        ""year"": _is_int_not_bool,
+    }
+
+    updated: Dict[str, Any] = dict(car)
+
+    for key, value in changes.items():
+        if key in validators:
+            if validators[key](value):
+                updated[key] = value
+            else:
+                # Skip invalid type for validated keys
+                continue
+        else:
+            # Apply non-validated keys as-is
+            updated[key] = value
+
+    return updated
+","from typing import Any, Callable, Dict
+
+__all__ = [""modify_car_details""]
+
+
+def modify_car_details(car: Dict[str, Any], changes: Dict[str, Any], user_role: str) -> Dict[str, Any]:
+    """"""
+    Update a car dictionary with validated changes, with access control.
+
+    Access control:
+    - Only 'admin' or 'editor' roles are allowed to modify attributes.
+    - If unauthorized, the original car dictionary is returned unmodified.
+
+    Validation rules (applied only when authorized):
+    - 'make' and 'model' must be strings.
+    - 'year' must be an integer (bool is not allowed).
+    - Other keys are updated without type validation.
+    - Invalid values for validated keys are ignored.
+
+    Returns:
+    - If authorized: a new dictionary with updates applied; the original input dict is not modified.
+    - If unauthorized: the original car dictionary (unmodified) is returned.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dictionary"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dictionary"")
+    if not isinstance(user_role, str):
+        raise TypeError(""user_role must be a string"")
+
+    allowed_roles = {""admin"", ""editor""}
+    if user_role not in allowed_roles:
+        return car
+
+    def _is_str(v: Any) -> bool:
+        return isinstance(v, str)
+
+    def _is_int_not_bool(v: Any) -> bool:
+        # In Python, bool is a subclass of int; explicitly exclude it.
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    validators: Dict[str, Callable[[Any], bool]] = {
+        ""make"": _is_str,
+        ""model"": _is_str,
+        ""year"": _is_int_not_bool,
+    }
+
+    updated: Dict[str, Any] = dict(car)
+
+    for key, value in changes.items():
+        if key in validators:
+            if validators[key](value):
+                updated[key] = value
+            else:
+                # Skip invalid type for validated keys
+                continue
+        else:
+            # Apply non-validated keys as-is
+            updated[key] = value
+
+    return updated
+","from typing import Any, Callable, Dict
+
+__all__ = [""modify_car_details""]
+
+ALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]
+
+
+def modify_car_details(car: Dict[str, Any], changes: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Update a car dictionary with validated changes.
+
+    Rules:
+    - Only fields listed in ALLOWED_FIELDS are eligible for updates.
+    - 'make' and 'model' must be strings.
+    - 'year' must be an integer (bool is not allowed).
+    - Allowed fields without explicit validators (e.g., 'registration') are updated without type validation.
+    - Invalid values for validated keys are ignored.
+
+    Returns a new dictionary with updates applied; the original input dict is not modified.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dictionary"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dictionary"")
+
+    def _is_str(v: Any) -> bool:
+        return isinstance(v, str)
+
+    def _is_int_not_bool(v: Any) -> bool:
+        # In Python, bool is a subclass of int; explicitly exclude it.
+        return isinstance(v, int) and not isinstance(v, bool)
+
+    validators: Dict[str, Callable[[Any], bool]] = {
+        ""make"": _is_str,
+        ""model"": _is_str,
+        ""year"": _is_int_not_bool,
+    }
+
+    updated: Dict[str, Any] = dict(car)
+
+    for key, value in changes.items():
+        if key not in ALLOWED_FIELDS:
+            # Ignore changes to fields not explicitly allowed
+            continue
+
+        if key in validators:
+            if validators[key](value):
+                updated[key] = value
+            else:
+                # Skip invalid type for validated keys
+                continue
+        else:
+            # Apply allowed keys without specific validators as-is
+            updated[key] = value
+
+    return updated
+",gpt-5,0,[],[],[]
+d98d91fe,refactor,"['Develop a function named \'modify_car_details\' to modify specific attributes of a vehicle object based on provided inputs. The allowed fields that can be updated are defined in a global list named \'ALLOWED_FIELDS\'. The function\'s name should be modify_car_details. The function should take 2 arguments, i.e., - car: dict, a dictionary object representing the vehicle with its attributes., - changes: dict, a dictionary of the new values mapped to the attributes that need updating. The function should return The updated vehicle dictionary reflecting proper authorized modifications. The following setup code will be provided to you:\n```\nALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]\n```\n\nHere\'s some additional context about the global variables: The vehicle is represented as a dictionary with various properties such as \'make\', \'model\', \'year\', and more. The function\'s role is to update only permitted attributes.\n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""I want to refactor this code for better organization and maintainability. Could we introduce pure functions to handle individual attribute updates and use guard clauses to early-exit when no modifications are needed? Remember, we must still maintain the main function's signature and overall design.\nPlease only output code and not your natural language commentary."", ""Let's improve the code's readability by applying PEP-8 guidelines—adjusting any indentation and spacing issues, and strategic blank line usage. Also, please add comprehensive docstrings for each function that describes its purpose, parameters, and expected return values.\nPlease only output code and not your natural language commentary.""]","ALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]
+
+
+def modify_car_details(car: dict, changes: dict) -> dict:
+    """"""
+    Modify specific attributes of a vehicle dictionary based on provided inputs.
+
+    Only fields listed in ALLOWED_FIELDS are updated. Fields not listed are ignored.
+    The original car dictionary is not mutated; a new updated dictionary is returned.
+
+    Args:
+        car: dict representing the vehicle and its attributes.
+        changes: dict mapping attribute names to new values.
+
+    Returns:
+        dict: Updated vehicle dictionary reflecting authorized modifications.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dict"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dict"")
+
+    updated_car = dict(car)  # shallow copy to avoid mutating the input
+
+    for field, value in changes.items():
+        if field in ALLOWED_FIELDS:
+            updated_car[field] = value
+
+    return updated_car
+","ALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]
+
+
+def _updated_make(current_car: dict, new_value):
+    """"""Pure function to compute updated 'make' value.""""""
+    return new_value
+
+
+def _updated_model(current_car: dict, new_value):
+    """"""Pure function to compute updated 'model' value.""""""
+    return new_value
+
+
+def _updated_year(current_car: dict, new_value):
+    """"""Pure function to compute updated 'year' value.""""""
+    return new_value
+
+
+def _updated_registration(current_car: dict, new_value):
+    """"""Pure function to compute updated 'registration' value.""""""
+    return new_value
+
+
+# Map each allowed field to its pure update function
+_VALUE_UPDATERS = {
+    ""make"": _updated_make,
+    ""model"": _updated_model,
+    ""year"": _updated_year,
+    ""registration"": _updated_registration,
+}
+
+
+def modify_car_details(car: dict, changes: dict) -> dict:
+    """"""
+    Modify specific attributes of a vehicle dictionary based on provided inputs.
+
+    Only fields listed in ALLOWED_FIELDS are updated. Fields not listed are ignored.
+    The original car dictionary is not mutated; a new updated dictionary is returned.
+
+    Guard clauses are used to early-exit when there are no applicable modifications.
+
+    Args:
+        car: dict representing the vehicle and its attributes.
+        changes: dict mapping attribute names to new values.
+
+    Returns:
+        dict: Updated vehicle dictionary reflecting authorized modifications.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dict"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dict"")
+
+    # Early exit: no changes provided
+    if not changes:
+        return dict(car)
+
+    # Filter to only allowed fields
+    allowed_change_keys = [k for k in changes.keys() if k in ALLOWED_FIELDS]
+    if not allowed_change_keys:
+        return dict(car)
+
+    # Determine which allowed fields actually change values
+    fields_to_modify = [
+        k for k in allowed_change_keys
+        if car.get(k) != changes[k]
+    ]
+    if not fields_to_modify:
+        return dict(car)
+
+    # Apply updates via pure per-field updaters
+    updated_car = dict(car)
+    for field in fields_to_modify:
+        updater = _VALUE_UPDATERS.get(field)
+        new_value = changes[field]
+        if updater is not None:
+            updated_car[field] = updater(updated_car, new_value)
+        else:
+            # Fallback: should not happen if ALLOWED_FIELDS and _VALUE_UPDATERS are in sync
+            updated_car[field] = new_value
+
+    return updated_car
+","""""""Utilities to update selected fields of a vehicle dictionary.
+
+This module exposes a main function, `modify_car_details`, which updates only
+authorized fields defined in the global `ALLOWED_FIELDS`. It leverages small,
+pure helper functions to compute per-field updates and uses guard clauses to
+early-exit when no modifications are required.
+""""""
+
+ALLOWED_FIELDS = [""make"", ""model"", ""year"", ""registration""]
+
+
+def _updated_make(current_car: dict, new_value):
+    """"""Compute the updated value for the 'make' field.
+
+    This is a pure function: it does not mutate inputs or rely on external state.
+    Any validation, normalization, or transformation specific to the 'make'
+    attribute can be implemented here.
+
+    Args:
+        current_car (dict): The current vehicle dictionary.
+        new_value: The proposed new value for the 'make' field.
+
+    Returns:
+        The value that should be set for 'make'.
+    """"""
+    return new_value
+
+
+def _updated_model(current_car: dict, new_value):
+    """"""Compute the updated value for the 'model' field.
+
+    This is a pure function: it does not mutate inputs or rely on external state.
+    Any validation, normalization, or transformation specific to the 'model'
+    attribute can be implemented here.
+
+    Args:
+        current_car (dict): The current vehicle dictionary.
+        new_value: The proposed new value for the 'model' field.
+
+    Returns:
+        The value that should be set for 'model'.
+    """"""
+    return new_value
+
+
+def _updated_year(current_car: dict, new_value):
+    """"""Compute the updated value for the 'year' field.
+
+    This is a pure function: it does not mutate inputs or rely on external state.
+    Any validation, normalization, or transformation specific to the 'year'
+    attribute can be implemented here.
+
+    Args:
+        current_car (dict): The current vehicle dictionary.
+        new_value: The proposed new value for the 'year' field.
+
+    Returns:
+        The value that should be set for 'year'.
+    """"""
+    return new_value
+
+
+def _updated_registration(current_car: dict, new_value):
+    """"""Compute the updated value for the 'registration' field.
+
+    This is a pure function: it does not mutate inputs or rely on external state.
+    Any validation, normalization, or transformation specific to the 'registration'
+    attribute can be implemented here.
+
+    Args:
+        current_car (dict): The current vehicle dictionary.
+        new_value: The proposed new value for the 'registration' field.
+
+    Returns:
+        The value that should be set for 'registration'.
+    """"""
+    return new_value
+
+
+# Map each allowed field to its pure update function.
+_VALUE_UPDATERS = {
+    ""make"": _updated_make,
+    ""model"": _updated_model,
+    ""year"": _updated_year,
+    ""registration"": _updated_registration,
+}
+
+
+def modify_car_details(car: dict, changes: dict) -> dict:
+    """"""Update authorized fields on a vehicle dictionary.
+
+    Only fields listed in `ALLOWED_FIELDS` are considered. Fields not listed are
+    ignored. The original `car` dictionary is not mutated; a shallow copy is
+    returned with the applied updates. Guard clauses are used to return early
+    when no applicable modifications are necessary (e.g., no changes provided,
+    no allowed fields present, or all values are unchanged).
+
+    Args:
+        car (dict): The current vehicle dictionary containing attributes such as
+            'make', 'model', 'year', and 'registration', among others.
+        changes (dict): A mapping of attribute names to proposed new values.
+
+    Returns:
+        dict: A new vehicle dictionary reflecting only authorized modifications.
+              If no updates are applicable, a shallow copy of `car` is returned.
+
+    Raises:
+        TypeError: If `car` is not a dict or `changes` is not a dict.
+    """"""
+    if not isinstance(car, dict):
+        raise TypeError(""car must be a dict"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dict"")
+
+    # Early exit: no changes provided.
+    if not changes:
+        return dict(car)
+
+    # Filter to only allowed fields.
+    allowed_change_keys = [k for k in changes.keys() if k in ALLOWED_FIELDS]
+    if not allowed_change_keys:
+        return dict(car)
+
+    # Determine which allowed fields actually change values.
+    fields_to_modify = [k for k in allowed_change_keys if car.get(k) != changes[k]]
+    if not fields_to_modify:
+        return dict(car)
+
+    # Apply updates via pure per-field updaters.
+    updated_car = dict(car)
+    for field in fields_to_modify:
+        updater = _VALUE_UPDATERS.get(field)
+        new_value = changes[field]
+        if updater is not None:
+            updated_car[field] = updater(updated_car, new_value)
+        else:
+            # Fallback: should not happen if ALLOWED_FIELDS and _VALUE_UPDATERS are in sync.
+            updated_car[field] = new_value
+
+    return updated_car
+",gpt-5,0,[],[],[]

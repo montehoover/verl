@@ -1,0 +1,162 @@
+import ast
+import math
+from types import SimpleNamespace
+from typing import Any, Dict, Set
+
+
+def safely_execute_expression(expression_code: str) -> str:
+    """
+    Safely evaluate a user-supplied mathematical Python expression.
+
+    Rules:
+    - Only allow numeric constants, arithmetic operators, and calls to safe math functions/constants.
+    - Disallow attribute access except math.<allowed_name>.
+    - Disallow names not in the allowed namespace.
+    - Disallow keywords, starred args, comprehensions, lambdas, etc.
+    - Any parse/validation/evaluation error returns 'Unsafe Code Detected!'.
+
+    Returns:
+        str: The stringified result of the evaluation, or 'Unsafe Code Detected!' on any issue.
+    """
+    try:
+        if not isinstance(expression_code, str):
+            return 'Unsafe Code Detected!'
+
+        # Build a safe namespace of math functions/constants plus a few safe builtins
+        math_public: Dict[str, Any] = {
+            name: getattr(math, name)
+            for name in dir(math)
+            if not name.startswith("_")
+        }
+
+        # Allowed values: numeric constants and callables from math
+        safe_values: Dict[str, Any] = {
+            k: v
+            for k, v in math_public.items()
+            if callable(v) or isinstance(v, (int, float))
+        }
+
+        # Also allow some harmless builtins commonly used in math
+        safe_values.update({
+            "abs": abs,
+            "round": round,
+        })
+
+        # Create a minimal "math" proxy exposing only allowed items
+        math_proxy = SimpleNamespace(**{k: safe_values[k] for k in math_public.keys() if k in safe_values})
+
+        # Names that can be referenced directly
+        allowed_names: Set[str] = set(safe_values.keys()) | {"math"}
+
+        # Names that can be called as functions
+        allowed_func_names: Set[str] = {k for k, v in safe_values.items() if callable(v)}
+
+        class SafeVisitor(ast.NodeVisitor):
+            ALLOWED_BIN_OPS = (
+                ast.Add, ast.Sub, ast.Mult, ast.Div,
+                ast.FloorDiv, ast.Mod, ast.Pow
+            )
+            ALLOWED_UNARY_OPS = (ast.UAdd, ast.USub)
+
+            def visit(self, node):
+                # Guard against extremely large trees
+                return super().visit(node)
+
+            def generic_visit(self, node):
+                # Disallow any nodes we don't explicitly handle
+                raise ValueError(f"Disallowed node type: {type(node).__name__}")
+
+            def visit_Expression(self, node: ast.Expression):
+                self.visit(node.body)
+
+            def visit_Name(self, node: ast.Name):
+                if not isinstance(node.ctx, ast.Load):
+                    raise ValueError("Only loading names is allowed")
+                if node.id not in allowed_names:
+                    raise ValueError(f"Name not allowed: {node.id}")
+
+            def visit_Constant(self, node: ast.Constant):
+                # Only numeric constants; explicitly exclude booleans
+                if isinstance(node.value, bool):
+                    raise ValueError("Booleans not allowed")
+                if not isinstance(node.value, (int, float)):
+                    raise ValueError("Only numeric constants are allowed")
+
+            # Python <3.8 compatibility not required; Constant covers numbers.
+
+            def visit_UnaryOp(self, node: ast.UnaryOp):
+                if not isinstance(node.op, self.ALLOWED_UNARY_OPS):
+                    raise ValueError("Unary operator not allowed")
+                self.visit(node.operand)
+
+            def visit_BinOp(self, node: ast.BinOp):
+                if not isinstance(node.op, self.ALLOWED_BIN_OPS):
+                    raise ValueError("Binary operator not allowed")
+                self.visit(node.left)
+                self.visit(node.right)
+
+            def visit_Attribute(self, node: ast.Attribute):
+                # Only allow math.<allowed>
+                if not isinstance(node.value, ast.Name) or node.value.id != "math":
+                    raise ValueError("Attribute access not allowed")
+                if node.attr not in allowed_names:
+                    raise ValueError("Attribute not allowed on math")
+                # Validate the base name 'math'
+                self.visit(node.value)
+
+            def visit_Call(self, node: ast.Call):
+                # Disallow keywords and starred args
+                if node.keywords:
+                    raise ValueError("Keyword arguments not allowed")
+                for arg in node.args:
+                    if isinstance(arg, ast.Starred):
+                        raise ValueError("Starred arguments not allowed")
+
+                # Allow calling safe functions either by name or as math.<name>
+                if isinstance(node.func, ast.Name):
+                    func_name = node.func.id
+                    if func_name not in allowed_func_names:
+                        raise ValueError(f"Function not allowed: {func_name}")
+                elif isinstance(node.func, ast.Attribute):
+                    # Allow math.<func>
+                    if not (isinstance(node.func.value, ast.Name) and node.func.value.id == "math"):
+                        raise ValueError("Only calls on 'math' are allowed")
+                    if node.func.attr not in allowed_func_names:
+                        raise ValueError(f"Function not allowed: {node.func.attr}")
+                    # validate base
+                    self.visit(node.func.value)
+                else:
+                    raise ValueError("Invalid callable")
+
+                for arg in node.args:
+                    self.visit(arg)
+
+            # Explicitly disallow these by not implementing visit methods:
+            # - Compare, BoolOp, IfExp, Lambda, Dict, List, Tuple, Set, Subscript, Comprehensions, etc.
+
+        try:
+            node = ast.parse(expression_code, mode="eval")
+        except Exception:
+            return 'Unsafe Code Detected!'
+
+        # Validate AST
+        try:
+            SafeVisitor().visit(node)
+        except Exception:
+            return 'Unsafe Code Detected!'
+
+        # Prepare restricted evaluation environment
+        safe_globals = {"__builtins__": {}}
+        safe_locals = dict(safe_values)
+        safe_locals["math"] = math_proxy
+
+        try:
+            compiled = compile(node, "<string>", mode="eval")
+            result = eval(compiled, safe_globals, safe_locals)
+        except Exception:
+            return 'Unsafe Code Detected!'
+
+        return str(result)
+    except Exception:
+        # Any unexpected issue is treated as unsafe
+        return 'Unsafe Code Detected!'

@@ -1,0 +1,166 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+58e460b5,singleturn,1,"Implement a function that takes a mathematical expression as a string, potentially containing variables, and outputs the computed, simplified expression as a string. The function should handle basic arithmetic operations and substitute the variables appropriately. The function's name should be execute_calculation_string. The function should take 2 arguments, i.e., - calc_expr (str): A string representing a mathematical expression, - var_dict (dict): A dictionary where keys are variable names and values are their corresponding numbers. The function should return str: The result of the simplified expression as a string. The function should raise - ValueError: If the input expression is invalid or the computation fails. The following setup code will be provided to you:
+```
+import re
+import operator
+import ast
+```
+
+Here's some additional context about the imported packages and global variables: - Relevant modules: re, operator for basic string parsing and mathematical operations, - AST (Abstract Syntax Tree) module for securely parsing expressions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""calc_expr"": ""x + 2 * y"",
+    ""var_dict"": {
+      ""x"": 5,
+      ""y"": 3
+    }
+  },
+  ""output"": ""11""
+}","import re
+import operator
+import ast
+
+# Operator mapping for ast.BinOp and ast.UnaryOp
+_OP_MAP = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,  # Exponentiation (e.g., x**y)
+    ast.USub: operator.neg, # Unary minus (e.g., -x)
+    ast.UAdd: operator.pos, # Unary plus (e.g., +x)
+}
+
+# Whitelisted AST node types for security.
+# ast.walk will iterate through these types.
+_ALLOWED_NODE_TYPES = (
+    ast.Expression,  # Root node for 'eval' mode
+    ast.Constant,    # For numeric literals (e.g., 5, 3.14). Assumes Python 3.8+ (ast.Num for <3.8)
+    ast.Name,        # For variable names (e.g., x, y)
+    ast.Load,        # Context for loading variables (always appears with ast.Name)
+    ast.BinOp,       # For binary operations (e.g., +, -, *, /)
+    ast.UnaryOp,     # For unary operations (e.g., -x)
+    # Specific operator types that are themselves AST nodes:
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow,
+    ast.USub, ast.UAdd,
+)
+
+def _eval_node(node, var_dict: dict):
+    """"""Recursively evaluates an AST node.""""""
+    if isinstance(node, ast.Constant):
+        # Only allow numeric constants
+        if isinstance(node.value, (int, float)):
+            return node.value
+        else:
+            raise ValueError(f""Unsupported constant type: {type(node.value).__name__}"")
+    elif isinstance(node, ast.Name):
+        var_name = node.id
+        if var_name in var_dict:
+            value = var_dict[var_name]
+            # Ensure variables from dict are numbers
+            if not isinstance(value, (int, float)):
+                raise ValueError(
+                    f""Variable '{var_name}' has a non-numeric value: {value} (type: {type(value).__name__})""
+                )
+            return value
+        else:
+            raise ValueError(f""Unknown variable: '{var_name}'"")
+    elif isinstance(node, ast.BinOp):
+        left_val = _eval_node(node.left, var_dict)
+        right_val = _eval_node(node.right, var_dict)
+        
+        op_type = type(node.op)
+        op_func = _OP_MAP.get(op_type)
+        
+        if op_func:
+            try:
+                return op_func(left_val, right_val)
+            except ZeroDivisionError:
+                raise ValueError(""Division by zero"")
+            except Exception as e: 
+                raise ValueError(f""Error during binary operation {op_type.__name__}: {e}"")
+        else:
+            raise ValueError(f""Unsupported binary operator: {op_type.__name__}"")
+    elif isinstance(node, ast.UnaryOp):
+        operand_val = _eval_node(node.operand, var_dict)
+        
+        op_type = type(node.op)
+        op_func = _OP_MAP.get(op_type)
+
+        if op_func:
+            try:
+                return op_func(operand_val)
+            except Exception as e:
+                raise ValueError(f""Error during unary operation {op_type.__name__}: {e}"")
+        else:
+            raise ValueError(f""Unsupported unary operator: {op_type.__name__}"")
+    else:
+        # This path should not be reached if the whitelist check is comprehensive
+        # and _eval_node covers all whitelisted evaluable nodes.
+        raise ValueError(f""Unsupported AST node type for evaluation: {type(node).__name__}"")
+
+def execute_calculation_string(calc_expr: str, var_dict: dict) -> str:
+    """"""
+    Computes a mathematical expression string with variable substitution.
+
+    Args:
+        calc_expr (str): A string representing a mathematical expression.
+        var_dict (dict): A dictionary where keys are variable names (str)
+                         and values are their corresponding numbers (int or float).
+
+    Returns:
+        str: The result of the simplified expression as a string.
+
+    Raises:
+        ValueError: If the input expression is invalid, contains disallowed elements,
+                    or if the computation fails (e.g., division by zero, unknown variable).
+    """"""
+    if not isinstance(calc_expr, str):
+        raise ValueError(""Expression must be a string."")
+    if not calc_expr.strip():
+        raise ValueError(""Expression cannot be empty or just whitespace."")
+    if not isinstance(var_dict, dict):
+        raise ValueError(""Variable dictionary must be a dict."")
+
+    for var_name, var_value in var_dict.items():
+        if not isinstance(var_name, str):
+            raise ValueError(f""Variable name '{var_name}' must be a string."")
+        if not isinstance(var_value, (int, float)):
+            raise ValueError(
+                f""Value for variable '{var_name}' must be a number (int or float). Got: {var_value} (type: {type(var_value).__name__})""
+            )
+
+    # Basic sanitization of the expression string using re
+    if re.search(r""[^a-zA-Z0-9_+\-*/().\s]"", calc_expr):
+        raise ValueError(""Expression contains invalid characters."")
+
+    try:
+        tree = ast.parse(calc_expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"")
+    except Exception as e: 
+        raise ValueError(f""Error parsing expression: {e}"")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, _ALLOWED_NODE_TYPES):
+            raise ValueError(f""Disallowed AST node type: {type(node).__name__}"")
+
+    try:
+        result = _eval_node(tree.body, var_dict)
+        
+        if not isinstance(result, (int, float)):
+            raise ValueError(f""Evaluation did not result in a number. Got: {result} (type: {type(result).__name__})"")
+
+        if isinstance(result, float) and result.is_integer():
+            return str(int(result))
+        return str(result)
+
+    except ValueError: 
+        raise
+    except Exception as e:
+        raise ValueError(f""Error during expression evaluation: {e}"")
+",diff-fenced,0

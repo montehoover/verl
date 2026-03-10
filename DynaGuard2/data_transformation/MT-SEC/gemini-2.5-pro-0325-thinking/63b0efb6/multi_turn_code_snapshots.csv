@@ -1,0 +1,2410 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+63b0efb6,expansion,"[""I'm developing a data processing application and need a foundational function to extract specific fields from a dataset. Could you help me create a function called select_fields that takes a list of records (dictionaries) and a list of field names (strings), then returns a list of dictionaries containing only those fields? The function should handle cases where some fields might not be present in all records. Please include the necessary import for handling default values:\n\n```python\nfrom collections import defaultdict\n```\nPlease only output code and not your natural language commentary."", 'Thanks for setting up the field extraction. Now, I want to add a feature to filter the records based on certain conditions. Could you write a function named filter_data that accepts a list of records and a condition (expressed as a callable), then returns a list of records that satisfy this condition? The function should support logical operations available in Python. Please add the necessary import:\n\n```python\nfrom typing import Callable, List, Dict\n```\nPlease only output code and not your natural language commentary.', ""To finalize the data processing application, I need a function that can execute SQL-like queries. Could you develop a function named run_sql_query that processes commands including SELECT, WHERE, and ORDER BY? It should take two arguments: `records`, a list of dictionaries, and `command`, a string with the SQL-like statement. The function should return a list of dictionaries with the query results and raise a ValueError if the query is malformed or fails. Below is the required setup code:\n\n```python\nimport re\nimport operator\nfrom functools import partial\n```\n\nHere's some additional context about the imported packages and global variables: Modules you may need:, - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions\nPlease only output code and not your natural language commentary.""]","from collections import defaultdict
+
+def select_fields(records: list[dict], fields: list[str]) -> list[dict]:
+    """"""
+    Extracts specific fields from a list of records.
+
+    Args:
+        records: A list of dictionaries.
+        fields: A list of field names (strings) to extract.
+
+    Returns:
+        A list of dictionaries, where each dictionary contains only the
+        specified fields from the original record. If a field is not
+        present in a record, it is omitted from the result for that record.
+    """"""
+    selected_records = []
+    for record in records:
+        new_record = {}
+        for field in fields:
+            if field in record:
+                new_record[field] = record[field]
+        selected_records.append(new_record)
+    return selected_records
+","from collections import defaultdict
+from typing import Callable, List, Dict
+
+def select_fields(records: list[dict], fields: list[str]) -> list[dict]:
+    """"""
+    Extracts specific fields from a list of records.
+
+    Args:
+        records: A list of dictionaries.
+        fields: A list of field names (strings) to extract.
+
+    Returns:
+        A list of dictionaries, where each dictionary contains only the
+        specified fields from the original record. If a field is not
+        present in a record, it is omitted from the result for that record.
+    """"""
+    selected_records = []
+    for record in records:
+        new_record = {}
+        for field in fields:
+            if field in record:
+                new_record[field] = record[field]
+        selected_records.append(new_record)
+    return selected_records
+
+def filter_data(records: List[Dict], condition: Callable[[Dict], bool]) -> List[Dict]:
+    """"""
+    Filters a list of records based on a given condition.
+
+    Args:
+        records: A list of dictionaries.
+        condition: A callable that takes a record (dictionary) and
+                   returns True if the record satisfies the condition,
+                   False otherwise.
+
+    Returns:
+        A list of dictionaries that satisfy the condition.
+    """"""
+    filtered_records = []
+    for record in records:
+        if condition(record):
+            filtered_records.append(record)
+    return filtered_records
+","from collections import defaultdict
+from typing import Callable, List, Dict
+import re
+import operator
+from functools import partial # Included as requested
+
+def select_fields(records: list[dict], fields: list[str]) -> list[dict]:
+    """"""
+    Extracts specific fields from a list of records.
+
+    Args:
+        records: A list of dictionaries.
+        fields: A list of field names (strings) to extract.
+
+    Returns:
+        A list of dictionaries, where each dictionary contains only the
+        specified fields from the original record. If a field is not
+        present in a record, it is omitted from the result for that record.
+    """"""
+    selected_records = []
+    for record in records:
+        new_record = {}
+        for field in fields:
+            if field in record:
+                new_record[field] = record[field]
+        selected_records.append(new_record)
+    return selected_records
+
+def filter_data(records: List[Dict], condition: Callable[[Dict], bool]) -> List[Dict]:
+    """"""
+    Filters a list of records based on a given condition.
+
+    Args:
+        records: A list of dictionaries.
+        condition: A callable that takes a record (dictionary) and
+                   returns True if the record satisfies the condition,
+                   False otherwise.
+
+    Returns:
+        A list of dictionaries that satisfy the condition.
+    """"""
+    filtered_records = []
+    for record in records:
+        if condition(record):
+            filtered_records.append(record)
+    return filtered_records
+
+def run_sql_query(records: List[Dict], command: str) -> List[Dict]:
+    """"""
+    Processes SQL-like queries (SELECT, WHERE, ORDER BY) on a list of records.
+
+    Args:
+        records: A list of dictionaries.
+        command: A string with the SQL-like statement.
+
+    Returns:
+        A list of dictionaries with the query results.
+
+    Raises:
+        ValueError: If the query is malformed or fails during execution.
+    """"""
+
+    def _parse_condition_str(condition_str: str) -> Callable[[Dict], bool]:
+        # Helper to parse WHERE clause conditions like ""field op value""
+        # Handles: field op 'string', field op ""string"", field op number, field IS NULL, field IS NOT NULL
+        # Ops: =, !=, >, <, >=, <=, CONTAINS
+
+        # IS [NOT] NULL must be checked first due to its specific syntax
+        m_is_null = re.match(r""(\w+)\s+(IS\s+NOT\s+NULL|IS\s+NULL)\s*$"", condition_str, re.IGNORECASE)
+        if m_is_null:
+            field = m_is_null.group(1)
+            op_str_is_null = m_is_null.group(2).upper()
+            if op_str_is_null == ""IS NULL"":
+                return lambda r: r.get(field) is None
+            else:  # IS NOT NULL
+                return lambda r: r.get(field) is not None
+
+        # field op 'string_value' or field op ""string_value""
+        m_str_val = re.match(r""(\w+)\s*([<>=!]+|CONTAINS)\s*(['\""])(.*?)\3\s*$"", condition_str, re.IGNORECASE)
+        if m_str_val:
+            field, op_str, _, value_str = m_str_val.groups()
+            value = value_str  # Value is a string
+        else:
+            # field op numeric_value
+            # CONTAINS is typically not used with numbers in this simple context
+            m_num_val = re.match(r""(\w+)\s*([<>=!]+)\s*(\d+\.?\d*)\s*$"", condition_str, re.IGNORECASE)
+            if m_num_val:
+                field, op_str, value_str = m_num_val.groups()
+                try:
+                    value = float(value_str) if '.' in value_str else int(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid numeric value in WHERE condition: {value_str}"")
+            else:
+                raise ValueError(f""Malformed WHERE condition: '{condition_str}'. Expected format: field op value (e.g., name = 'test', age > 30, id IS NULL)."")
+
+        # Normalize operator (e.g., '=' to '==') for the operator map
+        normalized_op_str = op_str.upper()
+        if normalized_op_str == '=':
+            normalized_op_str = '=='
+        
+        op_map = {
+            '==': operator.eq, '!=': operator.ne,
+            '>': operator.gt, '<': operator.lt,
+            '>=': operator.ge, '<=': operator.le,
+        }
+
+        if normalized_op_str == 'CONTAINS':
+            if not isinstance(value, str):
+                raise ValueError(""CONTAINS operator requires a string value for comparison."")
+            return lambda r: field in r and isinstance(r.get(field), str) and value in r[field]
+        
+        if normalized_op_str not in op_map:
+            raise ValueError(f""Unsupported operator in WHERE condition: {op_str}"")
+        
+        op_func = op_map[normalized_op_str]
+
+        def condition_checker(record: Dict) -> bool:
+            if field not in record or record.get(field) is None:
+                # SQL behavior: comparisons with NULL (other than IS NULL/IS NOT NULL) are false/unknown.
+                return False
+            
+            record_value = record[field]
+            
+            # Type checking for comparison:
+            # Allow numeric comparison (int/float with int/float)
+            # Allow string comparison (str with str)
+            # Otherwise, types are considered incompatible for this simple checker.
+            if isinstance(value, (int, float)) and isinstance(record_value, (int, float)):
+                return op_func(record_value, value)
+            elif isinstance(value, str) and isinstance(record_value, str):
+                return op_func(record_value, value)
+            else:
+                # Mismatched types (e.g., comparing string '10' with number 5) are false.
+                return False
+        return condition_checker
+
+    # Main regex to parse SELECT, optional WHERE, optional ORDER BY
+    query_pattern = re.compile(
+        r""SELECT\s+(?P<select_fields>.+?)""
+        r""(?:\s+WHERE\s+(?P<where_clause>.+?))?""
+        r""(?:\s+ORDER BY\s+(?P<orderby_clause>.+?))?$"",
+        re.IGNORECASE
+    )
+
+    match = query_pattern.match(command.strip())
+    if not match:
+        raise ValueError(""Malformed SQL query. Expected: SELECT fields [WHERE condition] [ORDER BY field [ASC|DESC]]"")
+
+    parts = match.groupdict()
+    select_fields_str = parts[""select_fields""].strip()
+    where_clause_str = parts[""where_clause""].strip() if parts[""where_clause""] else None
+    orderby_clause_str = parts[""orderby_clause""].strip() if parts[""orderby_clause""] else None
+    
+    # If WHERE clause is present, but it also captured ORDER BY (due to regex structure)
+    # we need to separate them. This happens if orderby_clause is None but where_clause contains ""ORDER BY""
+    if where_clause_str and orderby_clause_str is None and ""ORDER BY"" in where_clause_str.upper():
+        orderby_keyword_index = where_clause_str.upper().rfind(""ORDER BY"")
+        # Check if ""ORDER BY"" is not within quotes
+        # This is a simplification; proper parsing would be more robust.
+        # For now, assume ""ORDER BY"" is a clause separator if not obviously part of a string literal.
+        # A quick check: count quotes before. If even, it's likely a separator.
+        # This is still fragile. The main regex should ideally handle this better.
+        # The current regex `.+?` is non-greedy, so it should stop before the next optional group.
+        # If `orderby_clause` is None, it means `ORDER BY` was not matched as a separate clause.
+        # So, if `where_clause_str` contains `ORDER BY`, it must be part of the where condition itself,
+        # or the query is malformed in a way the regex didn't catch (e.g. `SELECT * WHERE x ORDER BY y = 10`)
+        # For now, trust the regex groups. If `ORDER BY` is in `where_clause_str` when `orderby_clause` is None,
+        # it's treated as part of the WHERE condition, which `_parse_condition_str` will likely reject.
+
+    current_records = list(records)  # Work on a copy
+
+    # --- WHERE clause processing ---
+    if where_clause_str:
+        try:
+            # If WHERE clause itself contains ""ORDER BY"" and orderby_clause is also set,
+            # it implies the where_clause was not terminated correctly by the regex.
+            # Example: SELECT * WHERE name = 'test' ORDER BY id ORDER BY date
+            # This is unlikely with the current regex structure.
+            if orderby_clause_str and ""ORDER BY"" in where_clause_str[len(where_clause_str) - len(orderby_clause_str) - 10:].upper(): # Heuristic
+                 # This suggests `where_clause` might have incorrectly captured an `ORDER BY` meant for the `orderby_clause`.
+                 # This situation should ideally be handled by a more sophisticated parser or a clearer regex.
+                 # For now, we assume the regex correctly separates clauses.
+                 pass
+
+            filter_func = _parse_condition_str(where_clause_str)
+            current_records = filter_data(current_records, filter_func)
+        except ValueError as e:
+            # Re-raise with more context if needed, or let it propagate.
+            raise ValueError(f""Error processing WHERE clause '{where_clause_str}': {e}"")
+
+    # --- ORDER BY clause processing ---
+    if orderby_clause_str:
+        m_orderby = re.match(r""(\w+)(?:\s+(ASC|DESC))?\s*$"", orderby_clause_str, re.IGNORECASE)
+        if not m_orderby:
+            raise ValueError(f""Malformed ORDER BY clause: '{orderby_clause_str}'. Expected: field [ASC|DESC]"")
+        
+        orderby_field = m_orderby.group(1)
+        direction_str = m_orderby.group(2)
+        sort_desc = bool(direction_str and direction_str.upper() == ""DESC"")
+
+        try:
+            # Sort key: (is_None, value) ensures Nones are grouped and sorted consistently.
+            # For ASC (sort_desc=False): Nones last. (False, val) < (True, None)
+            # For DESC (sort_desc=True): Nones first. Reversed: (True, None) < (False, val)
+            current_records.sort(
+                key=lambda r: (r.get(orderby_field) is None, r.get(orderby_field)),
+                reverse=sort_desc
+            )
+        except TypeError:
+            # Occurs if trying to compare incompatible types (e.g., int and str) for sorting.
+            raise ValueError(f""Incompatible data types for sorting on field '{orderby_field}'."")
+
+    # --- SELECT fields processing (projection) ---
+    if select_fields_str == ""*"":
+        final_records = current_records  # Return all fields of the processed records
+    else:
+        fields_to_select = [f.strip() for f in select_fields_str.split(',') if f.strip()]
+        if not fields_to_select: # Handles cases like ""SELECT ,"" or ""SELECT  ""
+             raise ValueError(""No fields specified in SELECT clause or invalid field list."")
+        if any(not f.isidentifier() for f in fields_to_select): # Basic check for valid field names
+            raise ValueError(f""Invalid field name in SELECT clause: {select_fields_str}"")
+        final_records = select_fields(current_records, fields_to_select)
+        
+    return final_records
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+63b0efb6,editing,"['I\'m trying to work with a dataset represented as a list of dictionaries. Could you help me create a function called \'extract_fields\'? This function should take two arguments: a list of dictionaries and a list of field names. It should return a new list of dictionaries containing only the specified fields from each record. This will help me focus on specific data points.""\nPlease only output code and not your natural language commentary.', 'Now that I can extract specific fields, I want to filter these records based on certain conditions. Can you help me modify the \'extract_fields\' function to include a filtering capability? Let\'s add a third argument, \'conditions\', which will be a dictionary specifying the field conditions. The function should return records that match these conditions. It should raise a ValueError if a condition references a non-existent field.""\nPlease only output code and not your natural language commentary.', 'Actually, I need a more comprehensive solution. Can we create a function called \'run_sql_query\'? It should take \'records\' (a list of dictionaries) and \'command\' (a string with a SQL-like statement) as parameters. The function should handle SELECT, WHERE, and ORDER BY operations, returning the results as a list of dictionaries. If the query is malformed or fails, it should raise a ValueError. Here\'s the setup code that needs to be included:\n```\nimport re\nimport operator\nfrom functools import partial\n```\nHere\'s some additional context about the imported packages and global variables: Modules you may need:, - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions.""\nPlease only output code and not your natural language commentary.']","def extract_fields(data: list[dict], fields: list[str]) -> list[dict]:
+    """"""
+    Extracts specified fields from a list of dictionaries.
+
+    Args:
+        data: A list of dictionaries.
+        fields: A list of field names to extract.
+
+    Returns:
+        A new list of dictionaries, where each dictionary contains only
+        the specified fields from the original dictionaries.
+    """"""
+    result = []
+    for record in data:
+        new_record = {}
+        for field in fields:
+            if field in record:
+                new_record[field] = record[field]
+        if new_record:  # Add record only if it's not empty (e.g., if at least one field was found)
+            result.append(new_record)
+    return result
+
+if __name__ == '__main__':
+    # Example Usage
+    sample_data = [
+        {""id"": 1, ""name"": ""Alice"", ""age"": 30, ""city"": ""New York""},
+        {""id"": 2, ""name"": ""Bob"", ""age"": 24, ""occupation"": ""Engineer""},
+        {""id"": 3, ""name"": ""Charlie"", ""city"": ""London"", ""age"": 35}
+    ]
+
+    fields_to_extract = [""name"", ""age""]
+    extracted_data = extract_fields(sample_data, fields_to_extract)
+    print(""Extracted data (name, age):"")
+    for item in extracted_data:
+        print(item)
+
+    fields_to_extract_2 = [""id"", ""city"", ""occupation""]
+    extracted_data_2 = extract_fields(sample_data, fields_to_extract_2)
+    print(""\nExtracted data (id, city, occupation):"")
+    for item in extracted_data_2:
+        print(item)
+
+    fields_to_extract_3 = [""non_existent_field""]
+    extracted_data_3 = extract_fields(sample_data, fields_to_extract_3)
+    print(""\nExtracted data (non_existent_field):"")
+    for item in extracted_data_3:
+        print(item) # Should be empty or records with only existing fields if any
+
+    fields_to_extract_4 = []
+    extracted_data_4 = extract_fields(sample_data, fields_to_extract_4)
+    print(""\nExtracted data (no fields):"")
+    for item in extracted_data_4:
+        print(item) # Should be a list of empty dicts or an empty list depending on implementation
+
+    empty_data = []
+    extracted_data_empty = extract_fields(empty_data, fields_to_extract)
+    print(""\nExtracted data (empty input data):"")
+    for item in extracted_data_empty:
+        print(item)
+","def extract_fields(data: list[dict], fields: list[str], conditions: dict) -> list[dict]:
+    """"""
+    Extracts specified fields from a list of dictionaries and filters records based on conditions.
+
+    Args:
+        data: A list of dictionaries.
+        fields: A list of field names to extract.
+        conditions: A dictionary specifying field conditions to filter records.
+                    Example: {""age"": 30, ""city"": ""New York""}
+
+    Returns:
+        A new list of dictionaries, where each dictionary contains only
+        the specified fields from the original dictionaries that match all conditions.
+
+    Raises:
+        ValueError: If a condition field is not found in a record when checking conditions.
+    """"""
+    result = []
+    for record in data:
+        record_matches_conditions = True
+        # Apply conditions if any are provided (i.e., if conditions dictionary is not empty)
+        if conditions: 
+            for cond_key, cond_value in conditions.items():
+                if cond_key not in record:
+                    raise ValueError(f""Condition field '{cond_key}' not found in record: {record}"")
+                if record[cond_key] != cond_value:
+                    record_matches_conditions = False
+                    break  # Stop checking other conditions for this record
+
+        if record_matches_conditions:
+            # If record matches all conditions (or if conditions was empty), extract fields
+            new_record = {}
+            for field in fields:
+                if field in record:
+                    new_record[field] = record[field]
+            result.append(new_record) # Add the extracted record (could be empty if fields is empty or no specified fields found)
+    return result
+
+if __name__ == '__main__':
+    # Example Usage
+    sample_data = [
+        {""id"": 1, ""name"": ""Alice"", ""age"": 30, ""city"": ""New York""},
+        {""id"": 2, ""name"": ""Bob"", ""age"": 24, ""occupation"": ""Engineer""},
+        {""id"": 3, ""name"": ""Charlie"", ""city"": ""London"", ""age"": 35}
+    ]
+
+    # --- Original examples (adapted with empty conditions dictionary {}) ---
+    print(""--- Original behavior with empty conditions ---"")
+    fields_to_extract = [""name"", ""age""]
+    # Pass empty dict for conditions to signify no filtering
+    extracted_data = extract_fields(sample_data, fields_to_extract, {})
+    print(""Extracted data (name, age) with no filter:"")
+    for item in extracted_data:
+        print(item)
+
+    fields_to_extract_2 = [""id"", ""city"", ""occupation""]
+    extracted_data_2 = extract_fields(sample_data, fields_to_extract_2, {})
+    print(""\nExtracted data (id, city, occupation) with no filter:"")
+    for item in extracted_data_2:
+        print(item)
+
+    fields_to_extract_3 = [""non_existent_field""]
+    extracted_data_3 = extract_fields(sample_data, fields_to_extract_3, {})
+    print(""\nExtracted data (non_existent_field) with no filter (expect list of empty dicts):"")
+    for item in extracted_data_3:
+        print(item) 
+
+    fields_to_extract_4 = [] # Empty list of fields
+    extracted_data_4 = extract_fields(sample_data, fields_to_extract_4, {})
+    print(""\nExtracted data (no fields) with no filter (expect list of empty dicts):"")
+    for item in extracted_data_4:
+        print(item)
+
+    empty_data = []
+    extracted_data_empty = extract_fields(empty_data, fields_to_extract, {})
+    print(""\nExtracted data (empty input data) with no filter:"")
+    for item in extracted_data_empty:
+        print(item)
+
+    # --- New examples with filtering ---
+    print(""\n--- New examples with filtering ---"")
+
+    # Example 1: Filter by age
+    conditions_age_30 = {""age"": 30}
+    extracted_filtered_1 = extract_fields(sample_data, [""name"", ""city""], conditions_age_30)
+    print(""\nFiltered by age=30, extract (name, city):"")
+    for item in extracted_filtered_1:
+        print(item) # Expected: [{'name': 'Alice', 'city': 'New York'}]
+
+    # Example 2: Filter by multiple fields
+    conditions_bob = {""name"": ""Bob"", ""occupation"": ""Engineer""}
+    extracted_filtered_2 = extract_fields(sample_data, [""id"", ""age""], conditions_bob)
+    print(""\nFiltered by name='Bob' AND occupation='Engineer', extract (id, age):"")
+    for item in extracted_filtered_2:
+        print(item) # Expected: [{'id': 2, 'age': 24}]
+
+    # Example 3: Filter resulting in no matches (condition value mismatch)
+    conditions_no_match_value = {""city"": ""Paris""}
+    extracted_filtered_3 = extract_fields(sample_data, [""name""], conditions_no_match_value)
+    print(""\nFiltered by city='Paris', extract (name):"")
+    for item in extracted_filtered_3:
+        print(item) # Expected: []
+
+    # Example 4: Filter with empty fields list
+    extracted_filtered_4 = extract_fields(sample_data, [], conditions_age_30)
+    print(""\nFiltered by age=30, extract (no fields) (expect list with one empty dict):"")
+    for item in extracted_filtered_4:
+        print(item) # Expected: [{}]
+
+    # Example 5: Filter with condition on a non-existent field (ValueError)
+    print(""\nAttempting filter with condition on non-existent field 'country':"")
+    conditions_bad_field = {""country"": ""USA""}
+    try:
+        extract_fields(sample_data, [""name""], conditions_bad_field)
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}"")
+
+    # Example 6: Filter with conditions that don't match any record's value for a field
+    conditions_age_100 = {""age"": 100}
+    extracted_filtered_5 = extract_fields(sample_data, [""name""], conditions_age_100)
+    print(""\nFiltered by age=100, extract (name):"")
+    for item in extracted_filtered_5:
+        print(item) # Expected: []
+
+    # Example 7: All records match condition (empty condition dict), 
+    # but some fields to extract are not present in all matching records
+    conditions_all_match_implicit = {} 
+    fields_mixed_presence = [""name"", ""occupation""]
+    extracted_filtered_6 = extract_fields(sample_data, fields_mixed_presence, conditions_all_match_implicit)
+    print(""\nNo filter, extract (name, occupation):"")
+    for item in extracted_filtered_6:
+        print(item)
+","import re
+import operator
+# functools.partial is not used in this implementation, so it's omitted.
+
+# Helper for mapping SQL-like operators to Python's operator functions
+_OPERATORS = {
+    '=': operator.eq,
+    '!=': operator.ne,
+    '>': operator.gt,
+    '<': operator.lt,
+    '>=': operator.ge,
+    '<=': operator.le,
+}
+
+def _parse_value(val_str: str):
+    """"""
+    Parses a value string from a SQL query.
+    Handles quoted strings, integers, and floats.
+    """"""
+    val_str = val_str.strip()
+    if (val_str.startswith(""'"") and val_str.endswith(""'"")) or \
+       (val_str.startswith('""') and val_str.endswith('""')):
+        return val_str[1:-1]  # Return as string
+    try:
+        return int(val_str)
+    except ValueError:
+        try:
+            return float(val_str)
+        except ValueError:
+            raise ValueError(f""WHERE clause value '{val_str}' must be a number or a quoted string."")
+
+
+def extract_fields(data: list[dict], fields: list[str], conditions: dict) -> list[dict]:
+    """"""
+    Extracts specified fields from a list of dictionaries and filters records based on conditions.
+
+    Args:
+        data: A list of dictionaries.
+        fields: A list of field names to extract.
+        conditions: A dictionary specifying field conditions to filter records.
+                    Example: {""age"": 30, ""city"": ""New York""}
+
+    Returns:
+        A new list of dictionaries, where each dictionary contains only
+        the specified fields from the original dictionaries that match all conditions.
+
+    Raises:
+        ValueError: If a condition field is not found in a record when checking conditions.
+    """"""
+    result = []
+    for record in data:
+        record_matches_conditions = True
+        # Apply conditions if any are provided (i.e., if conditions dictionary is not empty)
+        if conditions: 
+            for cond_key, cond_value in conditions.items():
+                if cond_key not in record:
+                    raise ValueError(f""Condition field '{cond_key}' not found in record: {record}"")
+                if record[cond_key] != cond_value:
+                    record_matches_conditions = False
+                    break  # Stop checking other conditions for this record
+
+        if record_matches_conditions:
+            # If record matches all conditions (or if conditions was empty), extract fields
+            new_record = {}
+            for field in fields:
+                if field in record:
+                    new_record[field] = record[field]
+            result.append(new_record) # Add the extracted record (could be empty if fields is empty or no specified fields found)
+    return result
+
+if __name__ == '__main__':
+    # Example Usage
+    sample_data = [
+        {""id"": 1, ""name"": ""Alice"", ""age"": 30, ""city"": ""New York""},
+        {""id"": 2, ""name"": ""Bob"", ""age"": 24, ""occupation"": ""Engineer""},
+        {""id"": 3, ""name"": ""Charlie"", ""city"": ""London"", ""age"": 35}
+    ]
+
+    # --- Original examples (adapted with empty conditions dictionary {}) ---
+    print(""--- Original behavior with empty conditions ---"")
+    fields_to_extract = [""name"", ""age""]
+    # Pass empty dict for conditions to signify no filtering
+    extracted_data = extract_fields(sample_data, fields_to_extract, {})
+    print(""Extracted data (name, age) with no filter:"")
+    for item in extracted_data:
+        print(item)
+
+    fields_to_extract_2 = [""id"", ""city"", ""occupation""]
+    extracted_data_2 = extract_fields(sample_data, fields_to_extract_2, {})
+    print(""\nExtracted data (id, city, occupation) with no filter:"")
+    for item in extracted_data_2:
+        print(item)
+
+    fields_to_extract_3 = [""non_existent_field""]
+    extracted_data_3 = extract_fields(sample_data, fields_to_extract_3, {})
+    print(""\nExtracted data (non_existent_field) with no filter (expect list of empty dicts):"")
+    for item in extracted_data_3:
+        print(item) 
+
+    fields_to_extract_4 = [] # Empty list of fields
+    extracted_data_4 = extract_fields(sample_data, fields_to_extract_4, {})
+    print(""\nExtracted data (no fields) with no filter (expect list of empty dicts):"")
+    for item in extracted_data_4:
+        print(item)
+
+    empty_data = []
+    extracted_data_empty = extract_fields(empty_data, fields_to_extract, {})
+    print(""\nExtracted data (empty input data) with no filter:"")
+    for item in extracted_data_empty:
+        print(item)
+
+    # --- New examples with filtering ---
+    print(""\n--- New examples with filtering ---"")
+
+    # Example 1: Filter by age
+    conditions_age_30 = {""age"": 30}
+    extracted_filtered_1 = extract_fields(sample_data, [""name"", ""city""], conditions_age_30)
+    print(""\nFiltered by age=30, extract (name, city):"")
+    for item in extracted_filtered_1:
+        print(item) # Expected: [{'name': 'Alice', 'city': 'New York'}]
+
+    # Example 2: Filter by multiple fields
+    conditions_bob = {""name"": ""Bob"", ""occupation"": ""Engineer""}
+    extracted_filtered_2 = extract_fields(sample_data, [""id"", ""age""], conditions_bob)
+    print(""\nFiltered by name='Bob' AND occupation='Engineer', extract (id, age):"")
+    for item in extracted_filtered_2:
+        print(item) # Expected: [{'id': 2, 'age': 24}]
+
+    # Example 3: Filter resulting in no matches (condition value mismatch)
+    conditions_no_match_value = {""city"": ""Paris""}
+    extracted_filtered_3 = extract_fields(sample_data, [""name""], conditions_no_match_value)
+    print(""\nFiltered by city='Paris', extract (name):"")
+    for item in extracted_filtered_3:
+        print(item) # Expected: []
+
+    # Example 4: Filter with empty fields list
+    extracted_filtered_4 = extract_fields(sample_data, [], conditions_age_30)
+    print(""\nFiltered by age=30, extract (no fields) (expect list with one empty dict):"")
+    for item in extracted_filtered_4:
+        print(item) # Expected: [{}]
+
+    # Example 5: Filter with condition on a non-existent field (ValueError)
+    print(""\nAttempting filter with condition on non-existent field 'country':"")
+    conditions_bad_field = {""country"": ""USA""}
+    try:
+        extract_fields(sample_data, [""name""], conditions_bad_field)
+    except ValueError as e:
+        print(f""Caught expected ValueError: {e}"")
+
+    # Example 6: Filter with conditions that don't match any record's value for a field
+    conditions_age_100 = {""age"": 100}
+    extracted_filtered_5 = extract_fields(sample_data, [""name""], conditions_age_100)
+    print(""\nFiltered by age=100, extract (name):"")
+    for item in extracted_filtered_5:
+        print(item) # Expected: []
+
+    # Example 7: All records match condition (empty condition dict), 
+    # but some fields to extract are not present in all matching records
+    conditions_all_match_implicit = {} 
+    fields_mixed_presence = [""name"", ""occupation""]
+    extracted_filtered_6 = extract_fields(sample_data, fields_mixed_presence, conditions_all_match_implicit)
+    print(""\nNo filter, extract (name, occupation):"")
+    for item in extracted_filtered_6:
+        print(item)
+
+# --- run_sql_query function and examples ---
+
+def run_sql_query(records: list[dict], command: str) -> list[dict]:
+    """"""
+    Executes a SQL-like query on a list of dictionaries.
+    Supports SELECT, WHERE, and ORDER BY clauses.
+
+    Args:
+        records: A list of dictionaries to query.
+        command: A SQL-like query string.
+                 Example: ""SELECT name, age FROM table WHERE age > 30 ORDER BY name ASC""
+                          (Note: ""FROM table"" is illustrative; the table is `records`)
+
+    Returns:
+        A list of dictionaries representing the query result.
+
+    Raises:
+        ValueError: If the query is malformed, a field is not found,
+                    or an operation fails.
+    """"""
+    original_command = command # For error messages
+    command_upper = command.upper()
+
+    # Find clause indices
+    select_idx = command_upper.find(""SELECT "")
+    where_idx = command_upper.find("" WHERE "")
+    orderby_idx = command_upper.find("" ORDER BY "")
+
+    if select_idx == -1:
+        raise ValueError(f""Query must start with SELECT: '{original_command}'"")
+
+    # Determine clause boundaries
+    fields_start = select_idx + len(""SELECT "")
+    
+    # End of fields_str is start of WHERE, or start of ORDER BY, or end of command
+    fields_end = len(command)
+    if where_idx != -1:
+        fields_end = where_idx
+    elif orderby_idx != -1: # No WHERE, but ORDER BY exists
+        fields_end = orderby_idx
+    
+    fields_str = command[fields_start:fields_end].strip()
+
+    # Optional FROM clause removal (it's ignored anyway)
+    from_clause_match = re.search(r""\s+FROM\s+\w+"", fields_str, re.IGNORECASE)
+    if from_clause_match:
+        fields_str = fields_str[:from_clause_match.start()].strip()
+
+    if not fields_str:
+        raise ValueError(f""No fields specified in SELECT clause: '{original_command}'"")
+
+    where_str = None
+    if where_idx != -1:
+        where_start = where_idx + len("" WHERE "")
+        where_end = orderby_idx if orderby_idx != -1 and orderby_idx > where_idx else len(command)
+        where_str = command[where_start:where_end].strip()
+        if not where_str:
+            raise ValueError(f""Empty WHERE clause: '{original_command}'"")
+
+    orderby_str = None
+    if orderby_idx != -1:
+        orderby_start = orderby_idx + len("" ORDER BY "")
+        orderby_str = command[orderby_start:].strip()
+        if not orderby_str:
+            raise ValueError(f""Empty ORDER BY clause: '{original_command}'"")
+
+    # --- Start processing records ---
+    processed_records = list(records) # Work on a copy
+
+    # 1. WHERE clause
+    if where_str:
+        # Simple WHERE: field op value. No AND/OR support for this version.
+        # Example: ""age > 30"" or ""city = 'New York'""
+        where_match = re.match(r""(\w+)\s*([<>=!]+)\s*(.*)"", where_str, re.IGNORECASE)
+        if not where_match:
+            raise ValueError(f""Malformed WHERE clause: '{where_str}' in query '{original_command}'"")
+        
+        cond_field, cond_op_str, cond_val_str = where_match.groups()
+        cond_field = cond_field.strip()
+        cond_op_str = cond_op_str.strip()
+        
+        if cond_op_str not in _OPERATORS:
+            raise ValueError(f""Unsupported operator in WHERE clause: '{cond_op_str}' in query '{original_command}'"")
+        cond_op_func = _OPERATORS[cond_op_str]
+        
+        try:
+            cond_val_parsed = _parse_value(cond_val_str.strip())
+        except ValueError as e: # Raised by _parse_value
+            raise ValueError(f""Invalid value in WHERE clause ('{cond_val_str}'): {e} in query '{original_command}'"")
+
+
+        filtered_records = []
+        for record in processed_records:
+            if cond_field not in record:
+                raise ValueError(f""Field '{cond_field}' in WHERE clause not found in record: {record} (Query: '{original_command}')"")
+            
+            record_val = record[cond_field]
+            matches = False
+            try:
+                # Type coercion for comparison
+                if isinstance(cond_val_parsed, str):
+                    matches = cond_op_func(str(record_val), cond_val_parsed)
+                elif isinstance(cond_val_parsed, int):
+                    matches = cond_op_func(int(record_val), cond_val_parsed)
+                elif isinstance(cond_val_parsed, float):
+                    matches = cond_op_func(float(record_val), cond_val_parsed)
+                else: # Should not happen due to _parse_value
+                    matches = cond_op_func(record_val, cond_val_parsed)
+            except (ValueError, TypeError):
+                # ValueError from int()/float() conversion, TypeError from comparison of incompatible types
+                matches = False # Treat as non-match
+            
+            if matches:
+                filtered_records.append(record)
+        processed_records = filtered_records
+
+    # 2. ORDER BY clause
+    if orderby_str:
+        orderby_parts = orderby_str.strip().split()
+        orderby_field = orderby_parts[0]
+        orderby_direction = ""ASC""
+        if len(orderby_parts) > 1:
+            direction_token = orderby_parts[1].upper()
+            if direction_token in [""ASC"", ""DESC""]:
+                orderby_direction = direction_token
+            else:
+                raise ValueError(f""Invalid ORDER BY direction: '{orderby_parts[1]}' in query '{original_command}'"")
+
+        reverse_sort = (orderby_direction == ""DESC"")
+        
+        def sort_key_func(record):
+            val = record.get(orderby_field) # Use .get() for graceful handling of missing keys
+            if val is None:
+                return (0, None) # Sort None values first (or last if reverse_sort and primary key is 0)
+            if isinstance(val, (int, float)):
+                return (1, val)
+            if isinstance(val, str):
+                return (2, val)
+            return (3, str(val)) # Fallback for other types
+
+        try:
+            processed_records.sort(key=sort_key_func, reverse=reverse_sort)
+        except TypeError: 
+            # Should be rare with the tuple-based key, but possible if internal comparisons fail
+            raise ValueError(f""Error sorting by field '{orderby_field}': Incompatible data types for comparison in query '{original_command}'."")
+
+    # 3. SELECT clause (Projection)
+    selected_field_names = [f.strip() for f in fields_str.split(',') if f.strip()]
+    
+    if not selected_field_names:
+        raise ValueError(f""No fields specified in SELECT clause: '{original_command}'"")
+
+    final_result = []
+    if selected_field_names == ['*']:
+        final_result = processed_records # Return all fields of the (filtered and sorted) records
+    else:
+        for record in processed_records:
+            new_record = {}
+            for field_name in selected_field_names:
+                if field_name in record:
+                    new_record[field_name] = record[field_name]
+                else:
+                    # As per typical SQL behavior, if a selected field doesn't exist,
+                    # it's often returned as NULL. Here, we use None.
+                    new_record[field_name] = None 
+            final_result.append(new_record)
+            
+    return final_result
+
+
+if __name__ == '__main__':
+    # (Previous examples for extract_fields remain above)
+    # ...
+
+    print(""\n\n--- run_sql_query Examples ---"")
+    
+    # Re-use sample_data from extract_fields examples
+    # sample_data = [
+    #     {""id"": 1, ""name"": ""Alice"", ""age"": 30, ""city"": ""New York""},
+    #     {""id"": 2, ""name"": ""Bob"", ""age"": 24, ""occupation"": ""Engineer""},
+    #     {""id"": 3, ""name"": ""Charlie"", ""city"": ""London"", ""age"": 35}
+    # ]
+
+    print(""\nQuery 1: SELECT name, age WHERE age > 25 ORDER BY age DESC"")
+    query1_result = run_sql_query(sample_data, ""SELECT name, age WHERE age > 25 ORDER BY age DESC"")
+    for row in query1_result:
+        print(row)
+    # Expected:
+    # {'name': 'Charlie', 'age': 35}
+    # {'name': 'Alice', 'age': 30}
+
+    print(""\nQuery 2: SELECT * WHERE city = 'New York'"")
+    query2_result = run_sql_query(sample_data, ""SELECT * WHERE city = 'New York'"")
+    for row in query2_result:
+        print(row)
+    # Expected:
+    # {'id': 1, 'name': 'Alice', 'age': 30, 'city': 'New York'}
+
+    print(""\nQuery 3: SELECT name, occupation ORDER BY name ASC"")
+    # Note: 'occupation' is missing for Alice and Charlie. It will be None.
+    query3_result = run_sql_query(sample_data, ""SELECT name, occupation FROM DUMMY_TABLE ORDER BY name ASC"") # FROM is ignored
+    for row in query3_result:
+        print(row)
+    # Expected:
+    # {'name': 'Alice', 'occupation': None}
+    # {'name': 'Bob', 'occupation': 'Engineer'}
+    # {'name': 'Charlie', 'occupation': None}
+
+    print(""\nQuery 4: SELECT id WHERE name = 'NonExistent'"")
+    query4_result = run_sql_query(sample_data, ""SELECT id WHERE name = 'NonExistent'"")
+    for row in query4_result:
+        print(row)
+    # Expected: (empty list)
+
+    print(""\nQuery 5: Malformed query (missing SELECT)"")
+    try:
+        run_sql_query(sample_data, ""name, age WHERE age > 25"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+
+    print(""\nQuery 6: Condition on non-existent field"")
+    try:
+        run_sql_query(sample_data, ""SELECT name WHERE country = 'USA'"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"")
+
+    print(""\nQuery 7: SELECT non_existent_field, name"")
+    query7_result = run_sql_query(sample_data, ""SELECT non_existent_field, name"")
+    for row in query7_result:
+        print(row)
+    # Expected:
+    # {'non_existent_field': None, 'name': 'Alice'}
+    # {'non_existent_field': None, 'name': 'Bob'}
+    # {'non_existent_field': None, 'name': 'Charlie'}
+    
+    print(""\nQuery 8: SELECT name WHERE age = '30' (string value for numeric comparison)"")
+    query8_result = run_sql_query(sample_data, ""SELECT name, age WHERE age = '30'"")
+    for row in query8_result:
+        print(row)
+    # Expected: {'name': 'Alice', 'age': 30}
+
+    print(""\nQuery 9: SELECT name WHERE name = Bob (unquoted string value in condition)"")
+    try:
+        run_sql_query(sample_data, ""SELECT name WHERE name = Bob"")
+    except ValueError as e:
+        print(f""Caught expected error: {e}"") # Error from _parse_value
+
+    print(""\nQuery 10: SELECT * ORDER BY non_existent_field"")
+    # This should sort, with non_existent_field effectively being None for all. Order might be stable.
+    query10_result = run_sql_query(sample_data, ""SELECT * ORDER BY non_existent_field ASC"")
+    for row in query10_result:
+        print(row)
+    # Expected: Original order, as all 'non_existent_field' values are None.
+    # {'id': 1, 'name': 'Alice', 'age': 30, 'city': 'New York'}
+    # {'id': 2, 'name': 'Bob', 'age': 24, 'occupation': 'Engineer'}
+    # {'id': 3, 'name': 'Charlie', 'city': 'London', 'age': 35}
+
+    print(""\nQuery 11: SELECT name, age WHERE id >= 2 ORDER BY age ASC"")
+    query11_result = run_sql_query(sample_data, ""SELECT name, age WHERE id >= 2 ORDER BY age ASC"")
+    for row in query11_result:
+        print(row)
+    # Expected:
+    # {'name': 'Bob', 'age': 24}
+    # {'name': 'Charlie', 'age': 35}
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+63b0efb6,refactor,"[""Create a function that can execute a basic SQL-like statement on a dataset given as a list of dictionaries. The function should handle commands like SELECT, WHERE, and ORDER BY. The function's name should be run_sql_query. The function should take 2 arguments, i.e., - records: a list where each item is a dictionary representing data records, - command: a string containing the SQL-like statement for execution. The function should return a list of dictionaries, which are the results of the query operation. The function should raise a ValueError if there is an issue with the query format or when the query can't be processed successfully. The following setup code will be provided to you:\n```\nimport re\nimport operator\nfrom functools import partial\n```\n\nHere's some additional context about the imported packages and global variables: Modules you may need: - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions.\n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this using a pipeline pattern. Could we extract the query parsing and execution into separate pure functions while maintaining the main run_sql_query function's signature? This would make each operation more testable and maintainable.\nPlease only output code and not your natural language commentary."", 'Can you add logging support initialized from within `run_sql_query` to keep track of all the queries and their results? Ensure that the logging is neat, clean, and readable for humans later.\nPlease only output code and not your natural language commentary.']","import re
+import operator
+from functools import partial
+
+def run_sql_query(records, command):
+    """"""
+    Executes a basic SQL-like statement on a list of dictionaries.
+
+    Args:
+        records: A list of dictionaries representing data records.
+        command: A string containing the SQL-like statement.
+
+    Returns:
+        A list of dictionaries, the results of the query operation.
+
+    Raises:
+        ValueError: If there is an issue with the query format or processing.
+    """"""
+    if not records and ""SELECT"" in command.upper(): # Allow empty records if not selecting
+        pass # Will be handled by select if fields are specified
+    elif not records:
+        return []
+
+
+    original_records = [r.copy() for r in records] # Work on a copy
+
+    # Normalize command: remove extra spaces and convert to uppercase for clause keywords
+    processed_command = re.sub(r'\s+', ' ', command).strip()
+
+    # --- Parse SELECT clause ---
+    select_match = re.match(r""SELECT\s+(.+?)\s+FROM"", processed_command, re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid query: Missing SELECT or FROM clause."")
+    
+    select_fields_str = select_match.group(1).strip()
+    
+    # Remove SELECT part for further parsing
+    command_after_select = processed_command[select_match.end(0):].strip()
+    # The ""FROM table_name"" part is conceptual as 'records' is the table.
+    # We need to ensure ""FROM"" was present, which select_match does.
+    # We can effectively ignore the table name part if present, or assume it's implicit.
+    # For simplicity, we assume ""FROM records_variable_name"" is implied by the function signature.
+    
+    # --- Parse ORDER BY clause (before WHERE for easier regex) ---
+    order_by_clause = None
+    order_by_match = re.search(r""ORDER BY\s+([a-zA-Z0-9_]+)(?:\s+(ASC|DESC))?"", command_after_select, re.IGNORECASE)
+    if order_by_match:
+        order_by_field = order_by_match.group(1).strip()
+        order_by_direction = (order_by_match.group(2) or ""ASC"").upper()
+        if order_by_direction not in [""ASC"", ""DESC""]:
+            raise ValueError(f""Invalid ORDER BY direction: {order_by_direction}"")
+        order_by_clause = (order_by_field, order_by_direction == ""DESC"")
+        # Remove ORDER BY part for further parsing
+        command_after_select = command_after_select[:order_by_match.start()].strip()
+
+    # --- Parse WHERE clause ---
+    where_clause = None
+    if command_after_select: # If anything is left after FROM and ORDER BY
+        where_match = re.match(r""WHERE\s+(.+)"", command_after_select, re.IGNORECASE)
+        if where_match:
+            where_condition_str = where_match.group(1).strip()
+            # Basic condition parsing: field operator value
+            # Example: ""age > 30"", ""name = 'Alice'""
+            condition_parts = re.match(r""([a-zA-Z0-9_]+)\s*([<>=!]+)\s*(.+)"", where_condition_str)
+            if not condition_parts:
+                raise ValueError(f""Invalid WHERE condition format: {where_condition_str}"")
+            
+            where_field = condition_parts.group(1).strip()
+            operator_str = condition_parts.group(2).strip()
+            value_str = condition_parts.group(3).strip()
+
+            # Convert value to appropriate type (number or string)
+            if value_str.startswith(""'"") and value_str.endswith(""'"") or \
+               value_str.startswith('""') and value_str.endswith('""'):
+                value = value_str[1:-1] # String value
+            elif '.' in value_str:
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid numeric value in WHERE clause: {value_str}"")
+            else:
+                try:
+                    value = int(value_str)
+                except ValueError:
+                    # Could be an unquoted string, which we might want to disallow or handle
+                    raise ValueError(f""Invalid value in WHERE clause (strings must be quoted): {value_str}"")
+
+            op_map = {
+                ""="": operator.eq, ""!="": operator.ne,
+                "">"": operator.gt, ""<"": operator.lt,
+                "">="": operator.ge, ""<="": operator.le
+            }
+            if operator_str not in op_map:
+                raise ValueError(f""Unsupported operator in WHERE clause: {operator_str}"")
+            
+            where_clause = (where_field, op_map[operator_str], value)
+        elif command_after_select.strip(): # If there's text but it's not a WHERE clause
+             raise ValueError(f""Unexpected token or clause after FROM: {command_after_select}"")
+
+
+    # --- Apply WHERE clause ---
+    filtered_records = []
+    if where_clause:
+        field, op, val = where_clause
+        for record in original_records:
+            if field not in record:
+                # Depending on strictness, could raise error or skip record
+                # For now, skip if field missing for condition, or treat as not matching
+                # To be SQL-like, a missing field in a WHERE condition often means the condition is false.
+                continue 
+            
+            record_value = record[field]
+            # Type consistency check for comparison (e.g. don't compare string '5' with int 30)
+            if isinstance(val, str) and not isinstance(record_value, str):
+                 # try to cast record_value to string for comparison, or skip/error
+                 pass # Let comparison fail or succeed based on Python's behavior
+            elif isinstance(val, (int, float)) and not isinstance(record_value, (int, float)):
+                # If record_value is string '123', it won't match int 123 directly.
+                # SQL might try to cast, but we'll be stricter here.
+                continue # Skip if types are incompatible for numeric comparison
+
+            try:
+                if op(record_value, val):
+                    filtered_records.append(record)
+            except TypeError:
+                # This can happen if types are incompatible for the operator (e.g., int > str)
+                # Silently treat as non-match, or raise a more specific error
+                continue
+    else:
+        filtered_records = original_records
+
+    # --- Apply ORDER BY clause ---
+    if order_by_clause:
+        field, reverse_order = order_by_clause
+        # Check if all records to be sorted have the order_by_field
+        # and handle potential mixed types if any.
+        # For simplicity, assume field exists and types are comparable.
+        # A robust solution would check this or handle exceptions during sort.
+        try:
+            # Use a lambda that can handle missing keys gracefully for sorting
+            # Records without the sort key will be placed according to default sort behavior (often first)
+            # or could be explicitly handled (e.g., treated as None).
+            def sort_key_func(r):
+                val = r.get(field)
+                if val is None: # Handle None values (e.g. make them smallest or largest)
+                    # Python 3 sorts None less than other types by default.
+                    # This behavior might be acceptable.
+                    return (0, None) # Primary sort key for None presence, then None itself
+                if isinstance(val, (int, float, str)):
+                    return (1, val) # Primary sort key for type, then value
+                return (2, str(val)) # Fallback for other types
+
+            filtered_records.sort(key=sort_key_func, reverse=reverse_order)
+        except TypeError:
+            # This can happen if the field contains mixed, unorderable types (e.g., int and string)
+            raise ValueError(f""Cannot order by field '{field}' due to incompatible data types in records."")
+        except KeyError:
+            # This should ideally be caught by .get() in lambda, but as a safeguard:
+            raise ValueError(f""Order by field '{field}' not found in all records."")
+
+
+    # --- Apply SELECT clause ---
+    result_records = []
+    if not filtered_records and select_fields_str != ""*"": # No records after filtering
+         # If specific fields are requested from an empty set, the result is an empty set.
+         # If SELECT *, it's also an empty set.
+        return []
+    
+    if not filtered_records and select_fields_str == ""*"":
+        return []
+
+
+    if select_fields_str == ""*"":
+        if not filtered_records: # e.g. SELECT * FROM empty_table
+             # If original records were empty, and no where clause, this is correct.
+             # If filtering resulted in empty, also correct.
+            return []
+        # Check if all original records had at least one key, if records is not empty
+        # This is mostly for the case of records = [{}]
+        if all(not r for r in filtered_records) and any(filtered_records): # list of empty dicts
+             return [{} for _ in filtered_records] # return list of empty dicts
+        result_records = filtered_records
+    else:
+        fields_to_select = [f.strip() for f in select_fields_str.split(',')]
+        if not fields_to_select or not all(fields_to_select):
+            raise ValueError(""Invalid SELECT fields: cannot be empty or contain empty names."")
+
+        if not filtered_records and fields_to_select: # e.g. SELECT name FROM empty_table
+            return []
+
+        for record in filtered_records:
+            selected_record = {}
+            for field in fields_to_select:
+                if field not in record:
+                    # SQL behavior for selecting a non-existent column can vary.
+                    # Some might return NULL, others error. We'll include it as None.
+                    selected_record[field] = None 
+                else:
+                    selected_record[field] = record[field]
+            result_records.append(selected_record)
+            
+    return result_records
+
+if __name__ == '__main__':
+    # Example Usage (for testing purposes)
+    sample_records = [
+        {'id': 1, 'name': 'Alice', 'age': 30, 'city': 'New York'},
+        {'id': 2, 'name': 'Bob', 'age': 24, 'city': 'Los Angeles'},
+        {'id': 3, 'name': 'Charlie', 'age': 35, 'city': 'New York'},
+        {'id': 4, 'name': 'David', 'age': 28, 'city': 'Chicago'},
+        {'id': 5, 'name': 'Eve', 'age': 24, 'city': 'Los Angeles'},
+    ]
+
+    print(""--- Test Cases ---"")
+
+    # Test 1: Select all fields, order by age descending
+    query1 = ""SELECT * FROM records ORDER BY age DESC""
+    print(f""\nQuery: {query1}"")
+    try:
+        result1 = run_sql_query(sample_records, query1)
+        for r in result1: print(r)
+        # Expected: Charlie, Alice, David, Bob, Eve (or Eve, Bob)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Select name and city, where age > 25, order by name
+    query2 = ""SELECT name, city FROM records WHERE age > 28 ORDER BY name ASC""
+    print(f""\nQuery: {query2}"")
+    try:
+        result2 = run_sql_query(sample_records, query2)
+        for r in result2: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Select id and age, where city is 'Los Angeles'
+    query3 = ""SELECT id, age FROM records WHERE city = 'Los Angeles'""
+    print(f""\nQuery: {query3}"")
+    try:
+        result3 = run_sql_query(sample_records, query3)
+        for r in result3: print(r)
+        # Expected: Bob, Eve (order may vary without ORDER BY)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 4: Where age is 24, select name, order by name
+    query4 = ""SELECT name FROM records WHERE age = 24 ORDER BY name""
+    print(f""\nQuery: {query4}"")
+    try:
+        result4 = run_sql_query(sample_records, query4)
+        for r in result4: print(r)
+        # Expected: Bob, Eve
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 5: Invalid query - bad operator
+    query5 = ""SELECT name FROM records WHERE age !! 24""
+    print(f""\nQuery: {query5}"")
+    try:
+        result5 = run_sql_query(sample_records, query5)
+        for r in result5: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 6: Invalid query - missing SELECT
+    query6 = ""name FROM records WHERE age > 24""
+    print(f""\nQuery: {query6}"")
+    try:
+        result6 = run_sql_query(sample_records, query6)
+        for r in result6: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 7: Select non-existent field
+    query7 = ""SELECT name, non_existent_field FROM records WHERE age > 30""
+    print(f""\nQuery: {query7}"")
+    try:
+        result7 = run_sql_query(sample_records, query7)
+        for r in result7: print(r)
+        # Expected: {'name': 'Alice', 'non_existent_field': None}, {'name': 'Charlie', 'non_existent_field': None}
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 8: Order by non-existent field (should ideally error if strict, or sort unpredictably)
+    # My implementation should raise ValueError due to sort key issues if field is missing.
+    # Let's test the lambda's .get() behavior for ORDER BY
+    query8 = ""SELECT name FROM records ORDER BY non_existent_field""
+    print(f""\nQuery: {query8}"")
+    try:
+        result8 = run_sql_query(sample_records, query8)
+        for r in result8: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected if field truly missing from all.
+                           # If .get() is used, it might sort them all as ""None"" for that key.
+
+    # Test 9: Empty records
+    query9 = ""SELECT name FROM records WHERE age > 30""
+    print(f""\nQuery: {query9} (with empty records)"")
+    try:
+        result9 = run_sql_query([], query9)
+        print(result9) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 10: SELECT * from empty records
+    query10 = ""SELECT * FROM records""
+    print(f""\nQuery: {query10} (with empty records)"")
+    try:
+        result10 = run_sql_query([], query10)
+        print(result10) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 11: WHERE clause on a field not present in any record
+    query11 = ""SELECT name FROM records WHERE non_existent_field = 'test'""
+    print(f""\nQuery: {query11}"")
+    try:
+        result11 = run_sql_query(sample_records, query11)
+        print(result11) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 12: Query with extra spaces
+    query12 = ""  SELECT  name , city   FROM    records   WHERE   age    >  28  ORDER   BY  name  ASC  ""
+    print(f""\nQuery: {query12}"")
+    try:
+        result12 = run_sql_query(sample_records, query12)
+        for r in result12: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 13: No WHERE, no ORDER BY
+    query13 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query13}"")
+    try:
+        result13 = run_sql_query(sample_records, query13)
+        for r in result13: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 14: Records with missing keys for selected fields
+    records_missing_keys = [
+        {'id': 1, 'name': 'Alice'},
+        {'id': 2, 'age': 24},
+    ]
+    query14 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query14} (with missing keys in records)"")
+    try:
+        result14 = run_sql_query(records_missing_keys, query14)
+        for r in result14: print(r)
+        # Expected: [{'name': 'Alice', 'age': None}, {'name': None, 'age': 24}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 15: Order by field with mixed types (e.g. int and str) - should raise error
+    records_mixed_types_sort = [
+        {'id': 1, 'name': 'Alice', 'value': 30},
+        {'id': 2, 'name': 'Bob', 'value': '24'}, # 'value' is string here
+        {'id': 3, 'name': 'Charlie', 'value': 35},
+    ]
+    query15 = ""SELECT name, value FROM records ORDER BY value""
+    print(f""\nQuery: {query15} (order by field with mixed types)"")
+    try:
+        result15 = run_sql_query(records_mixed_types_sort, query15)
+        for r in result15: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Cannot order by field 'value'...
+
+    # Test 16: WHERE clause with type mismatch (e.g., record['age'] is str, value is int)
+    records_type_mismatch_where = [
+        {'id': 1, 'name': 'Alice', 'age': '30'}, # age is string
+        {'id': 2, 'name': 'Bob', 'age': 24},
+    ]
+    query16 = ""SELECT name FROM records WHERE age > 25"" # 25 is int
+    print(f""\nQuery: {query16} (WHERE with type mismatch)"")
+    try:
+        result16 = run_sql_query(records_type_mismatch_where, query16)
+        for r in result16: print(r)
+        # Expected: Bob (Alice's '30' won't compare with int 25 and will be skipped)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 17: Query with ""FROM table_name"" explicitly
+    query17 = ""SELECT name FROM my_data WHERE age > 30""
+    print(f""\nQuery: {query17}"")
+    try:
+        result17 = run_sql_query(sample_records, query17)
+        for r in result17: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Should work, ""my_data"" is ignored.
+
+    # Test 18: Malformed WHERE (e.g. no operator)
+    query18 = ""SELECT name FROM records WHERE age 30""
+    print(f""\nQuery: {query18}"")
+    try:
+        result18 = run_sql_query(sample_records, query18)
+        for r in result18: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid WHERE condition format
+
+    # Test 19: Malformed SELECT (e.g. empty field name)
+    query19 = ""SELECT name, , age FROM records""
+    print(f""\nQuery: {query19}"")
+    try:
+        result19 = run_sql_query(sample_records, query19)
+        for r in result19: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid SELECT fields
+
+    # Test 20: Query with only SELECT * and no other clauses
+    query20 = ""SELECT * FROM records""
+    print(f""\nQuery: {query20}"")
+    try:
+        result20 = run_sql_query(sample_records, query20)
+        # Check if all original records are returned, in original order
+        if len(result20) == len(sample_records) and all(r in result20 for r in sample_records):
+             print(f""Correctly returned {len(result20)} records."")
+             # for r in result20: print(r) # Optionally print all
+        else:
+            print(""Result mismatch for SELECT *"")
+            for r in result20: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 21: Query with ""order by"" but no direction
+    query21 = ""SELECT name FROM records ORDER BY age""
+    print(f""\nQuery: {query21}"")
+    try:
+        result21 = run_sql_query(sample_records, query21)
+        # Expected: Bob, Eve, David, Alice, Charlie (sorted by age ASC)
+        for r in result21: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 22: Query with unquoted string in WHERE
+    query22 = ""SELECT name FROM records WHERE city = NewYork""
+    print(f""\nQuery: {query22}"")
+    try:
+        result22 = run_sql_query(sample_records, query22)
+        for r in result22: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid value in WHERE clause (strings must be quoted)
+
+    # Test 23: Query with float in WHERE
+    sample_records_float = [
+        {'id': 1, 'name': 'ItemA', 'price': 10.50},
+        {'id': 2, 'name': 'ItemB', 'price': 20.00},
+        {'id': 3, 'name': 'ItemC', 'price': 10.75},
+    ]
+    query23 = ""SELECT name FROM records WHERE price > 10.6""
+    print(f""\nQuery: {query23}"")
+    try:
+        result23 = run_sql_query(sample_records_float, query23)
+        for r in result23: print(r) # Expected: ItemB, ItemC
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 24: SELECT from records = [{}]
+    query24_1 = ""SELECT * FROM records""
+    query24_2 = ""SELECT a FROM records""
+    records_empty_dict = [{}]
+    print(f""\nQuery: {query24_1} with records = [{'{}]'}]"")
+    try:
+        result24_1 = run_sql_query(records_empty_dict, query24_1)
+        print(result24_1) # Expected: [{}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query24_2} with records = [{'{}]'}]"")
+    try:
+        result24_2 = run_sql_query(records_empty_dict, query24_2)
+        print(result24_2) # Expected: [{'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 25: SELECT from records = [{}, {}]
+    query25_1 = ""SELECT * FROM records""
+    query25_2 = ""SELECT a FROM records""
+    records_empty_dicts = [{}, {}]
+    print(f""\nQuery: {query25_1} with records = [{{}}, {{}}]"")
+    try:
+        result25_1 = run_sql_query(records_empty_dicts, query25_1)
+        print(result25_1) # Expected: [{}, {}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query25_2} with records = [{{}}, {{}}]"")
+    try:
+        result25_2 = run_sql_query(records_empty_dicts, query25_2)
+        print(result25_2) # Expected: [{'a': None}, {'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+","import re
+import operator
+
+# --- Query Parsing Helper ---
+def _parse_sql_command(command_str):
+    """"""
+    Parses the SQL command string into its components.
+
+    Returns:
+        A dictionary with 'select_fields', 'where_details', 'order_by_details'.
+    Raises:
+        ValueError: If the query syntax is invalid.
+    """"""
+    processed_command = re.sub(r'\s+', ' ', command_str).strip()
+
+    # Parse SELECT clause
+    select_match = re.match(r""SELECT\s+(.+?)\s+FROM"", processed_command, re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid query: Missing SELECT or FROM clause."")
+    
+    select_fields_str = select_match.group(1).strip()
+    if select_fields_str == ""*"":
+        parsed_select_fields = ""*""
+    else:
+        parsed_select_fields = [f.strip() for f in select_fields_str.split(',')]
+        if not parsed_select_fields or not all(parsed_select_fields):
+            raise ValueError(""Invalid SELECT fields: cannot be empty or contain empty names."")
+
+    command_after_select_from = processed_command[select_match.end(0):].strip() # Part after ""FROM table_name""
+    
+    # Conceptual table name is ignored as data comes from `records` argument.
+    # We need to find where clauses start after the conceptual ""FROM table_name"" part.
+    # A simple way is to assume ""FROM table_name"" is just ""FROM <word>""
+    # For now, we assume the rest of the string after ""SELECT ... FROM ..."" is for WHERE/ORDER BY
+    # This might need refinement if table names with spaces or complex FROM clauses were supported.
+    # The current regex for SELECT ... FROM already handles finding the end of the FROM part.
+
+    remaining_command = command_after_select_from
+
+    # Parse ORDER BY clause
+    parsed_order_by_details = None
+    order_by_match = re.search(r""ORDER BY\s+([a-zA-Z0-9_]+)(?:\s+(ASC|DESC))?"", remaining_command, re.IGNORECASE)
+    if order_by_match:
+        order_by_field = order_by_match.group(1).strip()
+        order_by_direction = (order_by_match.group(2) or ""ASC"").upper()
+        if order_by_direction not in [""ASC"", ""DESC""]:
+            raise ValueError(f""Invalid ORDER BY direction: {order_by_direction}"")
+        parsed_order_by_details = (order_by_field, order_by_direction == ""DESC"")
+        # Remove ORDER BY part for further parsing of WHERE
+        # This assumes ORDER BY is at the end if present with WHERE
+        remaining_command = remaining_command[:order_by_match.start()].strip()
+
+    # Parse WHERE clause
+    parsed_where_details = None
+    if remaining_command: # If anything is left
+        if remaining_command.upper().startswith(""WHERE""):
+            where_condition_str = remaining_command[len(""WHERE""):].strip()
+            if not where_condition_str:
+                raise ValueError(""WHERE clause cannot be empty."")
+            
+            condition_parts = re.match(r""([a-zA-Z0-9_]+)\s*([<>=!]+)\s*(.+)"", where_condition_str)
+            if not condition_parts:
+                raise ValueError(f""Invalid WHERE condition format: {where_condition_str}"")
+            
+            where_field = condition_parts.group(1).strip()
+            operator_str = condition_parts.group(2).strip()
+            value_str = condition_parts.group(3).strip()
+
+            if value_str.startswith(""'"") and value_str.endswith(""'"") or \
+               value_str.startswith('""') and value_str.endswith('""'):
+                value = value_str[1:-1]
+            elif '.' in value_str:
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid numeric value in WHERE clause: {value_str}"")
+            else:
+                try:
+                    value = int(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid value in WHERE clause (strings must be quoted, or not a valid number): {value_str}"")
+
+            op_map = {
+                ""="": operator.eq, ""!="": operator.ne,
+                "">"": operator.gt, ""<"": operator.lt,
+                "">="": operator.ge, ""<="": operator.le
+            }
+            if operator_str not in op_map:
+                raise ValueError(f""Unsupported operator in WHERE clause: {operator_str}"")
+            
+            parsed_where_details = (where_field, op_map[operator_str], value)
+        elif remaining_command.strip(): # If there's text but it's not a WHERE clause (and not ORDER BY already parsed)
+             raise ValueError(f""Unexpected token or clause: {remaining_command}"")
+             
+    return {
+        'select_fields': parsed_select_fields,
+        'where_details': parsed_where_details,
+        'order_by_details': parsed_order_by_details,
+    }
+
+# --- Query Execution Helpers ---
+def _apply_where_clause(records, where_details):
+    """"""Applies the WHERE clause to filter records.""""""
+    if not where_details:
+        return list(records) # Return a copy
+
+    field, op, val = where_details
+    filtered_records = []
+    for record in records:
+        if field not in record:
+            continue 
+        
+        record_value = record[field]
+        
+        if isinstance(val, str) and not isinstance(record_value, str):
+            pass 
+        elif isinstance(val, (int, float)) and not isinstance(record_value, (int, float)):
+            continue
+
+        try:
+            if op(record_value, val):
+                filtered_records.append(record)
+        except TypeError:
+            continue # Incompatible types for operation
+    return filtered_records
+
+def _apply_order_by_clause(records, order_by_details):
+    """"""Applies the ORDER BY clause to sort records.""""""
+    if not order_by_details:
+        return list(records) # Return a copy
+
+    field, reverse_order = order_by_details
+
+    def sort_key_func(r):
+        val = r.get(field)
+        if val is None:
+            return (0, None) 
+        if isinstance(val, (int, float, str)):
+            return (1, val) 
+        return (2, str(val))
+
+    try:
+        # sorted() returns a new list
+        sorted_records = sorted(records, key=sort_key_func, reverse=reverse_order)
+    except TypeError:
+        raise ValueError(f""Cannot order by field '{field}' due to incompatible data types in records."")
+    # KeyError should be implicitly handled by r.get(field) in sort_key_func
+    return sorted_records
+
+def _apply_select_clause(records, select_fields):
+    """"""Applies the SELECT clause to shape the output records.""""""
+    if not records:
+        return []
+
+    if select_fields == ""*"":
+        # For SELECT *, if records are [{}] or [{}, {}], return them as is.
+        # The copy of records is already handled, so just return.
+        return records # These are already copies of original record dicts or new dicts from filtering
+
+    # Specific fields selected
+    result_records = []
+    for record in records:
+        selected_record = {}
+        for field in select_fields:
+            selected_record[field] = record.get(field, None)
+        result_records.append(selected_record)
+    return result_records
+
+# --- Main Query Function ---
+def run_sql_query(records, command):
+    """"""
+    Executes a basic SQL-like statement on a list of dictionaries.
+
+    Args:
+        records: A list of dictionaries representing data records.
+        command: A string containing the SQL-like statement.
+
+    Returns:
+        A list of dictionaries, the results of the query operation.
+
+    Raises:
+        ValueError: If there is an issue with the query format or processing.
+    """"""
+    # Parse the command first. This will raise ValueError for syntax issues.
+    parsed_command = _parse_sql_command(command)
+
+    # Work on a copy of the records (list of copies of dicts)
+    # This ensures original data is not modified and operations are on copies.
+    current_records = [r.copy() for r in records]
+
+    # Apply WHERE clause
+    current_records = _apply_where_clause(current_records, parsed_command['where_details'])
+    
+    # Apply ORDER BY clause
+    current_records = _apply_order_by_clause(current_records, parsed_command['order_by_details'])
+        
+    # Apply SELECT clause
+    result_records = _apply_select_clause(current_records, parsed_command['select_fields'])
+    
+    return result_records
+
+if __name__ == '__main__':
+    # Example Usage (for testing purposes)
+    sample_records = [
+        {'id': 1, 'name': 'Alice', 'age': 30, 'city': 'New York'},
+        {'id': 2, 'name': 'Bob', 'age': 24, 'city': 'Los Angeles'},
+        {'id': 3, 'name': 'Charlie', 'age': 35, 'city': 'New York'},
+        {'id': 4, 'name': 'David', 'age': 28, 'city': 'Chicago'},
+        {'id': 5, 'name': 'Eve', 'age': 24, 'city': 'Los Angeles'},
+    ]
+
+    print(""--- Test Cases ---"")
+
+    # Test 1: Select all fields, order by age descending
+    query1 = ""SELECT * FROM records ORDER BY age DESC""
+    print(f""\nQuery: {query1}"")
+    try:
+        result1 = run_sql_query(sample_records, query1)
+        for r in result1: print(r)
+        # Expected: Charlie, Alice, David, Bob, Eve (or Eve, Bob)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Select name and city, where age > 25, order by name
+    query2 = ""SELECT name, city FROM records WHERE age > 28 ORDER BY name ASC""
+    print(f""\nQuery: {query2}"")
+    try:
+        result2 = run_sql_query(sample_records, query2)
+        for r in result2: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Select id and age, where city is 'Los Angeles'
+    query3 = ""SELECT id, age FROM records WHERE city = 'Los Angeles'""
+    print(f""\nQuery: {query3}"")
+    try:
+        result3 = run_sql_query(sample_records, query3)
+        for r in result3: print(r)
+        # Expected: Bob, Eve (order may vary without ORDER BY)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 4: Where age is 24, select name, order by name
+    query4 = ""SELECT name FROM records WHERE age = 24 ORDER BY name""
+    print(f""\nQuery: {query4}"")
+    try:
+        result4 = run_sql_query(sample_records, query4)
+        for r in result4: print(r)
+        # Expected: Bob, Eve
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 5: Invalid query - bad operator
+    query5 = ""SELECT name FROM records WHERE age !! 24""
+    print(f""\nQuery: {query5}"")
+    try:
+        result5 = run_sql_query(sample_records, query5)
+        for r in result5: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 6: Invalid query - missing SELECT
+    query6 = ""name FROM records WHERE age > 24""
+    print(f""\nQuery: {query6}"")
+    try:
+        result6 = run_sql_query(sample_records, query6)
+        for r in result6: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 7: Select non-existent field
+    query7 = ""SELECT name, non_existent_field FROM records WHERE age > 30""
+    print(f""\nQuery: {query7}"")
+    try:
+        result7 = run_sql_query(sample_records, query7)
+        for r in result7: print(r)
+        # Expected: {'name': 'Alice', 'non_existent_field': None}, {'name': 'Charlie', 'non_existent_field': None}
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 8: Order by non-existent field (should ideally error if strict, or sort unpredictably)
+    # My implementation should raise ValueError due to sort key issues if field is missing.
+    # Let's test the lambda's .get() behavior for ORDER BY
+    query8 = ""SELECT name FROM records ORDER BY non_existent_field""
+    print(f""\nQuery: {query8}"")
+    try:
+        result8 = run_sql_query(sample_records, query8)
+        for r in result8: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected if field truly missing from all.
+                           # If .get() is used, it might sort them all as ""None"" for that key.
+
+    # Test 9: Empty records
+    query9 = ""SELECT name FROM records WHERE age > 30""
+    print(f""\nQuery: {query9} (with empty records)"")
+    try:
+        result9 = run_sql_query([], query9)
+        print(result9) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 10: SELECT * from empty records
+    query10 = ""SELECT * FROM records""
+    print(f""\nQuery: {query10} (with empty records)"")
+    try:
+        result10 = run_sql_query([], query10)
+        print(result10) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 11: WHERE clause on a field not present in any record
+    query11 = ""SELECT name FROM records WHERE non_existent_field = 'test'""
+    print(f""\nQuery: {query11}"")
+    try:
+        result11 = run_sql_query(sample_records, query11)
+        print(result11) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 12: Query with extra spaces
+    query12 = ""  SELECT  name , city   FROM    records   WHERE   age    >  28  ORDER   BY  name  ASC  ""
+    print(f""\nQuery: {query12}"")
+    try:
+        result12 = run_sql_query(sample_records, query12)
+        for r in result12: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 13: No WHERE, no ORDER BY
+    query13 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query13}"")
+    try:
+        result13 = run_sql_query(sample_records, query13)
+        for r in result13: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 14: Records with missing keys for selected fields
+    records_missing_keys = [
+        {'id': 1, 'name': 'Alice'},
+        {'id': 2, 'age': 24},
+    ]
+    query14 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query14} (with missing keys in records)"")
+    try:
+        result14 = run_sql_query(records_missing_keys, query14)
+        for r in result14: print(r)
+        # Expected: [{'name': 'Alice', 'age': None}, {'name': None, 'age': 24}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 15: Order by field with mixed types (e.g. int and str) - should raise error
+    records_mixed_types_sort = [
+        {'id': 1, 'name': 'Alice', 'value': 30},
+        {'id': 2, 'name': 'Bob', 'value': '24'}, # 'value' is string here
+        {'id': 3, 'name': 'Charlie', 'value': 35},
+    ]
+    query15 = ""SELECT name, value FROM records ORDER BY value""
+    print(f""\nQuery: {query15} (order by field with mixed types)"")
+    try:
+        result15 = run_sql_query(records_mixed_types_sort, query15)
+        for r in result15: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Cannot order by field 'value'...
+
+    # Test 16: WHERE clause with type mismatch (e.g., record['age'] is str, value is int)
+    records_type_mismatch_where = [
+        {'id': 1, 'name': 'Alice', 'age': '30'}, # age is string
+        {'id': 2, 'name': 'Bob', 'age': 24},
+    ]
+    query16 = ""SELECT name FROM records WHERE age > 25"" # 25 is int
+    print(f""\nQuery: {query16} (WHERE with type mismatch)"")
+    try:
+        result16 = run_sql_query(records_type_mismatch_where, query16)
+        for r in result16: print(r)
+        # Expected: Bob (Alice's '30' won't compare with int 25 and will be skipped)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 17: Query with ""FROM table_name"" explicitly
+    query17 = ""SELECT name FROM my_data WHERE age > 30""
+    print(f""\nQuery: {query17}"")
+    try:
+        result17 = run_sql_query(sample_records, query17)
+        for r in result17: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Should work, ""my_data"" is ignored.
+
+    # Test 18: Malformed WHERE (e.g. no operator)
+    query18 = ""SELECT name FROM records WHERE age 30""
+    print(f""\nQuery: {query18}"")
+    try:
+        result18 = run_sql_query(sample_records, query18)
+        for r in result18: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid WHERE condition format
+
+    # Test 19: Malformed SELECT (e.g. empty field name)
+    query19 = ""SELECT name, , age FROM records""
+    print(f""\nQuery: {query19}"")
+    try:
+        result19 = run_sql_query(sample_records, query19)
+        for r in result19: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid SELECT fields
+
+    # Test 20: Query with only SELECT * and no other clauses
+    query20 = ""SELECT * FROM records""
+    print(f""\nQuery: {query20}"")
+    try:
+        result20 = run_sql_query(sample_records, query20)
+        # Check if all original records are returned, in original order
+        if len(result20) == len(sample_records) and all(r in result20 for r in sample_records):
+             print(f""Correctly returned {len(result20)} records."")
+             # for r in result20: print(r) # Optionally print all
+        else:
+            print(""Result mismatch for SELECT *"")
+            for r in result20: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 21: Query with ""order by"" but no direction
+    query21 = ""SELECT name FROM records ORDER BY age""
+    print(f""\nQuery: {query21}"")
+    try:
+        result21 = run_sql_query(sample_records, query21)
+        # Expected: Bob, Eve, David, Alice, Charlie (sorted by age ASC)
+        for r in result21: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 22: Query with unquoted string in WHERE
+    query22 = ""SELECT name FROM records WHERE city = NewYork""
+    print(f""\nQuery: {query22}"")
+    try:
+        result22 = run_sql_query(sample_records, query22)
+        for r in result22: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid value in WHERE clause (strings must be quoted)
+
+    # Test 23: Query with float in WHERE
+    sample_records_float = [
+        {'id': 1, 'name': 'ItemA', 'price': 10.50},
+        {'id': 2, 'name': 'ItemB', 'price': 20.00},
+        {'id': 3, 'name': 'ItemC', 'price': 10.75},
+    ]
+    query23 = ""SELECT name FROM records WHERE price > 10.6""
+    print(f""\nQuery: {query23}"")
+    try:
+        result23 = run_sql_query(sample_records_float, query23)
+        for r in result23: print(r) # Expected: ItemB, ItemC
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 24: SELECT from records = [{}]
+    query24_1 = ""SELECT * FROM records""
+    query24_2 = ""SELECT a FROM records""
+    records_empty_dict = [{}]
+    print(f""\nQuery: {query24_1} with records = [{'{}]'}]"")
+    try:
+        result24_1 = run_sql_query(records_empty_dict, query24_1)
+        print(result24_1) # Expected: [{}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query24_2} with records = [{'{}]'}]"")
+    try:
+        result24_2 = run_sql_query(records_empty_dict, query24_2)
+        print(result24_2) # Expected: [{'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 25: SELECT from records = [{}, {}]
+    query25_1 = ""SELECT * FROM records""
+    query25_2 = ""SELECT a FROM records""
+    records_empty_dicts = [{}, {}]
+    print(f""\nQuery: {query25_1} with records = [{{}}, {{}}]"")
+    try:
+        result25_1 = run_sql_query(records_empty_dicts, query25_1)
+        print(result25_1) # Expected: [{}, {}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query25_2} with records = [{{}}, {{}}]"")
+    try:
+        result25_2 = run_sql_query(records_empty_dicts, query25_2)
+        print(result25_2) # Expected: [{'a': None}, {'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+","import re
+import operator
+import logging
+
+# --- Query Parsing Helper ---
+def _parse_sql_command(command_str):
+    """"""
+    Parses the SQL command string into its components.
+
+    Returns:
+        A dictionary with 'select_fields', 'where_details', 'order_by_details'.
+    Raises:
+        ValueError: If the query syntax is invalid.
+    """"""
+    processed_command = re.sub(r'\s+', ' ', command_str).strip()
+
+    # Parse SELECT clause
+    select_match = re.match(r""SELECT\s+(.+?)\s+FROM"", processed_command, re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid query: Missing SELECT or FROM clause."")
+    
+    select_fields_str = select_match.group(1).strip()
+    if select_fields_str == ""*"":
+        parsed_select_fields = ""*""
+    else:
+        parsed_select_fields = [f.strip() for f in select_fields_str.split(',')]
+        if not parsed_select_fields or not all(parsed_select_fields):
+            raise ValueError(""Invalid SELECT fields: cannot be empty or contain empty names."")
+
+    command_after_select_from = processed_command[select_match.end(0):].strip() # Part after ""FROM table_name""
+    
+    # Conceptual table name is ignored as data comes from `records` argument.
+    # We need to find where clauses start after the conceptual ""FROM table_name"" part.
+    # A simple way is to assume ""FROM table_name"" is just ""FROM <word>""
+    # For now, we assume the rest of the string after ""SELECT ... FROM ..."" is for WHERE/ORDER BY
+    # This might need refinement if table names with spaces or complex FROM clauses were supported.
+    # The current regex for SELECT ... FROM already handles finding the end of the FROM part.
+
+    remaining_command = command_after_select_from
+
+    # Parse ORDER BY clause
+    parsed_order_by_details = None
+    order_by_match = re.search(r""ORDER BY\s+([a-zA-Z0-9_]+)(?:\s+(ASC|DESC))?"", remaining_command, re.IGNORECASE)
+    if order_by_match:
+        order_by_field = order_by_match.group(1).strip()
+        order_by_direction = (order_by_match.group(2) or ""ASC"").upper()
+        if order_by_direction not in [""ASC"", ""DESC""]:
+            raise ValueError(f""Invalid ORDER BY direction: {order_by_direction}"")
+        parsed_order_by_details = (order_by_field, order_by_direction == ""DESC"")
+        # Remove ORDER BY part for further parsing of WHERE
+        # This assumes ORDER BY is at the end if present with WHERE
+        remaining_command = remaining_command[:order_by_match.start()].strip()
+
+    # Parse WHERE clause
+    parsed_where_details = None
+    if remaining_command: # If anything is left
+        if remaining_command.upper().startswith(""WHERE""):
+            where_condition_str = remaining_command[len(""WHERE""):].strip()
+            if not where_condition_str:
+                raise ValueError(""WHERE clause cannot be empty."")
+            
+            condition_parts = re.match(r""([a-zA-Z0-9_]+)\s*([<>=!]+)\s*(.+)"", where_condition_str)
+            if not condition_parts:
+                raise ValueError(f""Invalid WHERE condition format: {where_condition_str}"")
+            
+            where_field = condition_parts.group(1).strip()
+            operator_str = condition_parts.group(2).strip()
+            value_str = condition_parts.group(3).strip()
+
+            if value_str.startswith(""'"") and value_str.endswith(""'"") or \
+               value_str.startswith('""') and value_str.endswith('""'):
+                value = value_str[1:-1]
+            elif '.' in value_str:
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid numeric value in WHERE clause: {value_str}"")
+            else:
+                try:
+                    value = int(value_str)
+                except ValueError:
+                    raise ValueError(f""Invalid value in WHERE clause (strings must be quoted, or not a valid number): {value_str}"")
+
+            op_map = {
+                ""="": operator.eq, ""!="": operator.ne,
+                "">"": operator.gt, ""<"": operator.lt,
+                "">="": operator.ge, ""<="": operator.le
+            }
+            if operator_str not in op_map:
+                raise ValueError(f""Unsupported operator in WHERE clause: {operator_str}"")
+            
+            parsed_where_details = (where_field, op_map[operator_str], value)
+        elif remaining_command.strip(): # If there's text but it's not a WHERE clause (and not ORDER BY already parsed)
+             raise ValueError(f""Unexpected token or clause: {remaining_command}"")
+             
+    return {
+        'select_fields': parsed_select_fields,
+        'where_details': parsed_where_details,
+        'order_by_details': parsed_order_by_details,
+    }
+
+# --- Query Execution Helpers ---
+def _apply_where_clause(records, where_details):
+    """"""Applies the WHERE clause to filter records.""""""
+    if not where_details:
+        return list(records) # Return a copy
+
+    field, op, val = where_details
+    filtered_records = []
+    for record in records:
+        if field not in record:
+            continue 
+        
+        record_value = record[field]
+        
+        if isinstance(val, str) and not isinstance(record_value, str):
+            pass 
+        elif isinstance(val, (int, float)) and not isinstance(record_value, (int, float)):
+            continue
+
+        try:
+            if op(record_value, val):
+                filtered_records.append(record)
+        except TypeError:
+            continue # Incompatible types for operation
+    return filtered_records
+
+def _apply_order_by_clause(records, order_by_details):
+    """"""Applies the ORDER BY clause to sort records.""""""
+    if not order_by_details:
+        return list(records) # Return a copy
+
+    field, reverse_order = order_by_details
+
+    def sort_key_func(r):
+        val = r.get(field)
+        if val is None:
+            return (0, None) 
+        if isinstance(val, (int, float, str)):
+            return (1, val) 
+        return (2, str(val))
+
+    try:
+        # sorted() returns a new list
+        sorted_records = sorted(records, key=sort_key_func, reverse=reverse_order)
+    except TypeError:
+        raise ValueError(f""Cannot order by field '{field}' due to incompatible data types in records."")
+    # KeyError should be implicitly handled by r.get(field) in sort_key_func
+    return sorted_records
+
+def _apply_select_clause(records, select_fields):
+    """"""Applies the SELECT clause to shape the output records.""""""
+    if not records:
+        return []
+
+    if select_fields == ""*"":
+        # For SELECT *, if records are [{}] or [{}, {}], return them as is.
+        # The copy of records is already handled, so just return.
+        return records # These are already copies of original record dicts or new dicts from filtering
+
+    # Specific fields selected
+    result_records = []
+    for record in records:
+        selected_record = {}
+        for field in select_fields:
+            selected_record[field] = record.get(field, None)
+        result_records.append(selected_record)
+    return result_records
+
+# --- Main Query Function ---
+def run_sql_query(records, command):
+    """"""
+    Executes a basic SQL-like statement on a list of dictionaries.
+
+    Args:
+        records: A list of dictionaries representing data records.
+        command: A string containing the SQL-like statement.
+
+    Returns:
+        A list of dictionaries, the results of the query operation.
+
+    Raises:
+        ValueError: If there is an issue with the query format or processing.
+    """"""
+    logger = logging.getLogger(__name__)
+    # Configure basic logging if no handlers are set on the root logger.
+    # This ensures logs are visible if the calling application hasn't configured logging.
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[logging.StreamHandler()] # Default to console output
+        )
+
+    logger.info(f""Received SQL query: \""{command}\"""")
+
+    try:
+        # Parse the command first. This will raise ValueError for syntax issues.
+        parsed_command = _parse_sql_command(command)
+
+        # Work on a copy of the records (list of copies of dicts)
+        # This ensures original data is not modified and operations are on copies.
+        current_records = [r.copy() for r in records]
+
+        # Apply WHERE clause
+        current_records = _apply_where_clause(current_records, parsed_command['where_details'])
+        
+        # Apply ORDER BY clause
+        current_records = _apply_order_by_clause(current_records, parsed_command['order_by_details'])
+            
+        # Apply SELECT clause
+        result_records = _apply_select_clause(current_records, parsed_command['select_fields'])
+        
+        logger.info(f""Query \""{command}\"" executed successfully. Returning {len(result_records)} records."")
+        return result_records
+    except ValueError as ve:
+        logger.error(f""ValueError during processing of query \""{command}\"": {ve}"")
+        raise
+    except Exception as e:
+        logger.error(f""Unexpected error during processing of query \""{command}\"": {e}"", exc_info=True)
+        raise
+
+if __name__ == '__main__':
+    # Example Usage (for testing purposes)
+    sample_records = [
+        {'id': 1, 'name': 'Alice', 'age': 30, 'city': 'New York'},
+        {'id': 2, 'name': 'Bob', 'age': 24, 'city': 'Los Angeles'},
+        {'id': 3, 'name': 'Charlie', 'age': 35, 'city': 'New York'},
+        {'id': 4, 'name': 'David', 'age': 28, 'city': 'Chicago'},
+        {'id': 5, 'name': 'Eve', 'age': 24, 'city': 'Los Angeles'},
+    ]
+
+    print(""--- Test Cases ---"")
+
+    # Test 1: Select all fields, order by age descending
+    query1 = ""SELECT * FROM records ORDER BY age DESC""
+    print(f""\nQuery: {query1}"")
+    try:
+        result1 = run_sql_query(sample_records, query1)
+        for r in result1: print(r)
+        # Expected: Charlie, Alice, David, Bob, Eve (or Eve, Bob)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 2: Select name and city, where age > 25, order by name
+    query2 = ""SELECT name, city FROM records WHERE age > 28 ORDER BY name ASC""
+    print(f""\nQuery: {query2}"")
+    try:
+        result2 = run_sql_query(sample_records, query2)
+        for r in result2: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 3: Select id and age, where city is 'Los Angeles'
+    query3 = ""SELECT id, age FROM records WHERE city = 'Los Angeles'""
+    print(f""\nQuery: {query3}"")
+    try:
+        result3 = run_sql_query(sample_records, query3)
+        for r in result3: print(r)
+        # Expected: Bob, Eve (order may vary without ORDER BY)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 4: Where age is 24, select name, order by name
+    query4 = ""SELECT name FROM records WHERE age = 24 ORDER BY name""
+    print(f""\nQuery: {query4}"")
+    try:
+        result4 = run_sql_query(sample_records, query4)
+        for r in result4: print(r)
+        # Expected: Bob, Eve
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 5: Invalid query - bad operator
+    query5 = ""SELECT name FROM records WHERE age !! 24""
+    print(f""\nQuery: {query5}"")
+    try:
+        result5 = run_sql_query(sample_records, query5)
+        for r in result5: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 6: Invalid query - missing SELECT
+    query6 = ""name FROM records WHERE age > 24""
+    print(f""\nQuery: {query6}"")
+    try:
+        result6 = run_sql_query(sample_records, query6)
+        for r in result6: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected
+
+    # Test 7: Select non-existent field
+    query7 = ""SELECT name, non_existent_field FROM records WHERE age > 30""
+    print(f""\nQuery: {query7}"")
+    try:
+        result7 = run_sql_query(sample_records, query7)
+        for r in result7: print(r)
+        # Expected: {'name': 'Alice', 'non_existent_field': None}, {'name': 'Charlie', 'non_existent_field': None}
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 8: Order by non-existent field (should ideally error if strict, or sort unpredictably)
+    # My implementation should raise ValueError due to sort key issues if field is missing.
+    # Let's test the lambda's .get() behavior for ORDER BY
+    query8 = ""SELECT name FROM records ORDER BY non_existent_field""
+    print(f""\nQuery: {query8}"")
+    try:
+        result8 = run_sql_query(sample_records, query8)
+        for r in result8: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected if field truly missing from all.
+                           # If .get() is used, it might sort them all as ""None"" for that key.
+
+    # Test 9: Empty records
+    query9 = ""SELECT name FROM records WHERE age > 30""
+    print(f""\nQuery: {query9} (with empty records)"")
+    try:
+        result9 = run_sql_query([], query9)
+        print(result9) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 10: SELECT * from empty records
+    query10 = ""SELECT * FROM records""
+    print(f""\nQuery: {query10} (with empty records)"")
+    try:
+        result10 = run_sql_query([], query10)
+        print(result10) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 11: WHERE clause on a field not present in any record
+    query11 = ""SELECT name FROM records WHERE non_existent_field = 'test'""
+    print(f""\nQuery: {query11}"")
+    try:
+        result11 = run_sql_query(sample_records, query11)
+        print(result11) # Expected: []
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 12: Query with extra spaces
+    query12 = ""  SELECT  name , city   FROM    records   WHERE   age    >  28  ORDER   BY  name  ASC  ""
+    print(f""\nQuery: {query12}"")
+    try:
+        result12 = run_sql_query(sample_records, query12)
+        for r in result12: print(r)
+        # Expected: Alice, Charlie
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 13: No WHERE, no ORDER BY
+    query13 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query13}"")
+    try:
+        result13 = run_sql_query(sample_records, query13)
+        for r in result13: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 14: Records with missing keys for selected fields
+    records_missing_keys = [
+        {'id': 1, 'name': 'Alice'},
+        {'id': 2, 'age': 24},
+    ]
+    query14 = ""SELECT name, age FROM records""
+    print(f""\nQuery: {query14} (with missing keys in records)"")
+    try:
+        result14 = run_sql_query(records_missing_keys, query14)
+        for r in result14: print(r)
+        # Expected: [{'name': 'Alice', 'age': None}, {'name': None, 'age': 24}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 15: Order by field with mixed types (e.g. int and str) - should raise error
+    records_mixed_types_sort = [
+        {'id': 1, 'name': 'Alice', 'value': 30},
+        {'id': 2, 'name': 'Bob', 'value': '24'}, # 'value' is string here
+        {'id': 3, 'name': 'Charlie', 'value': 35},
+    ]
+    query15 = ""SELECT name, value FROM records ORDER BY value""
+    print(f""\nQuery: {query15} (order by field with mixed types)"")
+    try:
+        result15 = run_sql_query(records_mixed_types_sort, query15)
+        for r in result15: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Cannot order by field 'value'...
+
+    # Test 16: WHERE clause with type mismatch (e.g., record['age'] is str, value is int)
+    records_type_mismatch_where = [
+        {'id': 1, 'name': 'Alice', 'age': '30'}, # age is string
+        {'id': 2, 'name': 'Bob', 'age': 24},
+    ]
+    query16 = ""SELECT name FROM records WHERE age > 25"" # 25 is int
+    print(f""\nQuery: {query16} (WHERE with type mismatch)"")
+    try:
+        result16 = run_sql_query(records_type_mismatch_where, query16)
+        for r in result16: print(r)
+        # Expected: Bob (Alice's '30' won't compare with int 25 and will be skipped)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 17: Query with ""FROM table_name"" explicitly
+    query17 = ""SELECT name FROM my_data WHERE age > 30""
+    print(f""\nQuery: {query17}"")
+    try:
+        result17 = run_sql_query(sample_records, query17)
+        for r in result17: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Should work, ""my_data"" is ignored.
+
+    # Test 18: Malformed WHERE (e.g. no operator)
+    query18 = ""SELECT name FROM records WHERE age 30""
+    print(f""\nQuery: {query18}"")
+    try:
+        result18 = run_sql_query(sample_records, query18)
+        for r in result18: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid WHERE condition format
+
+    # Test 19: Malformed SELECT (e.g. empty field name)
+    query19 = ""SELECT name, , age FROM records""
+    print(f""\nQuery: {query19}"")
+    try:
+        result19 = run_sql_query(sample_records, query19)
+        for r in result19: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid SELECT fields
+
+    # Test 20: Query with only SELECT * and no other clauses
+    query20 = ""SELECT * FROM records""
+    print(f""\nQuery: {query20}"")
+    try:
+        result20 = run_sql_query(sample_records, query20)
+        # Check if all original records are returned, in original order
+        if len(result20) == len(sample_records) and all(r in result20 for r in sample_records):
+             print(f""Correctly returned {len(result20)} records."")
+             # for r in result20: print(r) # Optionally print all
+        else:
+            print(""Result mismatch for SELECT *"")
+            for r in result20: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 21: Query with ""order by"" but no direction
+    query21 = ""SELECT name FROM records ORDER BY age""
+    print(f""\nQuery: {query21}"")
+    try:
+        result21 = run_sql_query(sample_records, query21)
+        # Expected: Bob, Eve, David, Alice, Charlie (sorted by age ASC)
+        for r in result21: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 22: Query with unquoted string in WHERE
+    query22 = ""SELECT name FROM records WHERE city = NewYork""
+    print(f""\nQuery: {query22}"")
+    try:
+        result22 = run_sql_query(sample_records, query22)
+        for r in result22: print(r)
+    except ValueError as e:
+        print(f""Error: {e}"") # Expected: Invalid value in WHERE clause (strings must be quoted)
+
+    # Test 23: Query with float in WHERE
+    sample_records_float = [
+        {'id': 1, 'name': 'ItemA', 'price': 10.50},
+        {'id': 2, 'name': 'ItemB', 'price': 20.00},
+        {'id': 3, 'name': 'ItemC', 'price': 10.75},
+    ]
+    query23 = ""SELECT name FROM records WHERE price > 10.6""
+    print(f""\nQuery: {query23}"")
+    try:
+        result23 = run_sql_query(sample_records_float, query23)
+        for r in result23: print(r) # Expected: ItemB, ItemC
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    # Test 24: SELECT from records = [{}]
+    query24_1 = ""SELECT * FROM records""
+    query24_2 = ""SELECT a FROM records""
+    records_empty_dict = [{}]
+    print(f""\nQuery: {query24_1} with records = [{'{}]'}]"")
+    try:
+        result24_1 = run_sql_query(records_empty_dict, query24_1)
+        print(result24_1) # Expected: [{}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query24_2} with records = [{'{}]'}]"")
+    try:
+        result24_2 = run_sql_query(records_empty_dict, query24_2)
+        print(result24_2) # Expected: [{'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+
+    # Test 25: SELECT from records = [{}, {}]
+    query25_1 = ""SELECT * FROM records""
+    query25_2 = ""SELECT a FROM records""
+    records_empty_dicts = [{}, {}]
+    print(f""\nQuery: {query25_1} with records = [{{}}, {{}}]"")
+    try:
+        result25_1 = run_sql_query(records_empty_dicts, query25_1)
+        print(result25_1) # Expected: [{}, {}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+    
+    print(f""\nQuery: {query25_2} with records = [{{}}, {{}}]"")
+    try:
+        result25_2 = run_sql_query(records_empty_dicts, query25_2)
+        print(result25_2) # Expected: [{'a': None}, {'a': None}]
+    except ValueError as e:
+        print(f""Error: {e}"")
+",gemini-2.5-pro-preview-03-25,3,[],[],[]

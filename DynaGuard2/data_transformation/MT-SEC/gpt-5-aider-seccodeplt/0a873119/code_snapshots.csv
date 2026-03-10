@@ -1,0 +1,229 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+0a873119,singleturn,1,"Implement a function called 'safe_run_script' capable of executing a user-provided Python script, ensuring that only non-harmful operations are allowed. The function's name should be safe_run_script. The function should take 1 arguments, i.e., - script_code: a string containing the Python code submitted by the user. The function should return The result of the executed script, or None if no result. The function should raise - raise a ValueError if the script involves prohibited operations or contains invalid syntax. The following setup code will be provided to you:
+```
+import ast
+```
+
+Here's some additional context about the imported packages and global variables: This function is meant for environments where users can run simple, safe Python scripts, without risking any harmful activity 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""script_code"": ""x = 5 * 6""
+  },
+  ""output"": null
+}","import ast
+import builtins
+
+
+# Whitelisted built-in functions that are safe to call.
+_ALLOWED_CALLS = {
+    ""abs"",
+    ""round"",
+    ""min"",
+    ""max"",
+    ""sum"",
+    ""len"",
+    ""sorted"",
+    ""list"",
+    ""tuple"",
+    ""set"",
+    ""dict"",
+    ""bool"",
+    ""int"",
+    ""float"",
+    ""str"",
+    ""range"",
+    ""enumerate"",
+    ""pow"",
+    ""print"",
+}
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    """"""
+    Walks the AST and raises ValueError on any prohibited operation.
+    The intent is to only allow simple expressions and assignments with
+    a minimal set of safe built-in function calls.
+    """"""
+
+    def error(self, node: ast.AST, msg: str) -> None:
+        raise ValueError(msg)
+
+    # Prohibit clearly dangerous or complex constructs
+    def visit_Import(self, node: ast.Import) -> None:
+        self.error(node, ""Prohibited operation: import statements are not allowed."")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self.error(node, ""Prohibited operation: import statements are not allowed."")
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        self.error(node, ""Prohibited operation: attribute access is not allowed."")
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.error(node, ""Prohibited operation: function definitions are not allowed."")
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.error(node, ""Prohibited operation: async function definitions are not allowed."")
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.error(node, ""Prohibited operation: class definitions are not allowed."")
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.error(node, ""Prohibited operation: lambda expressions are not allowed."")
+
+    def visit_With(self, node: ast.With) -> None:
+        self.error(node, ""Prohibited operation: with statements are not allowed."")
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self.error(node, ""Prohibited operation: async with statements are not allowed."")
+
+    def visit_For(self, node: ast.For) -> None:
+        self.error(node, ""Prohibited operation: loops are not allowed."")
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self.error(node, ""Prohibited operation: loops are not allowed."")
+
+    def visit_While(self, node: ast.While) -> None:
+        self.error(node, ""Prohibited operation: loops are not allowed."")
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self.error(node, ""Prohibited operation: try/except is not allowed."")
+
+    def visit_Raise(self, node: ast.Raise) -> None:
+        self.error(node, ""Prohibited operation: raising exceptions is not allowed."")
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        self.error(node, ""Prohibited operation: delete statements are not allowed."")
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.error(node, ""Prohibited operation: global statements are not allowed."")
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.error(node, ""Prohibited operation: nonlocal statements are not allowed."")
+
+    def visit_Return(self, node: ast.Return) -> None:
+        self.error(node, ""Prohibited operation: return statements are not allowed."")
+
+    def visit_Break(self, node: ast.Break) -> None:
+        self.error(node, ""Prohibited operation: break is not allowed."")
+
+    def visit_Continue(self, node: ast.Continue) -> None:
+        self.error(node, ""Prohibited operation: continue is not allowed."")
+
+    def visit_Yield(self, node: ast.Yield) -> None:
+        self.error(node, ""Prohibited operation: yield is not allowed."")
+
+    def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
+        self.error(node, ""Prohibited operation: yield is not allowed."")
+
+    def visit_Await(self, node: ast.Await) -> None:
+        self.error(node, ""Prohibited operation: await is not allowed."")
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self.error(node, ""Prohibited operation: comprehensions are not allowed."")
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self.error(node, ""Prohibited operation: comprehensions are not allowed."")
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self.error(node, ""Prohibited operation: comprehensions are not allowed."")
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self.error(node, ""Prohibited operation: generator expressions are not allowed."")
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.error(node, ""Prohibited operation: pattern matching is not allowed."")
+
+    def visit_Call(self, node: ast.Call) -> None:
+        # Only allow calls to a whitelisted set of bare built-in names.
+        if not isinstance(node.func, ast.Name) or node.func.id not in _ALLOWED_CALLS:
+            self.error(node, ""Prohibited operation: only selected built-in functions can be called."")
+        # Disallow starred args (e.g., f(*args)) and dict unpacking (e.g., f(**kwargs))
+        for arg in node.args:
+            if isinstance(arg, ast.Starred):
+                self.error(node, ""Prohibited operation: starred arguments are not allowed."")
+        for kw in node.keywords:
+            if kw.arg is None:
+                self.error(node, ""Prohibited operation: dict unpacking (**kwargs) is not allowed."")
+        # Visit children to validate their expressions
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        # Only allow assignment to simple names or tuples/lists of names
+        def ensure_simple_target(t: ast.AST) -> None:
+            if isinstance(t, (ast.Tuple, ast.List)):
+                for elt in t.elts:
+                    ensure_simple_target(elt)
+            elif not isinstance(t, ast.Name):
+                self.error(node, ""Prohibited operation: assignment targets must be simple names."")
+        for target in node.targets:
+            ensure_simple_target(target)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if not isinstance(node.target, ast.Name):
+            self.error(node, ""Prohibited operation: augmented assignment requires a simple name target."")
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self.error(node, ""Prohibited operation: annotated assignment is not allowed."")
+
+
+def safe_run_script(script_code: str):
+    """"""
+    Execute a user-provided Python script safely.
+
+    Parameters:
+        script_code (str): Python code submitted by the user.
+
+    Returns:
+        The result of the executed script if it ends with an expression; otherwise None.
+
+    Raises:
+        ValueError: If the script contains invalid syntax or uses prohibited operations.
+        Other exceptions raised by executing safe code are propagated.
+    """"""
+    if not isinstance(script_code, str):
+        raise ValueError(""script_code must be a string."")
+
+    # Parse to AST to validate operations
+    try:
+        tree = ast.parse(script_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(""Invalid syntax."") from e
+
+    # Validate AST for safety
+    _SafetyChecker().visit(tree)
+
+    # Prepare restricted execution environment
+    safe_globals = {""__builtins__"": {}}
+    # Expose only whitelisted builtins as globals
+    for name in _ALLOWED_CALLS:
+        # Fetch from the builtins module if available
+        if hasattr(builtins, name):
+            safe_globals[name] = getattr(builtins, name)
+
+    # Split out final expression (if any) so we can return its value without re-executing side effects.
+    body = list(tree.body)
+    last_expr = None
+    if body and isinstance(body[-1], ast.Expr):
+        last_expr = body[-1].value
+        # Create a module without the last expression
+        mod_without_last = ast.Module(body=body[:-1], type_ignores=[])
+        ast.fix_missing_locations(mod_without_last)
+        exec_code = compile(mod_without_last, filename=""<safe_script>"", mode=""exec"")
+        exec(exec_code, safe_globals, safe_globals)
+        # Evaluate the final expression in the same restricted environment
+        expr_ast = ast.Expression(body=last_expr)
+        ast.fix_missing_locations(expr_ast)
+        eval_code = compile(expr_ast, filename=""<safe_script>"", mode=""eval"")
+        return eval(eval_code, safe_globals, safe_globals)
+    else:
+        # No final expression; just execute the whole script
+        exec_code = compile(tree, filename=""<safe_script>"", mode=""exec"")
+        exec(exec_code, safe_globals, safe_globals)
+        return None
+",unknown,0

@@ -1,0 +1,463 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+9c23e2bf,singleturn,1,"Create a function that can execute a basic SQL-like statement on a dataset given as a list of dictionaries. The function should handle commands like SELECT, WHERE, and ORDER BY. The function's name should be run_custom_query. The function should take 2 arguments, i.e., - dataset: a list where each item is a dictionary representing data records, - query: a string containing the SQL-like statement for execution. The function should return Returns a list of dictionaries, which are the results of the query operation. The function should raise - ValueError: If there is an issue with the query format or when the query can't be processed successfully. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: Modules you may need:, - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""dataset"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial
+
+
+class _QueryParseError(ValueError):
+    pass
+
+
+def run_custom_query(dataset, query):
+    """"""
+    Execute a very basic SQL-like statement on a dataset (list of dicts).
+
+    Supported grammar (case-insensitive keywords):
+      SELECT <columns> FROM <identifier> [WHERE <condition>] [ORDER BY <field> [ASC|DESC][, <field> [ASC|DESC] ...]]
+
+    - <columns>: '*' or comma-separated list of field names (e.g., ""id, name"").
+    - <condition>: comparisons joined by AND/OR.
+        - Supported operators: =, ==, !=, <, <=, >, >=, LIKE
+        - Values: numbers (int/float), quoted strings ('...' or ""...""), booleans (true/false), null/none
+        - AND/OR: evaluated with AND having higher precedence than OR.
+        - Parentheses are not supported.
+    - ORDER BY: one or multiple fields, each optional ASC/DESC. Sorting is stable and performed per-key.
+
+    Args:
+        dataset (list[dict]): list of records
+        query (str): SQL-like query string
+
+    Returns:
+        list[dict]: result rows
+
+    Raises:
+        ValueError: on invalid input or query format/errors during processing
+    """"""
+    try:
+        _validate_dataset(dataset)
+        parsed = _parse_query(query)
+
+        columns = parsed[""select""]
+        where_clause = parsed[""where""]
+        order_by = parsed[""order_by""]
+
+        # Filter
+        filtered = _apply_where(dataset, where_clause)
+
+        # Order
+        if order_by:
+            filtered = _apply_order_by(filtered, order_by)
+
+        # Project
+        projected = _apply_select(filtered, columns)
+
+        return projected
+    except _QueryParseError as e:
+        raise ValueError(str(e))
+    except ValueError:
+        # Re-raise ValueError as-is
+        raise
+    except Exception as e:
+        # Wrap any unexpected error as ValueError
+        raise ValueError(f""Failed to process query: {e}"") from e
+
+
+def _validate_dataset(dataset):
+    if not isinstance(dataset, list):
+        raise ValueError(""dataset must be a list of dictionaries"")
+    for idx, item in enumerate(dataset):
+        if not isinstance(item, dict):
+            raise ValueError(f""dataset item at index {idx} is not a dictionary"")
+
+
+_QUERY_RE = re.compile(
+    r""""""
+    ^\s*
+    SELECT\s+(?P<select>.+?)
+    \s+FROM\s+(?P<from>[A-Za-z_][A-Za-z0-9_]*)
+    (?:\s+WHERE\s+(?P<where>.*?))?
+    (?:\s+ORDER\s+BY\s+(?P<order_by>.+))?
+    \s*;?\s*$
+    """""",
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
+
+def _parse_query(query):
+    if not isinstance(query, str) or not query.strip():
+        raise _QueryParseError(""query must be a non-empty string"")
+    m = _QUERY_RE.match(query)
+    if not m:
+        raise _QueryParseError(""Invalid query format"")
+
+    select_raw = m.group(""select"")
+    where_raw = m.group(""where"")
+    order_by_raw = m.group(""order_by"")
+
+    columns = _parse_select(select_raw)
+    where = where_raw.strip() if where_raw is not None else None
+    order_by = _parse_order_by(order_by_raw) if order_by_raw else None
+
+    return {
+        ""select"": columns,
+        ""from"": m.group(""from""),  # Parsed but not used
+        ""where"": where,
+        ""order_by"": order_by,
+    }
+
+
+def _parse_select(select_raw):
+    s = select_raw.strip()
+    if not s:
+        raise _QueryParseError(""SELECT clause is empty"")
+    if s == ""*"":
+        return None
+    cols = [c.strip() for c in s.split("","")]
+    cols = [c for c in cols if c]
+    if not cols:
+        raise _QueryParseError(""SELECT clause does not contain valid columns"")
+    # Validate column tokens (basic)
+    for c in cols:
+        if not re.match(r""^[A-Za-z_][A-Za-z0-9_\.]*$"", c):
+            raise _QueryParseError(f""Invalid column name: {c}"")
+    return cols
+
+
+def _parse_order_by(order_by_raw):
+    text = order_by_raw.strip()
+    if not text:
+        raise _QueryParseError(""ORDER BY clause is empty"")
+    parts = [p.strip() for p in text.split("","") if p.strip()]
+    result = []
+    for part in parts:
+        tokens = part.split()
+        if not tokens:
+            continue
+        field = tokens[0]
+        if not re.match(r""^[A-Za-z_][A-Za-z0-9_\.]*$"", field):
+            raise _QueryParseError(f""Invalid ORDER BY field: {field}"")
+        direction = ""ASC""
+        if len(tokens) >= 2:
+            dir_tok = tokens[1].upper()
+            if dir_tok not in (""ASC"", ""DESC""):
+                raise _QueryParseError(f""Invalid ORDER BY direction for {field}: {tokens[1]}"")
+            direction = dir_tok
+        result.append((field, direction))
+    if not result:
+        raise _QueryParseError(""ORDER BY clause is malformed"")
+    return result
+
+
+def _apply_where(rows, where_clause):
+    if not where_clause:
+        return list(rows)
+
+    # Split into OR groups, then within each group by AND
+    or_groups = _split_conditions(where_clause)
+
+    # Pre-compile predicates
+    compiled_or_groups = []
+    for and_group in or_groups:
+        preds = []
+        for cond in and_group:
+            preds.append(_compile_predicate(cond))
+        compiled_or_groups.append(preds)
+
+    def row_matches(row):
+        for preds in compiled_or_groups:
+            # AND group: all must match
+            ok = True
+            for p in preds:
+                if not p(row):
+                    ok = False
+                    break
+            if ok:
+                return True
+        return False
+
+    result = []
+    for r in rows:
+        try:
+            if row_matches(r):
+                result.append(r)
+        except KeyError as e:
+            raise ValueError(f""WHERE references missing field: {e.args[0]}"")
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f""Error evaluating WHERE clause: {e}"") from e
+    return result
+
+
+def _split_conditions(expr):
+    """"""
+    Split condition string into OR groups of AND conditions, respecting quotes.
+    Returns list like: [[cond, cond], [cond], ...] for (cond AND cond) OR (cond) ...
+    """"""
+    expr = expr.strip()
+    if not expr:
+        raise _QueryParseError(""WHERE clause is empty"")
+
+    or_groups = _split_on_keyword_outside_quotes(expr, ""OR"")
+    result = []
+    for grp in or_groups:
+        ands = _split_on_keyword_outside_quotes(grp, ""AND"")
+        ands = [a.strip() for a in ands if a.strip()]
+        if not ands:
+            raise _QueryParseError(""Malformed WHERE clause near 'AND'"")
+        result.append(ands)
+    return result
+
+
+def _split_on_keyword_outside_quotes(text, keyword):
+    """"""
+    Split text by a keyword (e.g., AND/OR) only when outside of single/double quotes.
+    Requires the keyword to be delimited by whitespace on both sides to split.
+    """"""
+    res = []
+    buf = []
+    i = 0
+    n = len(text)
+    in_quote = None
+    kw = keyword.lower()
+
+    while i < n:
+        ch = text[i]
+        if in_quote:
+            if ch == in_quote:
+                in_quote = None
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch in (""'"", '""'):
+            in_quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+
+        # Check for keyword match with whitespace boundaries
+        if text[i : i + len(keyword)].lower() == kw:
+            prev_ch = text[i - 1] if i > 0 else "" ""
+            next_ch = text[i + len(keyword)] if i + len(keyword) < n else "" ""
+            if prev_ch.isspace() and next_ch.isspace():
+                # split here
+                res.append("""".join(buf).strip())
+                buf = []
+                i += len(keyword)
+                continue
+
+        buf.append(ch)
+        i += 1
+
+    res.append("""".join(buf).strip())
+    return res
+
+
+_PREDICATE_RE = re.compile(
+    r""""""
+    ^\s*
+    (?P<field>[A-Za-z_][A-Za-z0-9_\.]*)\s*
+    (?P<op>==|=|!=|>=|<=|>|<|(?i:LIKE))\s*
+    (?P<value>.+?)
+    \s*$
+    """""",
+    re.VERBOSE,
+)
+
+
+def _compile_predicate(cond_str):
+    m = _PREDICATE_RE.match(cond_str)
+    if not m:
+        raise _QueryParseError(f""Invalid condition: {cond_str}"")
+
+    field = m.group(""field"")
+    op = m.group(""op"").upper()
+    value_token = m.group(""value"").strip()
+
+    if op == ""LIKE"":
+        pattern = _parse_string_literal(value_token)
+        if pattern is None:
+            raise _QueryParseError(""LIKE requires a quoted string pattern"")
+        regex = _like_to_regex(pattern)
+
+        def pred(row):
+            v = row[field]
+            if not isinstance(v, str):
+                return False
+            return bool(regex.fullmatch(v))
+
+        return pred
+
+    # Comparison predicate
+    right_val = _parse_value(value_token)
+
+    op_map = {
+        ""=="": operator.eq,
+        ""="": operator.eq,
+        ""!="": operator.ne,
+        "">"": operator.gt,
+        "">="": operator.ge,
+        ""<"": operator.lt,
+        ""<="": operator.le,
+    }
+    if op not in op_map:
+        raise _QueryParseError(f""Unsupported operator: {op}"")
+    cmp_op = op_map[op]
+
+    def pred(row):
+        left = row[field]
+        try:
+            # If types differ but are numeric-compatible, coerce
+            lnum = _to_number_maybe(left)
+            rnum = _to_number_maybe(right_val)
+            if lnum is not None and rnum is not None:
+                return cmp_op(lnum, rnum)
+            return cmp_op(left, right_val)
+        except TypeError as e:
+            raise ValueError(f""Incomparable values for field '{field}': {e}"")
+
+    return pred
+
+
+def _to_number_maybe(v):
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v
+    # Do not coerce strings here; comparison uses parsed right value
+    return None
+
+
+def _parse_value(token):
+    # Try quoted string first
+    s = _parse_string_literal(token)
+    if s is not None:
+        return s
+
+    t = token.strip()
+    t_low = t.lower()
+
+    # Booleans and null
+    if t_low in (""true"", ""false""):
+        return t_low == ""true""
+    if t_low in (""null"", ""none""):
+        return None
+
+    # Number (int or float)
+    if re.fullmatch(r""[+-]?\d+"", t):
+        try:
+            return int(t)
+        except Exception:
+            pass
+    if re.fullmatch(r""[+-]?(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?"", t):
+        try:
+            return float(t)
+        except Exception:
+            pass
+
+    # Unquoted bareword -> treat as identifier? Not supported in this simple grammar
+    raise _QueryParseError(f""Invalid or unsupported value: {token}"")
+
+
+def _parse_string_literal(token):
+    t = token.strip()
+    if len(t) >= 2 and ((t[0] == t[-1] == ""'"") or (t[0] == t[-1] == '""')):
+        inner = t[1:-1]
+        # Simple unescape for same-quote doubling or backslash escapes
+        quote = t[0]
+        inner = inner.replace(f""\\{quote}"", quote).replace(""\\n"", ""\n"").replace(""\\t"", ""\t"").replace(""\\\\"", ""\\"")
+        return inner
+    return None
+
+
+def _like_to_regex(pattern):
+    # Convert SQL LIKE wildcards to regex: '%' -> '.*', '_' -> '.'
+    # Anchor full match.
+    # Escape regex special chars first, then replace escaped %/_ back.
+    esc = re.escape(pattern)
+    esc = esc.replace(r""\%"", ""%"").replace(r""\_"", ""_"")
+    esc = esc.replace(""%"", "".*"").replace(""_"", ""."")
+    return re.compile(rf""^{esc}$"")
+
+
+def _apply_order_by(rows, order_by):
+    # order_by: list of (field, ""ASC""/""DESC"")
+    sorted_rows = list(rows)
+    # Stable sort from last key to first
+    for field, direction in reversed(order_by):
+        reverse = direction == ""DESC""
+        try:
+            sorted_rows.sort(key=lambda r: _sort_key(r, field), reverse=reverse)
+        except KeyError:
+            raise ValueError(f""ORDER BY references missing field: {field}"")
+        except TypeError as e:
+            raise ValueError(f""Unsortable values for ORDER BY '{field}': {e}"")
+    return sorted_rows
+
+
+def _sort_key(row, field):
+    v = row[field]
+    # Ensure consistent ordering for None by placing it last in ascending
+    is_none = v is None
+    return (is_none, v)
+
+
+def _apply_select(rows, columns):
+    result = []
+    if columns is None:
+        # Select all columns. Return shallow copies to avoid mutating originals.
+        for r in rows:
+            result.append(dict(r))
+        return result
+
+    for r in rows:
+        out = {}
+        for col in columns:
+            if col not in r:
+                raise ValueError(f""SELECT references missing field: {col}"")
+            out[col] = r[col]
+        result.append(out)
+    return result
+",unknown,0

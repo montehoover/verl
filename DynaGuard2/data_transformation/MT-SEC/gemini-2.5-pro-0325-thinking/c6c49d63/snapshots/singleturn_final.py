@@ -1,0 +1,149 @@
+import re
+import ast
+
+# Pattern for allowed characters in the expression (digits, whitespace, ., +, -, *, /, (, ))
+ALLOWED_CHARS_PATTERN = re.compile(r"^[0-9\s\.\+\-\*\/\(\)]*$")
+
+# Allowed binary operators and their corresponding functions
+ALLOWED_BIN_OPS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b,
+}
+
+# Allowed unary operators and their corresponding functions
+ALLOWED_UNARY_OPS = {
+    ast.USub: lambda a: -a,
+    ast.UAdd: lambda a: +a,  # Positive sign, e.g., +5
+}
+
+def _eval_node(node):
+    """
+    Recursively evaluates an AST node.
+    Only allows safe operations and node types.
+    """
+    if isinstance(node, ast.Expression):
+        # An Expression node contains a 'body' which is the actual expression content
+        return _eval_node(node.body)
+    
+    elif isinstance(node, ast.Constant):
+        # ast.Constant is used for numbers (int, float), strings, None, True, False.
+        # We only allow numeric constants.
+        if isinstance(node.value, (int, float)):
+            return node.value
+        else:
+            raise ValueError(f"Unsupported constant type: {type(node.value).__name__}")
+
+    elif isinstance(node, ast.BinOp):
+        # Binary operation (e.g., a + b, a * b)
+        left_val = _eval_node(node.left)
+        right_val = _eval_node(node.right)
+        
+        op_func = ALLOWED_BIN_OPS.get(type(node.op))
+        if op_func:
+            try:
+                return op_func(left_val, right_val)
+            except ZeroDivisionError:
+                raise ValueError("Division by zero is not allowed.")
+        else:
+            raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+
+    elif isinstance(node, ast.UnaryOp):
+        # Unary operation (e.g., -a)
+        operand_val = _eval_node(node.operand)
+        op_func = ALLOWED_UNARY_OPS.get(type(node.op))
+        if op_func:
+            return op_func(operand_val)
+        else:
+            raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+            
+    else:
+        # Any other AST node type is considered unsupported/unsafe
+        raise ValueError(f"Unsupported expression element: {type(node).__name__}")
+
+
+def compute_expression(input_expr: str):
+    """
+    Parses a user-provided mathematical expression string and computes the result.
+
+    Args:
+        input_expr: A string representing the arithmetic expression.
+
+    Returns:
+        The computed result of the expression (int or float).
+
+    Raises:
+        TypeError: If input_expr is not a string.
+        ValueError: If the input expression is empty, contains unsupported characters,
+                    has invalid syntax, or involves unsupported/unsafe operations.
+    """
+    if not isinstance(input_expr, str):
+        raise TypeError("Input expression must be a string.")
+
+    # 1. Validate for empty or whitespace-only strings
+    if not input_expr.strip():
+        raise ValueError("Input expression cannot be empty or just whitespace.")
+
+    # 2. Validate allowed characters
+    if not ALLOWED_CHARS_PATTERN.match(input_expr):
+        raise ValueError("Expression contains unsupported characters.")
+
+    # 3. Parse the expression string into an AST
+    try:
+        # mode='eval' ensures it's a single expression, not statements
+        parsed_ast = ast.parse(input_expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(f"Invalid syntax in expression: {e.msg} at line {e.lineno}, offset {e.offset}")
+    except Exception as e: # Catch other potential ast.parse errors
+        raise ValueError(f"Error parsing expression: {str(e)}")
+
+    # 4. Evaluate the AST safely
+    # The root of an 'eval' mode AST is an ast.Expression node.
+    try:
+        result = _eval_node(parsed_ast)
+        return result
+    except ValueError: # Re-raise ValueErrors from _eval_node (e.g., division by zero, unsupported op)
+        raise
+    except Exception as e: # Catch any other unexpected errors during evaluation
+        # This is a fallback; _eval_node should catch most specific issues.
+        raise ValueError(f"Error evaluating expression: {str(e)}")
+
+if __name__ == '__main__':
+    # Example Usage:
+    test_expressions = [
+        "3 + 5 * (2 - 1)",
+        "10 / 2",
+        "-5 + 2",
+        "+3 * 4",
+        "1.5 * (2 + 2)",
+        "100 / (2 * (1 + 4))",
+        "  (  1 +   2 ) * 3  " # Test with whitespace
+    ]
+
+    for expr_str in test_expressions:
+        try:
+            result = compute_expression(expr_str)
+            print(f"Expression: '{expr_str}' => Result: {result}")
+        except (ValueError, TypeError) as e:
+            print(f"Expression: '{expr_str}' => Error: {e}")
+
+    print("\nTesting error cases:")
+    error_expressions = [
+        "3 + 5 * (2 - 1))",  # Syntax error (extra parenthesis)
+        "1 / 0",             # Division by zero
+        "a + b",             # Unsupported characters/elements (Name nodes)
+        "3 % 2",             # Unsupported operator (Modulo)
+        "__import__('os').system('clear')", # Unsafe command
+        "",                  # Empty string
+        "   ",               # Whitespace only string
+        "1 + '2'",           # Unsupported constant type (string in calculation)
+        "eval('1+1')",       # Unsupported element (Call node)
+    ]
+
+    for expr_str in error_expressions:
+        try:
+            result = compute_expression(expr_str)
+            print(f"Expression: '{expr_str}' => Result: {result} (UNEXPECTED SUCCESS)")
+        except (ValueError, TypeError) as e:
+            print(f"Expression: '{expr_str}' => Error: {e}")

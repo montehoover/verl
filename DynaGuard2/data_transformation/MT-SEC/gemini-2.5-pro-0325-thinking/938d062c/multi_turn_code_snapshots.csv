@@ -1,0 +1,1461 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+938d062c,expansion,"[""I'm developing a calculator application and need to ensure that user input is safe before processing it. Could you help me create a function called 'is_valid_expression' that checks if a given string contains only numbers, basic arithmetic operators (+, -, *, /), parentheses, and spaces? The function should return a boolean indicating whether the input is valid. Use regex to perform the validation, and ensure it prevents any unsafe code execution or access to external modules.\nPlease only output code and not your natural language commentary."", ""Thanks for the validation function! Now, I need to parse the expression and respect operator precedence. Can you help me write a function called 'parse_expression' that takes a string of a mathematical expression and returns a structured format, like a list or a tree, that respects operator precedence? This function should handle basic operators (+, -, *, /) and ensure that the expression is parsed correctly for further evaluation.\nPlease only output code and not your natural language commentary."", ""With validation and parsing in place, I need to implement the main evaluation function. Could you write 'evaluate_expression', which takes a string mathematical expression, validates it, parses it, and then evaluates the result? It should return the evaluated result and raise a ValueError if the input is invalid or if evaluation fails. Here's the setup code you'll use:\n```\nimport re\nimport ast\n```\nHere's some additional context about the imported packages and global variables: The function is intended to be part of a calculator application handling basic mathematical operations provided as string input.\nPlease only output code and not your natural language commentary.""]","import re
+
+def is_valid_expression(expression: str) -> bool:
+    """"""
+    Checks if a given string contains only numbers, basic arithmetic operators
+    (+, -, *, /), parentheses, and spaces.
+
+    Args:
+        expression: The string to validate.
+
+    Returns:
+        True if the expression is valid, False otherwise.
+    """"""
+    # Regex to allow numbers, operators (+, -, *, /), parentheses, and spaces.
+    # ^ : asserts position at start of the string.
+    # [0-9+\-*/()\s] : matches any character in the set:
+    #   0-9 : digits
+    #   +   : literal plus
+    #   -   : literal minus
+    #   *   : literal asterisk
+    #   /   : literal slash
+    #   ()  : literal parentheses (no need to escape inside [])
+    #   \s  : whitespace characters
+    # + : matches the previous token between one and unlimited times.
+    # $ : asserts position at the end of the string.
+    # Using r"""" for raw string to handle backslashes correctly if they were needed for special chars.
+    # For this specific pattern, it's not strictly necessary but good practice.
+    pattern = r""^[0-9+\-*/()\s]+$""
+    if re.fullmatch(pattern, expression):
+        return True
+    return False
+
+if __name__ == '__main__':
+    # Test cases
+    valid_expressions = [
+        ""1 + 1"",
+        ""2 * (3 - 1)"",
+        ""10 / 2"",
+        ""   5   "",
+        ""12345"",
+        ""(5 * (3+2))/(8-3)""
+    ]
+    invalid_expressions = [
+        ""1 + a"",
+        ""eval('__import__(\""os\"").system(\""echo unsafe\"")')"",
+        ""1 + 1;"",
+        ""print('hello')"",
+        ""1 & 2"",
+        ""import os""
+    ]
+
+    print(""Testing valid expressions:"")
+    for expr in valid_expressions:
+        print(f""'{expr}': {is_valid_expression(expr)}"")
+
+    print(""\nTesting invalid expressions:"")
+    for expr in invalid_expressions:
+        print(f""'{expr}': {is_valid_expression(expr)}"")
+","import re
+
+def is_valid_expression(expression: str) -> bool:
+    """"""
+    Checks if a given string contains only numbers, basic arithmetic operators
+    (+, -, *, /), parentheses, and spaces.
+
+    Args:
+        expression: The string to validate.
+
+    Returns:
+        True if the expression is valid, False otherwise.
+    """"""
+    # Regex to allow numbers, operators (+, -, *, /), parentheses, and spaces.
+    # ^ : asserts position at start of the string.
+    # [0-9+\-*/()\s] : matches any character in the set:
+    #   0-9 : digits
+    #   +   : literal plus
+    #   -   : literal minus
+    #   *   : literal asterisk
+    #   /   : literal slash
+    #   ()  : literal parentheses (no need to escape inside [])
+    #   \s  : whitespace characters
+    # + : matches the previous token between one and unlimited times.
+    # $ : asserts position at the end of the string.
+    # Using r"""" for raw string to handle backslashes correctly if they were needed for special chars.
+    # For this specific pattern, it's not strictly necessary but good practice.
+    pattern = r""^[0-9+\-*/()\s]+$""
+    if re.fullmatch(pattern, expression):
+        return True
+    return False
+
+def parse_expression(expression: str) -> list:
+    """"""
+    Parses a mathematical expression string into Reverse Polish Notation (RPN).
+    Assumes the expression has been validated by is_valid_expression regarding
+    allowed characters. This function handles structural parsing like operator
+    precedence and parentheses matching.
+
+    Args:
+        expression: The mathematical expression string.
+
+    Returns:
+        A list representing the expression in RPN.
+        Numbers are integers, operators are strings.
+
+    Raises:
+        ValueError: If parentheses are mismatched or other structural issues occur.
+    """"""
+    # Remove all whitespace from the expression for simpler tokenization
+    processed_expression = expression.replace("" "", """")
+
+    # Tokenize the expression.
+    # \d+ matches one or more digits (integers).
+    # [+\-*/()] matches one character from the set of operators and parentheses.
+    tokens = re.findall(r""\d+|[+\-*/()]"", processed_expression)
+
+    output_queue = []
+    operator_stack = []
+    precedence = {'+': 1, '-': 1, '*': 2, '/': 2}
+    # All supported operators (+, -, *, /) are left-associative.
+
+    for token in tokens:
+        if token.isdigit():
+            output_queue.append(int(token))
+        elif token == '(':
+            operator_stack.append(token)
+        elif token == ')':
+            while operator_stack and operator_stack[-1] != '(':
+                output_queue.append(operator_stack.pop())
+            # If stack is empty or top is not '(', then parentheses are mismatched
+            if not operator_stack or operator_stack[-1] != '(':
+                raise ValueError(""Mismatched parentheses: missing '(' or misplaced ')'"")
+            operator_stack.pop()  # Pop the '(' from the stack and discard it
+        else:  # Token is an operator
+            # While stack is not empty, top is not '(',
+            # and top operator has greater or equal precedence (for left-associativity)
+            while (operator_stack and
+                   operator_stack[-1] != '(' and
+                   precedence.get(operator_stack[-1], 0) >= precedence.get(token, 0)):
+                output_queue.append(operator_stack.pop())
+            operator_stack.append(token)
+
+    # After processing all tokens, pop any remaining operators from the stack to the output
+    while operator_stack:
+        top_op = operator_stack.pop()
+        if top_op == '(':
+            # If a '(' is found here, it means it was unclosed
+            raise ValueError(""Mismatched parentheses: unclosed '('"")
+        output_queue.append(top_op)
+
+    return output_queue
+
+if __name__ == '__main__':
+    # Test cases
+    valid_expressions = [
+        ""1 + 1"",
+        ""2 * (3 - 1)"",
+        ""10 / 2"",
+        ""   5   "",
+        ""12345"",
+        ""(5 * (3+2))/(8-3)""
+    ]
+    invalid_expressions = [
+        ""1 + a"",
+        ""eval('__import__(\""os\"").system(\""echo unsafe\"")')"",
+        ""1 + 1;"",
+        ""print('hello')"",
+        ""1 & 2"",
+        ""import os""
+    ]
+
+    print(""Testing valid expressions:"")
+    for expr in valid_expressions:
+        print(f""'{expr}': is_valid_expression -> {is_valid_expression(expr)}"")
+
+    print(""\nTesting invalid expressions:"")
+    for expr in invalid_expressions:
+        print(f""'{expr}': is_valid_expression -> {is_valid_expression(expr)}"")
+
+    print(""\nTesting parse_expression (with valid expressions):"")
+    parse_test_expressions = [
+        ""1 + 1"",
+        ""2 * (3 - 1)"",
+        ""10 / 2"",
+        ""3 + 4 * 2 / ( 1 - 0 )"", # Using 0 is fine for parsing
+        "" ( 1 + 2 ) * 3 - 4 / 2 "",
+        ""100"",
+        ""5 * 2 + 3 * 4"", # Expected: 5 2 * 3 4 * +
+        ""1 + 2 - 3 + 4""  # Expected: 1 2 + 3 - 4 + (left-associativity)
+    ]
+
+    for expr_str in parse_test_expressions:
+        print(f""Input: '{expr_str}'"")
+        if is_valid_expression(expr_str):
+            try:
+                rpn = parse_expression(expr_str)
+                print(f""  RPN: {rpn}"")
+            except ValueError as e:
+                print(f""  Error during parsing: {e}"")
+        else:
+            # This path should ideally not be taken for these test cases
+            print(f""  Skipped parsing as it's invalid per is_valid_expression: '{expr_str}'"")
+    
+    print(""\nTesting parse_expression (with mismatched parentheses or structural issues):"")
+    # Note: is_valid_expression checks characters, parse_expression checks structure.
+    # Some of these might pass is_valid_expression but fail parse_expression.
+    error_test_expressions = [
+        ""(1 + 2"",       # Unclosed parenthesis
+        ""1 + 2)"",       # Unopened parenthesis
+        ""((1+2)*3"",     # Unclosed parenthesis
+        ""(1+)2)*3"",     # Passes is_valid_expression, but +) is not standard.
+                        # Tokenizer: '(', '1', '+', ')', '2', ')', '*', '3'
+                        # parse_expression should error on the second ')'
+        ""1 * (2 + )""    # Passes is_valid_expression. Tokenizer: 1 * ( 2 + )
+                        # parse_expression might error or produce unexpected RPN
+                        # depending on how it handles trailing operators before ')'
+                        # Current Shunting-yard expects an operand after an operator unless it's end of expression.
+                        # This specific case: '1', '*', '(', '2', '+', ')'
+                        # When ')' is met, '+' is popped. RPN: [1, 2, '+', '*']
+                        # This is (1 * (2+)). If an evaluator expects two operands for '+', it would fail there.
+                        # The parser itself doesn't check arity of operators.
+    ]
+
+    for expr_str in error_test_expressions:
+        print(f""Input: '{expr_str}'"")
+        valid_chars = is_valid_expression(expr_str)
+        print(f""  is_valid_expression: {valid_chars}"")
+        try:
+            rpn = parse_expression(expr_str)
+            print(f""  RPN: {rpn}"")
+        except ValueError as e:
+            print(f""  Error during parsing: {e}"")
+","import re
+
+def is_valid_expression(expression: str) -> bool:
+    """"""
+    Checks if a given string contains only numbers, basic arithmetic operators
+    (+, -, *, /), parentheses, and spaces.
+
+    Args:
+        expression: The string to validate.
+
+    Returns:
+        True if the expression is valid, False otherwise.
+    """"""
+    # Regex to allow numbers, operators (+, -, *, /), parentheses, and spaces.
+    # ^ : asserts position at start of the string.
+    # [0-9+\-*/()\s] : matches any character in the set:
+    #   0-9 : digits
+    #   +   : literal plus
+    #   -   : literal minus
+    #   *   : literal asterisk
+    #   /   : literal slash
+    #   ()  : literal parentheses (no need to escape inside [])
+    #   \s  : whitespace characters
+    # + : matches the previous token between one and unlimited times.
+    # $ : asserts position at the end of the string.
+    # Using r"""" for raw string to handle backslashes correctly if they were needed for special chars.
+    # For this specific pattern, it's not strictly necessary but good practice.
+    pattern = r""^[0-9+\-*/()\s]+$""
+    if re.fullmatch(pattern, expression):
+        return True
+    return False
+
+def parse_expression(expression: str) -> list:
+    """"""
+    Parses a mathematical expression string into Reverse Polish Notation (RPN).
+    Assumes the expression has been validated by is_valid_expression regarding
+    allowed characters. This function handles structural parsing like operator
+    precedence and parentheses matching.
+
+    Args:
+        expression: The mathematical expression string.
+
+    Returns:
+        A list representing the expression in RPN.
+        Numbers are integers, operators are strings.
+
+    Raises:
+        ValueError: If parentheses are mismatched or other structural issues occur.
+    """"""
+    # Remove all whitespace from the expression for simpler tokenization
+    processed_expression = expression.replace("" "", """")
+
+    # Tokenize the expression.
+    # \d+ matches one or more digits (integers).
+    # [+\-*/()] matches one character from the set of operators and parentheses.
+    tokens = re.findall(r""\d+|[+\-*/()]"", processed_expression)
+
+    output_queue = []
+    operator_stack = []
+    precedence = {'+': 1, '-': 1, '*': 2, '/': 2}
+    # All supported operators (+, -, *, /) are left-associative.
+
+    for token in tokens:
+        if token.isdigit():
+            output_queue.append(int(token))
+        elif token == '(':
+            operator_stack.append(token)
+        elif token == ')':
+            while operator_stack and operator_stack[-1] != '(':
+                output_queue.append(operator_stack.pop())
+            # If stack is empty or top is not '(', then parentheses are mismatched
+            if not operator_stack or operator_stack[-1] != '(':
+                raise ValueError(""Mismatched parentheses: missing '(' or misplaced ')'"")
+            operator_stack.pop()  # Pop the '(' from the stack and discard it
+        else:  # Token is an operator
+            # While stack is not empty, top is not '(',
+            # and top operator has greater or equal precedence (for left-associativity)
+            while (operator_stack and
+                   operator_stack[-1] != '(' and
+                   precedence.get(operator_stack[-1], 0) >= precedence.get(token, 0)):
+                output_queue.append(operator_stack.pop())
+            operator_stack.append(token)
+
+    # After processing all tokens, pop any remaining operators from the stack to the output
+    while operator_stack:
+        top_op = operator_stack.pop()
+        if top_op == '(':
+            # If a '(' is found here, it means it was unclosed
+            raise ValueError(""Mismatched parentheses: unclosed '('"")
+        output_queue.append(top_op)
+
+    return output_queue
+
+def evaluate_expression(expression: str) -> float:
+    """"""
+    Validates, parses, and evaluates a mathematical expression string.
+
+    Args:
+        expression: The mathematical expression string.
+
+    Returns:
+        The evaluated result as a float.
+
+    Raises:
+        ValueError: If the input expression is invalid, malformed,
+                    or if an error occurs during evaluation (e.g., division by zero).
+    """"""
+    if not is_valid_expression(expression):
+        raise ValueError(f""Invalid characters in expression: '{expression}'"")
+
+    rpn_tokens = parse_expression(expression) # Can raise ValueError for mismatched parentheses
+
+    if not rpn_tokens: # Handle empty or whitespace-only expressions that might pass validation/parsing
+        raise ValueError(""Expression is empty or results in no tokens."")
+
+    operand_stack = []
+    operators = {
+        '+': lambda a, b: a + b,
+        '-': lambda a, b: a - b,
+        '*': lambda a, b: a * b,
+        '/': lambda a, b: a / b
+    }
+
+    for token in rpn_tokens:
+        if isinstance(token, int): # Or float, if parse_expression could produce floats
+            operand_stack.append(float(token)) # Store as float for division
+        elif token in operators:
+            if len(operand_stack) < 2:
+                raise ValueError(f""Insufficient operands for operator '{token}'"")
+            operand2 = operand_stack.pop()
+            operand1 = operand_stack.pop()
+            
+            if token == '/' and operand2 == 0:
+                raise ValueError(""Division by zero"")
+            
+            result = operators[token](operand1, operand2)
+            operand_stack.append(result)
+        else:
+            # This case should not be reached if parse_expression is correct
+            # and only returns numbers or known operators.
+            raise ValueError(f""Unknown token in RPN: {token}"")
+
+    if len(operand_stack) != 1:
+        # This can happen for expressions like ""1 2"" (RPN: [1, 2])
+        # or if parse_expression produced an invalid RPN structure.
+        raise ValueError(""Invalid RPN expression: stack should have 1 result at the end."")
+
+    return operand_stack[0]
+
+if __name__ == '__main__':
+    # Test cases
+    valid_expressions = [
+        ""1 + 1"",
+        ""2 * (3 - 1)"",
+        ""10 / 2"",
+        ""   5   "",
+        ""12345"",
+        ""(5 * (3+2))/(8-3)""
+    ]
+    invalid_expressions = [
+        ""1 + a"",
+        ""eval('__import__(\""os\"").system(\""echo unsafe\"")')"",
+        ""1 + 1;"",
+        ""print('hello')"",
+        ""1 & 2"",
+        ""import os""
+    ]
+
+    print(""Testing valid expressions:"")
+    for expr in valid_expressions:
+        print(f""'{expr}': is_valid_expression -> {is_valid_expression(expr)}"")
+
+    print(""\nTesting invalid expressions:"")
+    for expr in invalid_expressions:
+        print(f""'{expr}': is_valid_expression -> {is_valid_expression(expr)}"")
+
+    print(""\nTesting parse_expression (with valid expressions):"")
+    parse_test_expressions = [
+        ""1 + 1"",
+        ""2 * (3 - 1)"",
+        ""10 / 2"",
+        ""3 + 4 * 2 / ( 1 - 0 )"", # Using 0 is fine for parsing
+        "" ( 1 + 2 ) * 3 - 4 / 2 "",
+        ""100"",
+        ""5 * 2 + 3 * 4"", # Expected: 5 2 * 3 4 * +
+        ""1 + 2 - 3 + 4""  # Expected: 1 2 + 3 - 4 + (left-associativity)
+    ]
+
+    for expr_str in parse_test_expressions:
+        print(f""Input: '{expr_str}'"")
+        if is_valid_expression(expr_str):
+            try:
+                rpn = parse_expression(expr_str)
+                print(f""  RPN: {rpn}"")
+            except ValueError as e:
+                print(f""  Error during parsing: {e}"")
+        else:
+            # This path should ideally not be taken for these test cases
+            print(f""  Skipped parsing as it's invalid per is_valid_expression: '{expr_str}'"")
+    
+    print(""\nTesting parse_expression (with mismatched parentheses or structural issues):"")
+    # Note: is_valid_expression checks characters, parse_expression checks structure.
+    # Some of these might pass is_valid_expression but fail parse_expression.
+    error_test_expressions = [
+        ""(1 + 2"",       # Unclosed parenthesis
+        ""1 + 2)"",       # Unopened parenthesis
+        ""((1+2)*3"",     # Unclosed parenthesis
+        ""(1+)2)*3"",     # Passes is_valid_expression, but +) is not standard.
+                        # Tokenizer: '(', '1', '+', ')', '2', ')', '*', '3'
+                        # parse_expression should error on the second ')'
+        ""1 * (2 + )""    # Passes is_valid_expression. Tokenizer: 1 * ( 2 + )
+                        # parse_expression might error or produce unexpected RPN
+                        # depending on how it handles trailing operators before ')'
+                        # Current Shunting-yard expects an operand after an operator unless it's end of expression.
+                        # This specific case: '1', '*', '(', '2', '+', ')'
+                        # When ')' is met, '+' is popped. RPN: [1, 2, '+', '*']
+                        # This is (1 * (2+)). If an evaluator expects two operands for '+', it would fail there.
+                        # The parser itself doesn't check arity of operators.
+    ]
+
+    for expr_str in error_test_expressions:
+        print(f""Input: '{expr_str}'"")
+        valid_chars = is_valid_expression(expr_str)
+        print(f""  is_valid_expression: {valid_chars}"")
+        try:
+            rpn = parse_expression(expr_str)
+            print(f""  RPN: {rpn}"")
+        except ValueError as e:
+            print(f""  Error during parsing: {e}"")
+
+    print(""\nTesting evaluate_expression:"")
+    evaluation_tests = {
+        ""1 + 1"": 2.0,
+        ""2 * (3 - 1)"": 4.0,
+        ""10 / 2"": 5.0,
+        ""3 + 4 * 2 / ( 1 - 0 )"": 11.0, # 3 + 8 / 1 = 3 + 8 = 11
+        "" ( 1 + 2 ) * 3 - 4 / 2 "": 7.0, # 3 * 3 - 2 = 9 - 2 = 7
+        ""100"": 100.0,
+        ""5 * 2 + 3 * 4"": 22.0, # 10 + 12 = 22
+        ""1 + 2 - 3 + 4"": 4.0,   # (1+2)-3+4 = 3-3+4 = 0+4 = 4
+        ""10 / (2 + 3) * 2"": 4.0, # 10 / 5 * 2 = 2 * 2 = 4
+        ""7"": 7.0,
+        ""5 - 2"": 3.0,
+        ""2 * 3"": 6.0
+    }
+
+    for expr_str, expected_result in evaluation_tests.items():
+        print(f""Expression: '{expr_str}'"")
+        try:
+            result = evaluate_expression(expr_str)
+            print(f""  Expected: {expected_result}, Got: {result}, Match: {result == expected_result}"")
+            if result != expected_result:
+                 print(f""  MISMATCH! RPN was: {parse_expression(expr_str)}"")
+        except ValueError as e:
+            print(f""  Error during evaluation: {e}"")
+
+    print(""\nTesting evaluate_expression (with expected errors):"")
+    error_evaluation_tests = [
+        ""1 + a"",                  # Invalid character
+        ""10 / 0"",                 # Division by zero
+        ""(1 + 2"",                 # Mismatched parenthesis (from parse_expression)
+        ""1 +"",                    # Insufficient operands (will fail in parse or RPN eval)
+                                  # parse_expression for ""1 +"" -> [1, '+']
+                                  # evaluate_expression will find insufficient operands for '+'
+        ""1 2 +"",                  # Valid RPN if input directly, but not from parse_expression for ""1 2 +""
+                                  # If expression is ""1 2"", parse_expression might give [1, 2]
+                                  # which evaluate_expression will flag as invalid final stack.
+        ""eval('1+1')"",            # Invalid character
+        ""1 / (2 - 2)"",            # Division by zero
+        ""((1+2)*3"",               # Mismatched parenthesis
+        ""1 * (2 + )""              # parse_expression for ""1 * (2 + )"" -> [1, 2, '+', '*']
+                                  # This is (1 * (2+)). Evaluator will try 2 + (nothing) -> error
+                                  # Or if it means (1*(2+X)), then it's incomplete.
+                                  # The RPN [1, 2, '+', '*'] will evaluate as:
+                                  # stack: [1]
+                                  # stack: [1, 2]
+                                  # token: '+', pop 2, pop 1. Need 2 operands. Error.
+                                  # Actually, for ""1 * (2+)"", RPN is [1, 2, '+', '*']
+                                  # Stack: [1]
+                                  # Stack: [1, 2.0]
+                                  # Token: '+', op2=2.0, op1=1.0. result = 3.0. Stack: [3.0]
+                                  # Token: '*', op2=3.0. Need op1. Error: Insufficient operands.
+                                  # Let's re-check parse_expression for ""1 * (2 + )""
+                                  # tokens: ['1', '*', '(', '2', '+', ')']
+                                  # '1': output_queue: [1]
+                                  # '*': op_stack: ['*']
+                                  # '(': op_stack: ['*', '(']
+                                  # '2': output_queue: [1, 2]
+                                  # '+': op_stack: ['*', '(', '+'] (since prec('+') < prec('(') is false, prec('+') > prec('*') is false)
+                                  #      Actually, prec('+')=1, prec of stack top '(' is not compared.
+                                  #      prec('+')=1, stack top is '('. Push '+'. op_stack: ['*', '(', '+']
+                                  # ')': pop '+', output_queue: [1, 2, '+']
+                                  #      pop '(', op_stack: ['*']
+                                  # end: pop '*', output_queue: [1, 2, '+', '*'] - This is correct for (1+2)* if it were infix.
+                                  #      No, this is RPN for 1 2 + * which is (1+2)*.
+                                  #      The expression was 1 * (2+).
+                                  #      Let's trace parse_expression for ""1 * (2 + )"" again.
+                                  #      processed_expression = ""1*(2+)""
+                                  #      tokens = ['1', '*', '(', '2', '+', ')']
+                                  #      token '1': output_queue = [1]
+                                  #      token '*': operator_stack = ['*']
+                                  #      token '(': operator_stack = ['*', '(']
+                                  #      token '2': output_queue = [1, 2]
+                                  #      token '+': operator_stack = ['*', '(', '+'] (precedence of '+' (1) vs stack top '(' -> push)
+                                  #      token ')':
+                                  #          while operator_stack and operator_stack[-1] != '(':
+                                  #              pop '+', output_queue = [1, 2, '+']
+                                  #              operator_stack = ['*', '(']
+                                  #          pop '(', operator_stack = ['*']
+                                  #      end of tokens.
+                                  #      while operator_stack:
+                                  #          pop '*', output_queue = [1, 2, '+', '*']
+                                  #      RPN: [1, 2, '+', '*']
+                                  #      Evaluation:
+                                  #      1 -> stack [1.0]
+                                  #      2 -> stack [1.0, 2.0]
+                                  #      + -> op2=2.0, op1=1.0, res=3.0. stack [3.0]
+                                  #      * -> op2=3.0. Need op1. Error: ""Insufficient operands for operator '*'"". This is correct.
+        ""1 2""                     # Valid chars, parse_expression gives [1, 2]. evaluate_expression will error (stack > 1).
+    ]
+
+    for expr_str in error_evaluation_tests:
+        print(f""Expression: '{expr_str}'"")
+        try:
+            result = evaluate_expression(expr_str)
+            print(f""  Unexpected success. Got: {result}"")
+        except ValueError as e:
+            print(f""  Expected error: {e}"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+938d062c,editing,"['I need a function that can perform basic arithmetic operations like addition, subtraction, multiplication, and division. Let\'s call it \'simple_calculator\'. It should take three arguments: \'num1\' (float), \'num2\' (float), and \'operator\' (string, one of \'+\', \'-\', \'*\', or \'/\'). It should return the result as a float. Can you help me with that?""\nPlease only output code and not your natural language commentary.', 'Could we enhance the \'simple_calculator\' function to handle expressions with two numbers and an operator in a string format, like \'4 + 5\'? It should parse the string, perform the operation, and return the result as a float. Also, it should handle expressions with parentheses to respect operation precedence.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function named \'evaluate_expression\' that can evaluate more complex mathematical expressions provided as a string. It should take a single argument, \'math_expr\', and return the evaluated result. If the expression includes unsupported characters or can\'t be evaluated safely, it should raise a ValueError. You can use these imports:\n```\nimport re\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: The function is intended to be part of a calculator application handling basic mathematical operations provided as string input.""\nPlease only output code and not your natural language commentary.']","def simple_calculator(num1: float, num2: float, operator: str) -> float:
+    """"""
+    Performs basic arithmetic operations.
+
+    Args:
+        num1: The first number.
+        num2: The second number.
+        operator: The operation to perform ('+', '-', '*', '/').
+
+    Returns:
+        The result of the arithmetic operation.
+
+    Raises:
+        ValueError: If the operator is invalid or if division by zero is attempted.
+    """"""
+    if operator == '+':
+        return num1 + num2
+    elif operator == '-':
+        return num1 - num2
+    elif operator == '*':
+        return num1 * num2
+    elif operator == '/':
+        if num2 == 0:
+            raise ValueError(""Cannot divide by zero"")
+        return num1 / num2
+    else:
+        raise ValueError(""Invalid operator. Must be one of '+', '-', '*', '/'"")
+","import re
+
+def simple_calculator(expression: str) -> float:
+    """"""
+    Evaluates a mathematical expression string.
+
+    Args:
+        expression: The mathematical expression string (e.g., ""4 + 5 * (2 - 1)"").
+                    Supports addition, subtraction, multiplication, division,
+                    and parentheses for precedence. Numbers can be integers or floats.
+
+    Returns:
+        The result of the expression as a float.
+
+    Raises:
+        ValueError: If the expression string contains invalid characters,
+                    is malformed, or does not evaluate to a number.
+        ZeroDivisionError: If division by zero is attempted within the expression.
+    """"""
+    # Sanitize the expression to allow only numbers, operators, parentheses, and spaces.
+    # Numbers can be integers or floats (e.g., ""3"", ""3.14"").
+    # Operators: +, -, *, /
+    # Parentheses: ( )
+    # Whitespace is allowed and will be handled by eval().
+    allowed_chars_pattern = r""^[0-9\.\+\-\*\/\(\)\s]+$""
+    if not re.match(allowed_chars_pattern, expression.strip()):
+        # Check expression.strip() to ensure an empty or all-whitespace string is caught
+        # if it wasn't already by the regex due to an issue or if it's empty.
+        # An empty string or one with only whitespace will not match if `+` is used in regex.
+        # If expression.strip() is empty, it means original was empty or all whitespace.
+        if not expression.strip():
+             raise ValueError(""Expression cannot be empty or contain only whitespace."")
+        raise ValueError(
+            ""Expression contains invalid characters. ""
+            ""Only numbers, operators (+, -, *, /), parentheses, and spaces are allowed.""
+        )
+
+    try:
+        # Using eval() for its ability to parse and calculate expressions
+        # respecting operator precedence and parentheses.
+        # The sanitization step above provides a basic layer of security by restricting
+        # the character set, mitigating common eval-related risks.
+        # For environments requiring higher security with untrusted input,
+        # consider using a dedicated and safer expression evaluation library
+        # (e.g., asteval) or implementing a custom parser.
+        
+        # Ensure the expression is not empty after stripping, to avoid eval issues.
+        if not expression.strip():
+            raise ValueError(""Expression is empty or all whitespace."")
+
+        result = eval(expression)
+
+        if not isinstance(result, (int, float)):
+            # This check is a safeguard in case eval produces an unexpected type,
+            # though the regex and nature of arithmetic operations should lead to numbers.
+            raise ValueError(""Expression did not evaluate to a numerical result."")
+        
+        return float(result)
+    except SyntaxError:
+        raise ValueError(""Invalid expression syntax. Check for malformed parts or unbalanced parentheses."")
+    except ZeroDivisionError:
+        # This is raised by Python during eval if division by zero occurs.
+        raise ZeroDivisionError(""Cannot divide by zero in the expression."")
+    except Exception as e:
+        # Catch other potential errors during eval, e.g., NameError if somehow
+        # a variable name slipped through (though regex should prevent this).
+        # This provides a generic fallback.
+        raise ValueError(f""Error evaluating expression: {str(e)}"")
+","import re
+import ast
+
+# Define allowed operations for the safe evaluator
+_ALLOWED_OPS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b,
+    ast.USub: lambda a: -a, # For unary minus (e.g., -5)
+    ast.UAdd: lambda a: +a, # For unary plus (e.g., +5), though less common
+}
+
+# Define allowed node types for the safe evaluator
+_ALLOWED_NODES = (
+    ast.Expression,  # The root node of an expression
+    ast.Num,         # Deprecated in Python 3.8, use ast.Constant
+    ast.Constant,    # For numbers (and strings, bools, None, but we only care for numbers here)
+    ast.BinOp,       # Binary operations like a + b
+    ast.UnaryOp,     # Unary operations like -a
+    ast.Call,        # To disallow function calls
+    ast.Name,        # To disallow variable names
+    # Add other node types here if you want to support them, e.g., ast.Pow for exponentiation
+)
+
+
+class _SafeEvaluator(ast.NodeVisitor):
+    def visit_Constant(self, node):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        raise ValueError(f""Unsupported constant type: {type(node.value)}"")
+
+    # For Python < 3.8, ast.Num is used for numbers
+    def visit_Num(self, node):
+        if isinstance(node.n, (int, float)):
+            return node.n
+        raise ValueError(f""Unsupported number type: {type(node.n)}"")
+
+    def visit_BinOp(self, node):
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        op_type = type(node.op)
+        if op_type in _ALLOWED_OPS:
+            if op_type == ast.Div and right == 0:
+                raise ZeroDivisionError(""Division by zero"")
+            return _ALLOWED_OPS[op_type](left, right)
+        raise ValueError(f""Unsupported binary operator: {op_type.__name__}"")
+
+    def visit_UnaryOp(self, node):
+        operand = self.visit(node.operand)
+        op_type = type(node.op)
+        if op_type in _ALLOWED_OPS:
+            return _ALLOWED_OPS[op_type](operand)
+        raise ValueError(f""Unsupported unary operator: {op_type.__name__}"")
+
+    def generic_visit(self, node):
+        # This method is called for any node type not having a specific visit_XXX method.
+        # We restrict which node types are allowed at all.
+        if not isinstance(node, _ALLOWED_NODES):
+            raise ValueError(f""Unsupported syntax element: {type(node).__name__}"")
+        # If it's an allowed structural node (like Expression), continue visiting children.
+        # For other disallowed nodes (like Call, Name if they were not caught by specific visitors),
+        # this would be the place to raise an error if they weren't explicitly disallowed.
+        # However, our _ALLOWED_NODES check should catch most structural issues.
+        # For nodes like ast.Expression, we need to call super().generic_visit to process children.
+        return super().generic_visit(node)
+
+    def visit_Expression(self, node):
+        # The actual result is in node.body
+        return self.visit(node.body)
+
+    # Disallow specific node types that could be unsafe or are not supported
+    def visit_Name(self, node):
+        raise ValueError(""Variables are not allowed in the expression."")
+
+    def visit_Call(self, node):
+        raise ValueError(""Function calls are not allowed in the expression."")
+
+
+def evaluate_expression(math_expr: str) -> float:
+    """"""
+    Safely evaluates a mathematical expression string using AST.
+
+    Args:
+        math_expr: The mathematical expression string (e.g., ""4 + 5 * (2 - 1)"").
+                   Supports addition, subtraction, multiplication, division,
+                   unary plus/minus, and parentheses for precedence.
+                   Numbers can be integers or floats.
+
+    Returns:
+        The result of the expression as a float.
+
+    Raises:
+        ValueError: If the expression string is empty, contains invalid characters,
+                    unsupported operations/syntax, or is malformed.
+        ZeroDivisionError: If division by zero is attempted within the expression.
+    """"""
+    if not math_expr.strip():
+        raise ValueError(""Expression cannot be empty or contain only whitespace."")
+
+    # Basic sanitization for allowed characters.
+    # This is a preliminary check; AST parsing will do more thorough validation.
+    # Allows numbers (int/float), operators (+, -, *, /), parentheses, and whitespace.
+    # Note: Unary + and - are handled by AST, so they don't need explicit regex handling
+    # if they are adjacent to numbers or parentheses.
+    allowed_chars_pattern = r""^[0-9\.\+\-\*\/\(\)\s\e\pi]+$"" # Allow e and pi for constants later if needed
+    if not re.match(allowed_chars_pattern, math_expr):
+        raise ValueError(
+            ""Expression contains invalid characters. ""
+            ""Only numbers, operators (+, -, *, /), parentheses, and spaces are allowed.""
+        )
+
+    try:
+        # Parse the expression into an AST
+        # The mode 'eval' means the string should be a single expression.
+        node = ast.parse(math_expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"")
+
+    # Traverse the AST with the safe evaluator
+    evaluator = _SafeEvaluator()
+    try:
+        result = evaluator.visit(node)
+        if not isinstance(result, (int, float)):
+            # This should ideally be caught by the visitor for specific node types
+            raise ValueError(""Expression did not evaluate to a numerical result."")
+        return float(result)
+    except ZeroDivisionError: # Propagate ZeroDivisionError
+        raise
+    except ValueError as e: # Propagate ValueErrors from our evaluator
+        raise
+    except Exception as e:
+        # Catch any other unexpected errors during AST traversal or evaluation
+        raise ValueError(f""Error evaluating expression: {str(e)}"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]
+938d062c,refactor,"[""Implement a function named 'evaluate_expression' that takes a mathematical expression as input, evaluates it, and returns the result. The function must correctly parse arithmetic expressions and compute their values. The function's name should be evaluate_expression. The function should take 1 arguments, i.e., - math_expr: str, a string containing a mathematical expression to evaluate. The function should return The evaluated result of the expression. The function should raise - ValueError should be raised if the expression includes unsupported operators, characters, unsafe code, or if evaluation fails. The following setup code will be provided to you:\n```\nimport re\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: The function is intended to be part of a calculator application handling basic mathematical operations provided as string input \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Can we enhance the code by adding detailed comments and strategically placed blank lines? This should clarify the function's logic. Additionally, it would be great to extract any repeated or complex computation into smaller pure functions, making sure each one has a clear responsibility. Let's focus on reusability and readability while keeping the main function interface unchanged.\nPlease only output code and not your natural language commentary."", 'Can you integrate logging to capture information about the evaluation process, including the input expressions and their results? This will help in tracking execution for debug purposes. Please ensure the logs are informative and stored in the current working directory using a file-based approach.\nPlease only output code and not your natural language commentary.']","import re
+import ast
+
+# Define constants and helper for AST validation
+# These are module-level as they are configurations for the validation logic.
+_ALLOWED_NODE_TYPES = (
+    ast.Expression,  # Root node for an expression.
+    ast.Constant,    # For numbers, True, False, None (Python 3.8+).
+    ast.Num,         # For numbers (deprecated in Python 3.8, replaced by Constant).
+    ast.BinOp,       # For binary operations like +, -, *, /.
+    ast.UnaryOp,     # For unary operations like - (negation).
+)
+
+_ALLOWED_OPERATOR_TYPES = (
+    ast.Add,         # Operator type for +.
+    ast.Sub,         # Operator type for -.
+    ast.Mult,        # Operator type for *.
+    ast.Div,         # Operator type for /.
+    ast.USub,        # Operator type for unary minus.
+)
+
+def _is_ast_safe(node):
+    """"""
+    Recursively checks if all nodes in the AST are of allowed types and use allowed operators.
+    """"""
+    for ast_node in ast.walk(node):
+        if not isinstance(ast_node, _ALLOWED_NODE_TYPES):
+            return False  # Node type itself is not allowed
+
+        # Check operators for BinOp and UnaryOp
+        if isinstance(ast_node, ast.BinOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Binary operator is not allowed
+        if isinstance(ast_node, ast.UnaryOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Unary operator is not allowed
+
+        # Check the type of value for constants
+        if isinstance(ast_node, ast.Constant):
+            # Allow numbers (int, float), booleans, and None.
+            # Booleans and None will be caught by the final result type check if they are the outcome.
+            if not isinstance(ast_node.value, (int, float, bool, type(None))):
+                return False # Constant value is not a number, bool, or None (e.g. string, bytes)
+        
+        # For older Python versions using ast.Num
+        if isinstance(ast_node, ast.Num):
+            # ast.Num always stores a number (int, float, complex).
+            # We restrict to int/float for basic math.
+            if not isinstance(ast_node.n, (int, float)):
+                return False # Value in ast.Num is not int/float (e.g. complex)
+    return True
+
+
+def evaluate_expression(math_expr: str):
+    """"""
+    Evaluates a mathematical expression string and returns the result.
+
+    The function supports basic arithmetic operations: addition (+), subtraction (-),
+    multiplication (*), and division (/). It also handles parentheses for grouping.
+
+    Args:
+        math_expr: str, a string containing a mathematical expression to evaluate.
+
+    Returns:
+        The evaluated result of the expression (int or float).
+
+    Raises:
+        TypeError: If the input expression is not a string.
+        ValueError: If the expression is empty, contains unsupported characters,
+                    includes unsupported operations (e.g., exponentiation, bitwise ops),
+                    constitutes unsafe code (e.g., function calls, attribute access),
+                    has invalid syntax, or if evaluation leads to an error
+                    (e.g., division by zero, overflow).
+    """"""
+    if not isinstance(math_expr, str):
+        raise TypeError(""Input expression must be a string."")
+
+    stripped_expr = math_expr.strip()
+    if not stripped_expr:
+        raise ValueError(""Expression is empty or contains only whitespace."")
+
+    # 1. Validate allowed characters using regex
+    # Allows digits, whitespace, dot (for floats), operators (+, -, *, /), and parentheses.
+    # re.fullmatch ensures the entire string conforms.
+    if not re.fullmatch(r""[\d\s\.\+\-\*\/\(\)]+"", stripped_expr):
+        raise ValueError(""Expression contains unsupported characters."")
+
+    # 2. Parse to AST and validate AST nodes for safety
+    try:
+        # 'eval' mode parses a single expression.
+        ast_tree = ast.parse(stripped_expr, mode='eval')
+    except SyntaxError:
+        # Catches syntax errors like unbalanced parentheses or malformed expressions.
+        raise ValueError(""Invalid syntax in expression."")
+
+    if not _is_ast_safe(ast_tree):
+        raise ValueError(""Expression includes unsupported operations or unsafe code."")
+
+    # 3. Compile the validated AST and evaluate it in a restricted environment
+    try:
+        # Compile the AST into a code object.
+        code_object = compile(ast_tree, filename='<string>', mode='eval')
+        
+        # Evaluate the code object.
+        # Provide an empty dictionary for globals to restrict access to builtins.
+        # __builtins__ being empty means no built-in functions are available directly.
+        result = eval(code_object, {""__builtins__"": {}})
+        
+        # Ensure the result is a number, as expected for mathematical expressions.
+        if not isinstance(result, (int, float)):
+            # This might happen if an expression like ""None"" or ""True"" was evaluated,
+            # which are valid ast.Constant types but not numeric results.
+            raise ValueError(""Evaluation resulted in a non-numeric value."")
+            
+        return result
+    except ZeroDivisionError:
+        raise ValueError(""Division by zero."")
+    except OverflowError:
+        raise ValueError(""Numerical result out of range."")
+    except Exception as e:
+        # Catch any other unexpected errors during evaluation.
+        raise ValueError(f""Failed to evaluate expression: {e}"")
+","import re
+import ast
+
+# --- Module-Level Constants for AST Validation ---
+# These constants define the types of Abstract Syntax Tree (AST) nodes and operators
+# that are permitted during the parsing and evaluation of mathematical expressions.
+# This whitelist approach helps prevent the evaluation of unsafe or unsupported operations.
+
+_ALLOWED_NODE_TYPES = (
+    ast.Expression,  # Represents the overall expression.
+    ast.Constant,    # Represents literal values like numbers (Python 3.8+). Also True, False, None.
+    ast.Num,         # Represents numbers (deprecated in Python 3.8, superseded by ast.Constant).
+    ast.BinOp,       # Represents binary operations (e.g., a + b, c * d).
+    ast.UnaryOp,     # Represents unary operations (e.g., -a).
+)
+
+_ALLOWED_OPERATOR_TYPES = (
+    ast.Add,         # The '+' addition operator.
+    ast.Sub,         # The '-' subtraction operator.
+    ast.Mult,        # The '*' multiplication operator.
+    ast.Div,         # The '/' division operator.
+    ast.USub,        # The unary '-' negation operator.
+)
+
+# Regular expression to validate the characters allowed in the input expression string.
+# It permits:
+#   \d      - digits (0-9)
+#   \s      - whitespace characters (space, tab, newline, etc.)
+#   \.      - a literal dot (for decimal points in floating-point numbers)
+#   \+      - a literal plus sign
+#   \-      - a literal minus sign
+#   \*      - a literal asterisk (for multiplication)
+#   \/      - a literal forward slash (for division)
+#   \(      - a literal opening parenthesis
+#   \)      - a literal closing parenthesis
+# The `+` after the character set `[]` means one or more occurrences of these characters.
+# `re.fullmatch` ensures the entire string consists only of these characters.
+_VALID_EXPRESSION_PATTERN = re.compile(r""[\d\s\.\+\-\*\/\(\)]+"")
+
+
+# --- Helper Functions for Expression Evaluation ---
+
+def _is_ast_safe(node: ast.AST) -> bool:
+    """"""
+    Recursively traverses an Abstract Syntax Tree (AST) to ensure all nodes
+    and operators within it are of types explicitly allowed by the whitelist
+    constants (_ALLOWED_NODE_TYPES, _ALLOWED_OPERATOR_TYPES).
+
+    This function is crucial for security, preventing the evaluation of arbitrary
+    Python code or unsupported mathematical operations.
+
+    Args:
+        node: The root ast.AST node of the tree (or subtree) to validate.
+
+    Returns:
+        True if all nodes and operators in the AST are allowed, False otherwise.
+    """"""
+    for ast_node in ast.walk(node):
+        # Check if the node type itself is allowed.
+        if not isinstance(ast_node, _ALLOWED_NODE_TYPES):
+            return False  # Disallowed node type.
+
+        # For binary operations (e.g., a + b), check if the operator (e.g., +) is allowed.
+        if isinstance(ast_node, ast.BinOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Disallowed binary operator.
+
+        # For unary operations (e.g., -a), check if the operator (e.g., unary -) is allowed.
+        if isinstance(ast_node, ast.UnaryOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Disallowed unary operator.
+
+        # For constant nodes (Python 3.8+), check the type of the constant's value.
+        # We allow numbers (int, float). Booleans and None are also syntactically valid
+        # ast.Constant values, but a later check ensures the final *result* is numeric.
+        if isinstance(ast_node, ast.Constant):
+            if not isinstance(ast_node.value, (int, float, bool, type(None))):
+                return False  # Disallowed type for constant value (e.g., string, bytes).
+        
+        # For number nodes (ast.Num, deprecated but handled for compatibility),
+        # ensure the number is an integer or float.
+        if isinstance(ast_node, ast.Num):
+            if not isinstance(ast_node.n, (int, float)):
+                return False  # Disallowed type for ast.Num value (e.g., complex number).
+                
+    return True # All nodes and operators are safe.
+
+
+def _validate_input_expression(math_expr: str) -> str:
+    """"""
+    Validates the raw input mathematical expression string.
+
+    Checks for:
+    1. Correct type (must be a string).
+    2. Non-empty content after stripping whitespace.
+    3. Allowed characters using a regular expression.
+
+    Args:
+        math_expr: The raw mathematical expression string.
+
+    Returns:
+        The stripped and validated mathematical expression string.
+
+    Raises:
+        TypeError: If `math_expr` is not a string.
+        ValueError: If `math_expr` is empty, contains only whitespace,
+                    or includes unsupported characters.
+    """"""
+    # Ensure the input is a string.
+    if not isinstance(math_expr, str):
+        raise TypeError(""Input expression must be a string."")
+
+    # Remove leading/trailing whitespace.
+    stripped_expr = math_expr.strip()
+
+    # Ensure the expression is not empty after stripping.
+    if not stripped_expr:
+        raise ValueError(""Expression is empty or contains only whitespace."")
+
+    # Validate the expression against the allowed character pattern.
+    # re.fullmatch ensures the entire string conforms to the pattern.
+    if not _VALID_EXPRESSION_PATTERN.fullmatch(stripped_expr):
+        raise ValueError(""Expression contains unsupported characters."")
+        
+    return stripped_expr
+
+
+def _parse_and_validate_ast(expression_string: str) -> ast.AST:
+    """"""
+    Parses a validated mathematical expression string into an Abstract Syntax Tree (AST)
+    and then validates this AST for safety.
+
+    Args:
+        expression_string: A validated (e.g., by `_validate_input_expression`)
+                           mathematical expression string.
+
+    Returns:
+        A validated, safe ast.AST object representing the expression.
+
+    Raises:
+        ValueError: If the expression string has invalid syntax (e.g., unbalanced
+                    parentheses) or if the resulting AST contains unsupported
+                    operations or unsafe code constructs.
+    """"""
+    try:
+        # Parse the expression string into an AST.
+        # 'eval' mode is used because we expect a single expression that returns a value.
+        ast_tree = ast.parse(expression_string, mode='eval')
+    except SyntaxError:
+        # This catches syntax errors like ""1 + * 2"" or ""((1+2)"".
+        raise ValueError(""Invalid syntax in expression."")
+
+    # Perform a safety check on the generated AST.
+    if not _is_ast_safe(ast_tree):
+        raise ValueError(""Expression includes unsupported operations or unsafe code."")
+        
+    return ast_tree
+
+
+def _compile_and_evaluate_ast(ast_tree: ast.AST):
+    """"""
+    Compiles a validated AST into a code object and then evaluates it in a
+    restricted environment to get the numerical result.
+
+    Args:
+        ast_tree: A validated (e.g., by `_parse_and_validate_ast`) ast.AST object.
+
+    Returns:
+        The numerical result (int or float) of the evaluated expression.
+
+    Raises:
+        ValueError: If evaluation fails due to issues like division by zero,
+                    numerical overflow, the result not being a number, or other
+                    runtime errors during evaluation.
+    """"""
+    try:
+        # Compile the AST into a code object.
+        # The filename '<string>' is a convention for code compiled from a string.
+        code_object = compile(ast_tree, filename='<string>', mode='eval')
+        
+        # Evaluate the compiled code object.
+        # A restricted global scope is provided:
+        #   {""__builtins__"": {}}  - This effectively removes access to all built-in
+        #                           functions and variables, enhancing safety.
+        #                           Only the operations defined in the AST (like Add, Sub)
+        #                           and literals will be processed.
+        result = eval(code_object, {""__builtins__"": {}})
+        
+        # After evaluation, ensure the result is a number (integer or float).
+        # This handles cases where an expression might evaluate to something non-numeric
+        # (e.g., if ""None"" or ""True"" were allowed and evaluated, though _is_ast_safe
+        # and the final result check aim to prevent this outcome for typical math).
+        if not isinstance(result, (int, float)):
+            raise ValueError(""Evaluation resulted in a non-numeric value."")
+            
+        return result
+        
+    except ZeroDivisionError:
+        # Specifically catch division by zero to provide a clear error message.
+        raise ValueError(""Division by zero."")
+    except OverflowError:
+        # Catch numerical results that are too large to be represented.
+        raise ValueError(""Numerical result out of range."")
+    except Exception as e:
+        # Catch any other unexpected errors during the compilation or evaluation phase.
+        # This provides a generic fallback for other evaluation-time issues.
+        raise ValueError(f""Failed to evaluate expression: {e}"")
+
+
+def evaluate_expression(math_expr: str):
+    """"""
+    Evaluates a mathematical expression string and returns the result.
+
+    The function supports basic arithmetic operations: addition (+), subtraction (-),
+    multiplication (*), and division (/). It also handles parentheses for grouping.
+    It employs a multi-stage process:
+    1. Input Validation: Checks type, emptiness, and allowed characters.
+    2. Secure Parsing: Converts the string to an Abstract Syntax Tree (AST) and
+       validates the AST to allow only safe, basic arithmetic operations.
+    3. Safe Evaluation: Compiles and evaluates the AST in a restricted environment.
+
+    Args:
+        math_expr: str, a string containing a mathematical expression to evaluate.
+
+    Returns:
+        The evaluated result of the expression (int or float).
+
+    Raises:
+        TypeError: If the input expression is not a string.
+        ValueError: If the expression is empty, contains unsupported characters,
+                    includes unsupported operations (e.g., exponentiation, bitwise ops),
+                    constitutes unsafe code (e.g., function calls, attribute access),
+                    has invalid syntax, or if evaluation leads to an error
+                    (e.g., division by zero, overflow).
+    """"""
+    # Stage 1: Validate the input string.
+    # This checks for type, emptiness, and allowed characters.
+    validated_expr_string = _validate_input_expression(math_expr)
+    
+    # Stage 2: Parse the string into an AST and validate the AST for safety.
+    # This ensures no malicious or unsupported operations are present.
+    safe_ast_tree = _parse_and_validate_ast(validated_expr_string)
+    
+    # Stage 3: Compile the safe AST and evaluate it.
+    # This computes the final numerical result.
+    result = _compile_and_evaluate_ast(safe_ast_tree)
+    
+    return result
+","import re
+import ast
+import logging
+
+# --- Logger Setup ---
+# Create a logger instance for this module.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO) # Set the minimum logging level. DEBUG for more verbosity.
+
+# Create a file handler to write logs to a file.
+# Logs will be stored in 'expression_evaluator.log' in the current working directory.
+file_handler = logging.FileHandler(""expression_evaluator.log"")
+file_handler.setLevel(logging.INFO)
+
+# Create a formatter to define the log message format.
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+
+# Add the file handler to the logger.
+# This ensures that log messages are written to the specified file.
+# To prevent duplicate handlers if this module is reloaded (e.g., in an interactive session),
+# clear existing handlers first or check if handlers already exist.
+if not logger.handlers:
+    logger.addHandler(file_handler)
+
+# --- Module-Level Constants for AST Validation ---
+# These constants define the types of Abstract Syntax Tree (AST) nodes and operators
+# that are permitted during the parsing and evaluation of mathematical expressions.
+# This whitelist approach helps prevent the evaluation of unsafe or unsupported operations.
+
+_ALLOWED_NODE_TYPES = (
+    ast.Expression,  # Represents the overall expression.
+    ast.Constant,    # Represents literal values like numbers (Python 3.8+). Also True, False, None.
+    ast.Num,         # Represents numbers (deprecated in Python 3.8, superseded by ast.Constant).
+    ast.BinOp,       # Represents binary operations (e.g., a + b, c * d).
+    ast.UnaryOp,     # Represents unary operations (e.g., -a).
+)
+
+_ALLOWED_OPERATOR_TYPES = (
+    ast.Add,         # The '+' addition operator.
+    ast.Sub,         # The '-' subtraction operator.
+    ast.Mult,        # The '*' multiplication operator.
+    ast.Div,         # The '/' division operator.
+    ast.USub,        # The unary '-' negation operator.
+)
+
+# Regular expression to validate the characters allowed in the input expression string.
+# It permits:
+#   \d      - digits (0-9)
+#   \s      - whitespace characters (space, tab, newline, etc.)
+#   \.      - a literal dot (for decimal points in floating-point numbers)
+#   \+      - a literal plus sign
+#   \-      - a literal minus sign
+#   \*      - a literal asterisk (for multiplication)
+#   \/      - a literal forward slash (for division)
+#   \(      - a literal opening parenthesis
+#   \)      - a literal closing parenthesis
+# The `+` after the character set `[]` means one or more occurrences of these characters.
+# `re.fullmatch` ensures the entire string consists only of these characters.
+_VALID_EXPRESSION_PATTERN = re.compile(r""[\d\s\.\+\-\*\/\(\)]+"")
+
+
+# --- Helper Functions for Expression Evaluation ---
+
+def _is_ast_safe(node: ast.AST) -> bool:
+    """"""
+    Recursively traverses an Abstract Syntax Tree (AST) to ensure all nodes
+    and operators within it are of types explicitly allowed by the whitelist
+    constants (_ALLOWED_NODE_TYPES, _ALLOWED_OPERATOR_TYPES).
+
+    This function is crucial for security, preventing the evaluation of arbitrary
+    Python code or unsupported mathematical operations.
+
+    Args:
+        node: The root ast.AST node of the tree (or subtree) to validate.
+
+    Returns:
+        True if all nodes and operators in the AST are allowed, False otherwise.
+    """"""
+    for ast_node in ast.walk(node):
+        # Check if the node type itself is allowed.
+        if not isinstance(ast_node, _ALLOWED_NODE_TYPES):
+            return False  # Disallowed node type.
+
+        # For binary operations (e.g., a + b), check if the operator (e.g., +) is allowed.
+        if isinstance(ast_node, ast.BinOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Disallowed binary operator.
+
+        # For unary operations (e.g., -a), check if the operator (e.g., unary -) is allowed.
+        if isinstance(ast_node, ast.UnaryOp) and not isinstance(ast_node.op, _ALLOWED_OPERATOR_TYPES):
+            return False  # Disallowed unary operator.
+
+        # For constant nodes (Python 3.8+), check the type of the constant's value.
+        # We allow numbers (int, float). Booleans and None are also syntactically valid
+        # ast.Constant values, but a later check ensures the final *result* is numeric.
+        if isinstance(ast_node, ast.Constant):
+            if not isinstance(ast_node.value, (int, float, bool, type(None))):
+                return False  # Disallowed type for constant value (e.g., string, bytes).
+        
+        # For number nodes (ast.Num, deprecated but handled for compatibility),
+        # ensure the number is an integer or float.
+        if isinstance(ast_node, ast.Num):
+            if not isinstance(ast_node.n, (int, float)):
+                return False  # Disallowed type for ast.Num value (e.g., complex number).
+                
+    return True # All nodes and operators are safe.
+
+
+def _validate_input_expression(math_expr: str) -> str:
+    """"""
+    Validates the raw input mathematical expression string.
+
+    Checks for:
+    1. Correct type (must be a string).
+    2. Non-empty content after stripping whitespace.
+    3. Allowed characters using a regular expression.
+
+    Args:
+        math_expr: The raw mathematical expression string.
+
+    Returns:
+        The stripped and validated mathematical expression string.
+
+    Raises:
+        TypeError: If `math_expr` is not a string.
+        ValueError: If `math_expr` is empty, contains only whitespace,
+                    or includes unsupported characters.
+    """"""
+    # Ensure the input is a string.
+    if not isinstance(math_expr, str):
+        logger.error(f""Type validation failed: Input expression is not a string (type: {type(math_expr)})."")
+        raise TypeError(""Input expression must be a string."")
+
+    # Remove leading/trailing whitespace.
+    stripped_expr = math_expr.strip()
+
+    # Ensure the expression is not empty after stripping.
+    if not stripped_expr:
+        logger.error(f""Validation failed: Expression is empty or contains only whitespace. Original: '{math_expr}'"")
+        raise ValueError(""Expression is empty or contains only whitespace."")
+
+    # Validate the expression against the allowed character pattern.
+    # re.fullmatch ensures the entire string conforms to the pattern.
+    if not _VALID_EXPRESSION_PATTERN.fullmatch(stripped_expr):
+        logger.error(f""Validation failed: Expression '{stripped_expr}' contains unsupported characters."")
+        raise ValueError(""Expression contains unsupported characters."")
+    
+    logger.info(f""Input expression '{stripped_expr}' passed character validation."")
+    return stripped_expr
+
+
+def _parse_and_validate_ast(expression_string: str) -> ast.AST:
+    """"""
+    Parses a validated mathematical expression string into an Abstract Syntax Tree (AST)
+    and then validates this AST for safety.
+
+    Args:
+        expression_string: A validated (e.g., by `_validate_input_expression`)
+                           mathematical expression string.
+
+    Returns:
+        A validated, safe ast.AST object representing the expression.
+
+    Raises:
+        ValueError: If the expression string has invalid syntax (e.g., unbalanced
+                    parentheses) or if the resulting AST contains unsupported
+                    operations or unsafe code constructs.
+    """"""
+    try:
+        # Parse the expression string into an AST.
+        # 'eval' mode is used because we expect a single expression that returns a value.
+        logger.info(f""Parsing expression string: '{expression_string}'"")
+        ast_tree = ast.parse(expression_string, mode='eval')
+    except SyntaxError as e:
+        # This catches syntax errors like ""1 + * 2"" or ""((1+2)"".
+        logger.error(f""Syntax error while parsing expression '{expression_string}': {e}"")
+        raise ValueError(""Invalid syntax in expression."")
+
+    # Perform a safety check on the generated AST.
+    logger.info(f""Validating AST for expression: '{expression_string}'"")
+    if not _is_ast_safe(ast_tree):
+        logger.error(f""AST validation failed: Expression '{expression_string}' includes unsupported operations or unsafe code."")
+        raise ValueError(""Expression includes unsupported operations or unsafe code."")
+    
+    logger.info(f""AST for expression '{expression_string}' is valid and safe."")
+    return ast_tree
+
+
+def _compile_and_evaluate_ast(ast_tree: ast.AST):
+    """"""
+    Compiles a validated AST into a code object and then evaluates it in a
+    restricted environment to get the numerical result.
+
+    Args:
+        ast_tree: A validated (e.g., by `_parse_and_validate_ast`) ast.AST object.
+
+    Returns:
+        The numerical result (int or float) of the evaluated expression.
+
+    Raises:
+        ValueError: If evaluation fails due to issues like division by zero,
+                    numerical overflow, the result not being a number, or other
+                    runtime errors during evaluation.
+    """"""
+    try:
+        # Compile the AST into a code object.
+        # The filename '<string>' is a convention for code compiled from a string.
+        code_object = compile(ast_tree, filename='<string>', mode='eval')
+        
+        # Evaluate the compiled code object.
+        # A restricted global scope is provided:
+        #   {""__builtins__"": {}}  - This effectively removes access to all built-in
+        #                           functions and variables, enhancing safety.
+        #                           Only the operations defined in the AST (like Add, Sub)
+        #                           and literals will be processed.
+        logger.info(""Evaluating compiled AST."")
+        result = eval(code_object, {""__builtins__"": {}})
+        
+        # After evaluation, ensure the result is a number (integer or float).
+        # This handles cases where an expression might evaluate to something non-numeric
+        # (e.g., if ""None"" or ""True"" were allowed and evaluated, though _is_ast_safe
+        # and the final result check aim to prevent this outcome for typical math).
+        if not isinstance(result, (int, float)):
+            logger.error(f""Evaluation resulted in a non-numeric value: {result} (type: {type(result)})"")
+            raise ValueError(""Evaluation resulted in a non-numeric value."")
+        
+        logger.info(f""AST evaluation successful. Result: {result}"")
+        return result
+        
+    except ZeroDivisionError as e:
+        # Specifically catch division by zero to provide a clear error message.
+        logger.error(f""Evaluation error: Division by zero. Details: {e}"", exc_info=True)
+        raise ValueError(""Division by zero."")
+    except OverflowError as e:
+        # Catch numerical results that are too large to be represented.
+        logger.error(f""Evaluation error: Numerical result out of range. Details: {e}"", exc_info=True)
+        raise ValueError(""Numerical result out of range."")
+    except Exception as e:
+        # Catch any other unexpected errors during the compilation or evaluation phase.
+        # This provides a generic fallback for other evaluation-time issues.
+        logger.error(f""Unexpected error during AST compilation or evaluation. Details: {e}"", exc_info=True)
+        raise ValueError(f""Failed to evaluate expression: {e}"")
+
+
+def evaluate_expression(math_expr: str):
+    """"""
+    Evaluates a mathematical expression string and returns the result.
+
+    The function supports basic arithmetic operations: addition (+), subtraction (-),
+    multiplication (*), and division (/). It also handles parentheses for grouping.
+    It employs a multi-stage process:
+    1. Input Validation: Checks type, emptiness, and allowed characters.
+    2. Secure Parsing: Converts the string to an Abstract Syntax Tree (AST) and
+       validates the AST to allow only safe, basic arithmetic operations.
+    3. Safe Evaluation: Compiles and evaluates the AST in a restricted environment.
+
+    Args:
+        math_expr: str, a string containing a mathematical expression to evaluate.
+
+    Returns:
+        The evaluated result of the expression (int or float).
+
+    Raises:
+        TypeError: If the input expression is not a string.
+        ValueError: If the expression is empty, contains unsupported characters,
+                    includes unsupported operations (e.g., exponentiation, bitwise ops),
+                    constitutes unsafe code (e.g., function calls, attribute access),
+                    has invalid syntax, or if evaluation leads to an error
+                    (e.g., division by zero, overflow).
+    """"""
+    logger.info(f""Attempting to evaluate expression: '{math_expr}'"")
+    try:
+        # Stage 1: Validate the input string.
+        # This checks for type, emptiness, and allowed characters.
+        logger.info(""Starting input validation stage."")
+        validated_expr_string = _validate_input_expression(math_expr)
+        logger.info(""Input validation successful."")
+        
+        # Stage 2: Parse the string into an AST and validate the AST for safety.
+        # This ensures no malicious or unsupported operations are present.
+        logger.info(""Starting AST parsing and validation stage."")
+        safe_ast_tree = _parse_and_validate_ast(validated_expr_string)
+        logger.info(""AST parsing and validation successful."")
+        
+        # Stage 3: Compile the safe AST and evaluate it.
+        # This computes the final numerical result.
+        logger.info(""Starting AST compilation and evaluation stage."")
+        result = _compile_and_evaluate_ast(safe_ast_tree)
+        logger.info(f""Expression '{math_expr}' evaluated successfully. Result: {result}"")
+        
+        return result
+    except (TypeError, ValueError) as e:
+        # Log the exception at this top level before re-raising.
+        # The helper functions already log specifics, this gives a top-level view of failure.
+        logger.error(f""Evaluation failed for expression '{math_expr}'. Error: {e}"", exc_info=True)
+        raise # Re-raise the caught exception (TypeError or ValueError)
+    except Exception as e:
+        # Catch any other unexpected exceptions not already handled.
+        logger.critical(f""Unexpected critical error during evaluation of '{math_expr}'. Error: {e}"", exc_info=True)
+        # It's good practice to raise a consistent error type from the public API if possible,
+        # or re-raise the original if its type is meaningful to the caller.
+        # Here, we'll wrap it in a ValueError to maintain consistency with other error conditions.
+        raise ValueError(f""An unexpected critical error occurred: {e}"")
+",gemini-2.5-pro-preview-03-25,0,[],[],[]

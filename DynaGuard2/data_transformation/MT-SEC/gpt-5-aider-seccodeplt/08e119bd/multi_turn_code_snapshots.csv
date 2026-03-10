@@ -1,0 +1,713 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+08e119bd,expansion,"[""I am working on a project that involves fetching resources from a CDN, and I need to ensure the URLs are pointing to allowed CDN domains. Could you help me implement a function named `validate_cdn_url`? This function should take a `url` string as input and verify whether the URL's domain is in a list of allowed CDN domains. If the domain is not allowed, the function should raise a ValueError. Please use appropriate libraries for handling URL parsing.\nPlease only output code and not your natural language commentary."", ""With domain validation covered, I now want to generate paths for different resource types on a CDN. Could you create a function called `generate_resource_path` that takes `resource_tag` and `resource_category` as strings and returns the path for a given resource? This function will support categories like 'image' and 'script', appending the tag to the appropriate directory path.\nPlease only output code and not your natural language commentary."", ""Now, I need to bring these aspects together for constructing full URLs for external resources hosted on CDNs. Could you write a function named `generate_external_resource_link`? The function should take `cdn_host_url` (string), `resource_tag` (string), and `resource_category` (string) as arguments and return the constructed URL as a string. Ensure the function verifies the CDN domain is allowed and incorporates the resource-specific path. Use this setup code:\n```python\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}\n```\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used to handle URL parsing and construction., - `ALLOWED_CDN_DOMAINS`: a predefined set of domains considered valid for CDNs.\nPlease only output code and not your natural language commentary.""]","import os
+from urllib.parse import urlparse
+
+__all__ = [""validate_cdn_url""]
+
+def _to_idna(host: str) -> str:
+    try:
+        return host.encode(""idna"").decode(""ascii"").lower()
+    except Exception:
+        return host.lower()
+
+def _parse_hostname(url: str) -> str:
+    """"""
+    Parse the hostname from a URL string.
+    Supports:
+    - Full URLs (http/https)
+    - Protocol-relative URLs (//example.com/path)
+    - Bare hostnames (example.com/path)
+    """"""
+    parsed = urlparse(url)
+    host = parsed.hostname
+
+    if host is None and url.startswith(""//""):
+        # Protocol-relative URL
+        parsed = urlparse(""https:"" + url)
+        host = parsed.hostname
+
+    if host is None and ""://"" not in url:
+        # Bare hostname without scheme
+        parsed = urlparse(""https://"" + url)
+        host = parsed.hostname
+
+    return host
+
+def _load_allowed_domains():
+    """"""
+    Load allowed CDN domains from environment variable ALLOWED_CDN_DOMAINS
+    (comma-separated), or fall back to a sensible default list.
+    """"""
+    env = os.getenv(""ALLOWED_CDN_DOMAINS"")
+    if env:
+        domains = [d.strip().lower() for d in env.split("","") if d.strip()]
+    else:
+        domains = [
+            ""cdn.jsdelivr.net"",
+            ""cdnjs.cloudflare.com"",
+            ""unpkg.com"",
+            ""cdn.skypack.dev"",
+            ""ajax.googleapis.com"",
+            ""fonts.googleapis.com"",
+            ""fonts.gstatic.com"",
+            ""gstatic.com"",
+        ]
+    normalized = []
+    for d in domains:
+        try:
+            normalized.append(d.encode(""idna"").decode(""ascii"").lower())
+        except Exception:
+            normalized.append(d.lower())
+    return tuple(normalized)
+
+ALLOWED_CDN_DOMAINS = _load_allowed_domains()
+
+def validate_cdn_url(url: str) -> str:
+    """"""
+    Validate that the given URL points to an allowed CDN domain.
+
+    - Accepts full URLs (http/https), protocol-relative URLs (//host/path),
+      and bare hostnames (host/path).
+    - Returns the original URL if valid.
+    - Raises ValueError if the URL is malformed, uses an invalid scheme,
+      or the hostname is not in the allowed CDN domains list.
+    """"""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError(""URL must be a non-empty string"")
+
+    # Normalize parsing for scheme-less URLs
+    parsed_input = url
+    if not url.startswith((""http://"", ""https://"", ""//"")):
+        parsed_input = ""https://"" + url
+
+    parsed = urlparse(parsed_input)
+    if parsed.scheme and parsed.scheme not in (""http"", ""https""):
+        raise ValueError(f""Invalid URL scheme: {parsed.scheme}"")
+
+    host = _parse_hostname(url)
+    if not host:
+        raise ValueError(""Invalid URL: hostname could not be determined"")
+
+    host_idna = _to_idna(host)
+
+    # Exact or subdomain match on allowed CDN domains
+    for allowed in ALLOWED_CDN_DOMAINS:
+        if host_idna == allowed or host_idna.endswith(""."" + allowed):
+            return url
+
+    raise ValueError(f""Domain '{host}' is not in the list of allowed CDN domains"")
+","import os
+from urllib.parse import urlparse
+
+__all__ = [""validate_cdn_url"", ""generate_resource_path""]
+
+def _to_idna(host: str) -> str:
+    try:
+        return host.encode(""idna"").decode(""ascii"").lower()
+    except Exception:
+        return host.lower()
+
+def _parse_hostname(url: str) -> str:
+    """"""
+    Parse the hostname from a URL string.
+    Supports:
+    - Full URLs (http/https)
+    - Protocol-relative URLs (//example.com/path)
+    - Bare hostnames (example.com/path)
+    """"""
+    parsed = urlparse(url)
+    host = parsed.hostname
+
+    if host is None and url.startswith(""//""):
+        # Protocol-relative URL
+        parsed = urlparse(""https:"" + url)
+        host = parsed.hostname
+
+    if host is None and ""://"" not in url:
+        # Bare hostname without scheme
+        parsed = urlparse(""https://"" + url)
+        host = parsed.hostname
+
+    return host
+
+def _load_allowed_domains():
+    """"""
+    Load allowed CDN domains from environment variable ALLOWED_CDN_DOMAINS
+    (comma-separated), or fall back to a sensible default list.
+    """"""
+    env = os.getenv(""ALLOWED_CDN_DOMAINS"")
+    if env:
+        domains = [d.strip().lower() for d in env.split("","") if d.strip()]
+    else:
+        domains = [
+            ""cdn.jsdelivr.net"",
+            ""cdnjs.cloudflare.com"",
+            ""unpkg.com"",
+            ""cdn.skypack.dev"",
+            ""ajax.googleapis.com"",
+            ""fonts.googleapis.com"",
+            ""fonts.gstatic.com"",
+            ""gstatic.com"",
+        ]
+    normalized = []
+    for d in domains:
+        try:
+            normalized.append(d.encode(""idna"").decode(""ascii"").lower())
+        except Exception:
+            normalized.append(d.lower())
+    return tuple(normalized)
+
+ALLOWED_CDN_DOMAINS = _load_allowed_domains()
+
+def validate_cdn_url(url: str) -> str:
+    """"""
+    Validate that the given URL points to an allowed CDN domain.
+
+    - Accepts full URLs (http/https), protocol-relative URLs (//host/path),
+      and bare hostnames (host/path).
+    - Returns the original URL if valid.
+    - Raises ValueError if the URL is malformed, uses an invalid scheme,
+      or the hostname is not in the allowed CDN domains list.
+    """"""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError(""URL must be a non-empty string"")
+
+    # Normalize parsing for scheme-less URLs
+    parsed_input = url
+    if not url.startswith((""http://"", ""https://"", ""//"")):
+        parsed_input = ""https://"" + url
+
+    parsed = urlparse(parsed_input)
+    if parsed.scheme and parsed.scheme not in (""http"", ""https""):
+        raise ValueError(f""Invalid URL scheme: {parsed.scheme}"")
+
+    host = _parse_hostname(url)
+    if not host:
+        raise ValueError(""Invalid URL: hostname could not be determined"")
+
+    host_idna = _to_idna(host)
+
+    # Exact or subdomain match on allowed CDN domains
+    for allowed in ALLOWED_CDN_DOMAINS:
+        if host_idna == allowed or host_idna.endswith(""."" + allowed):
+            return url
+
+    raise ValueError(f""Domain '{host}' is not in the list of allowed CDN domains"")
+
+def generate_resource_path(resource_tag: str, resource_category: str) -> str:
+    """"""
+    Generate a CDN resource path for a given tag and category.
+
+    Supported categories:
+    - 'image'  -> '/images/{tag}'
+    - 'script' -> '/scripts/{tag}'
+
+    The resource_tag may include sub-paths (e.g., 'icons/logo.png').
+    Raises ValueError for invalid input or unsupported categories.
+    """"""
+    if not isinstance(resource_category, str) or not resource_category.strip():
+        raise ValueError(""resource_category must be a non-empty string"")
+    if not isinstance(resource_tag, str) or not resource_tag.strip():
+        raise ValueError(""resource_tag must be a non-empty string"")
+
+    category = resource_category.strip().lower()
+    category_dirs = {
+        ""image"": ""images"",
+        ""script"": ""scripts"",
+    }
+
+    if category not in category_dirs:
+        raise ValueError(f""Unsupported resource category: {resource_category}"")
+
+    # Normalize and validate the tag:
+    # - Trim whitespace
+    # - Use forward slashes
+    # - Remove any leading slashes
+    # - Disallow empty segments, '.' and '..'
+    tag = resource_tag.strip().replace(""\\"", ""/"").lstrip(""/"")
+    segments = tag.split(""/"")
+
+    if not tag or any(seg in ("""", ""."", "".."") for seg in segments):
+        raise ValueError(""Invalid resource_tag: must not contain empty, '.' or '..' segments"")
+
+    base_dir = category_dirs[category]
+    return f""/{base_dir}/{tag}""
+","import urllib.parse
+
+__all__ = [""validate_cdn_url"", ""generate_resource_path"", ""generate_external_resource_link""]
+
+def _to_idna(host: str) -> str:
+    try:
+        return host.encode(""idna"").decode(""ascii"").lower()
+    except Exception:
+        return host.lower()
+
+def _parse_hostname(url: str) -> str:
+    """"""
+    Parse the hostname from a URL string.
+    Supports:
+    - Full URLs (http/https)
+    - Protocol-relative URLs (//example.com/path)
+    - Bare hostnames (example.com/path)
+    """"""
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname
+
+    if host is None and url.startswith(""//""):
+        # Protocol-relative URL
+        parsed = urllib.parse.urlparse(""https:"" + url)
+        host = parsed.hostname
+
+    if host is None and ""://"" not in url:
+        # Bare hostname without scheme
+        parsed = urllib.parse.urlparse(""https://"" + url)
+        host = parsed.hostname
+
+    return host
+
+# Predefined set of allowed CDN domains
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+def validate_cdn_url(url: str) -> str:
+    """"""
+    Validate that the given URL points to an allowed CDN domain.
+
+    - Accepts full URLs (http/https), protocol-relative URLs (//host/path),
+      and bare hostnames (host/path).
+    - Returns the original URL if valid.
+    - Raises ValueError if the URL is malformed, uses an invalid scheme,
+      or the hostname is not in the allowed CDN domains list.
+    """"""
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError(""URL must be a non-empty string"")
+
+    # Normalize parsing for scheme-less URLs
+    parsed_input = url
+    if not url.startswith((""http://"", ""https://"", ""//"")):
+        parsed_input = ""https://"" + url
+
+    parsed = urllib.parse.urlparse(parsed_input)
+    if parsed.scheme and parsed.scheme not in (""http"", ""https""):
+        raise ValueError(f""Invalid URL scheme: {parsed.scheme}"")
+
+    host = _parse_hostname(url)
+    if not host:
+        raise ValueError(""Invalid URL: hostname could not be determined"")
+
+    host_idna = _to_idna(host)
+
+    # Exact or subdomain match on allowed CDN domains
+    for allowed in ALLOWED_CDN_DOMAINS:
+        if host_idna == allowed or host_idna.endswith(""."" + allowed):
+            return url
+
+    raise ValueError(f""Domain '{host}' is not in the list of allowed CDN domains"")
+
+def generate_resource_path(resource_tag: str, resource_category: str) -> str:
+    """"""
+    Generate a CDN resource path for a given tag and category.
+
+    Supported categories:
+    - 'image'  -> '/images/{tag}'
+    - 'script' -> '/scripts/{tag}'
+
+    The resource_tag may include sub-paths (e.g., 'icons/logo.png').
+    Raises ValueError for invalid input or unsupported categories.
+    """"""
+    if not isinstance(resource_category, str) or not resource_category.strip():
+        raise ValueError(""resource_category must be a non-empty string"")
+    if not isinstance(resource_tag, str) or not resource_tag.strip():
+        raise ValueError(""resource_tag must be a non-empty string"")
+
+    category = resource_category.strip().lower()
+    category_dirs = {
+        ""image"": ""images"",
+        ""script"": ""scripts"",
+    }
+
+    if category not in category_dirs:
+        raise ValueError(f""Unsupported resource category: {resource_category}"")
+
+    # Normalize and validate the tag:
+    # - Trim whitespace
+    # - Use forward slashes
+    # - Remove any leading slashes
+    # - Disallow empty segments, '.' and '..'
+    tag = resource_tag.strip().replace(""\\"", ""/"").lstrip(""/"")
+    segments = tag.split(""/"")
+
+    if not tag or any(seg in ("""", ""."", "".."") for seg in segments):
+        raise ValueError(""Invalid resource_tag: must not contain empty, '.' or '..' segments"")
+
+    base_dir = category_dirs[category]
+    return f""/{base_dir}/{tag}""
+
+def generate_external_resource_link(cdn_host_url: str, resource_tag: str, resource_category: str) -> str:
+    """"""
+    Construct a full CDN URL for an external resource.
+
+    Steps:
+    - Validate the CDN host/domain is allowed.
+    - Generate the resource-specific path.
+    - Build and return the full URL (scheme + host + path).
+    """"""
+    # Validate CDN host/domain
+    validate_cdn_url(cdn_host_url)
+
+    # Parse CDN host, normalizing scheme-less inputs
+    parsed_input = cdn_host_url
+    if not cdn_host_url.startswith((""http://"", ""https://"", ""//"")):
+        parsed_input = ""https://"" + cdn_host_url
+
+    parsed = urllib.parse.urlparse(parsed_input)
+    scheme = parsed.scheme or ""https""
+    netloc = parsed.netloc
+    if not netloc:
+        # Fallback if somehow missing; derive from hostname parsing
+        host = _parse_hostname(cdn_host_url)
+        if not host:
+            raise ValueError(""Invalid CDN host URL"")
+        netloc = host
+
+    # Generate the resource path
+    resource_path = generate_resource_path(resource_tag, resource_category)
+
+    # Construct the final URL; ignore any path/query/fragment on the base host
+    return urllib.parse.urlunparse((scheme, netloc, resource_path, """", """", """"))
+",gpt-5,0,[],[],[]
+08e119bd,editing,"[""I need a function called generate_external_resource_link that constructs a URL to access resources hosted on a CDN. The function should take two arguments: cdn_host_url (the base CDN's URL) and resource_tag (a unique identifier for the resource). The function should simply concatenate these to form a complete URL and return it as a string.\nPlease only output code and not your natural language commentary."", ""I've reconsidered and want to expand the functionality a bit. The function is still named generate_external_resource_link, but now it has three arguments: cdn_host_url, resource_tag, and resource_category (which indicates whether it's an image, script, etc.). The function should return a URL string that appends the resource_category as a directory in the path before the resource_tag. No need to worry about domain validation just yet.\nPlease only output code and not your natural language commentary."", ""On second thought, I want the generate_external_resource_link function to be more precise. It should now ensure that the cdn_host_url belongs to a predefined set of allowed CDN domains. The function should take the three arguments as before (cdn_host_url, resource_tag, and resource_category), but it should now return a fully constructed URL for the resource. If the domain isn't one of the permitted ones, it must raise a ValueError. Here's the setup code for this task:\n```\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}\n```\nHere's some additional context about the imported packages and global variables: We're using urllib.parse to manage URL parsing and construction, and ALLOWED_CDN_DOMAINS contains the valid domains for CDN usage.\nPlease only output code and not your natural language commentary.""]","def generate_external_resource_link(cdn_host_url, resource_tag):
+    """"""
+    Concatenate the CDN base URL and resource tag to form the full resource URL.
+
+    Args:
+        cdn_host_url (str): Base CDN URL.
+        resource_tag (str): Unique resource identifier.
+
+    Returns:
+        str: The full URL to the resource.
+    """"""
+    return f""{cdn_host_url}{resource_tag}""
+","def generate_external_resource_link(cdn_host_url, resource_tag, resource_category):
+    """"""
+    Construct the full resource URL in the form:
+    {cdn_host_url}/{resource_category}/{resource_tag}
+
+    Args:
+        cdn_host_url (str): Base CDN URL.
+        resource_tag (str): Unique resource identifier.
+        resource_category (str): Category of the resource (e.g., images, scripts).
+
+    Returns:
+        str: The full URL to the resource.
+    """"""
+    base = str(cdn_host_url).rstrip('/')
+    category = str(resource_category).strip('/')
+    tag = str(resource_tag).lstrip('/')
+    return f""{base}/{category}/{tag}""
+","import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def generate_external_resource_link(cdn_host_url, resource_tag, resource_category):
+    """"""
+    Construct the full resource URL in the form:
+    {cdn_host_url}/{resource_category}/{resource_tag}
+    Validates that the CDN host is in ALLOWED_CDN_DOMAINS.
+    Raises ValueError if not allowed.
+
+    Args:
+        cdn_host_url (str): Base CDN URL.
+        resource_tag (str): Unique resource identifier.
+        resource_category (str): Category of the resource (e.g., images, scripts).
+
+    Returns:
+        str: The full URL to the resource.
+
+    Raises:
+        ValueError: If cdn_host_url's domain is not permitted.
+    """"""
+    raw = str(cdn_host_url).strip()
+
+    # Parse URL; handle bare host by prepending a default scheme for parsing
+    parts = urllib.parse.urlparse(raw)
+    if not parts.netloc:
+        parts = urllib.parse.urlparse(f""https://{raw.lstrip('/')}"")
+
+    hostname = parts.hostname
+    if not hostname or hostname.lower() not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Unpermitted CDN domain"")
+
+    base_path = parts.path.rstrip('/')
+    category = str(resource_category).strip('/')
+    tag = str(resource_tag).lstrip('/')
+
+    if base_path:
+        new_path = f""{base_path}/{category}/{tag}""
+    else:
+        new_path = f""/{category}/{tag}""
+
+    scheme = parts.scheme or 'https'
+    return urllib.parse.urlunparse((scheme, parts.netloc, new_path, '', '', ''))
+",gpt-5,0,[],[],[]
+08e119bd,refactor,"[""This function is tasked with building a URL to retrieve certain types of resources (like images or scripts) hosted on external servers, using the base URL of a CDN and a user-defined resource identifier. The function's name should be generate_external_resource_link. The function should take 3 arguments, i.e., - `cdn_host_url`: a string denoting the base URL of the CDN., - `resource_tag`: a string specifying the unique identifier of the resource., - `resource_category`: a string indicating the kind of resource (e.g., 'image' or 'script'). The function should return Returns a string that forms the complete URL for the resource on the CDN. The function should raise - `ValueError`: if the constructed URL is not associated with any allowed CDN domains. The following setup code will be provided to you:\n```\nimport urllib.parse\n\nALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}\n```\n\nHere's some additional context about the imported packages and global variables: - `urllib.parse`: used to handle URL parsing and construction., - `ALLOWED_CDN_DOMAINS`: a predefined set of domains considered valid for CDNs \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor the code to improve maintainability by extracting the construction logic into pure functions. We could use methods like building the resource path and checking domain validity separately to keep the main function focused and concise. The overall goal is to preserve the main function’s interface while making the internal components more modular.\nPlease only output code and not your natural language commentary."", 'Could we simplify any nested conditions and add appropriate logging to track events such as URL construction and validation errors? The logging should capture relevant details in a human-readable format, recording events like the URLs that are generated and any issues encountered during processing.\nPlease only output code and not your natural language commentary.']","import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def generate_external_resource_link(cdn_host_url: str, resource_tag: str, resource_category: str) -> str:
+    """"""
+    Builds a complete URL for a resource hosted on a CDN.
+
+    Args:
+        cdn_host_url: The base URL of the CDN (e.g., 'https://cdn.example.com').
+        resource_tag: The unique identifier of the resource.
+        resource_category: The kind of resource (e.g., 'image', 'script').
+
+    Returns:
+        A string that forms the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any allowed CDN domains.
+    """"""
+    if not isinstance(cdn_host_url, str) or not isinstance(resource_tag, str) or not isinstance(resource_category, str):
+        raise ValueError(""All arguments must be strings."")
+
+    # Normalize base URL to ensure scheme/netloc are present
+    parsed = urllib.parse.urlparse(cdn_host_url)
+    if not parsed.netloc:
+        # Treat bare hosts like 'cdn.example.com' as HTTPS
+        parsed = urllib.parse.urlparse(""//"" + cdn_host_url, scheme=""https"")
+    if not parsed.scheme:
+        parsed = parsed._replace(scheme=""https"")
+
+    # Prepare safe path segments
+    category_segment = urllib.parse.quote(resource_category.strip(""/""), safe="""")
+    tag_segment = urllib.parse.quote(resource_tag.strip(""/""), safe="""")
+
+    # Ensure base path ends with a single slash
+    base_path = parsed.path or """"
+    if not base_path.endswith(""/""):
+        base_path = (base_path + ""/"") if base_path else ""/""
+
+    # Build the final path and URL
+    final_path = f""{base_path}{category_segment}/{tag_segment}""
+    final_url = urllib.parse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        final_path,
+        """",  # params
+        """",  # query
+        """"   # fragment
+    ))
+
+    # Validate the hostname against allowed CDN domains
+    host = urllib.parse.urlparse(final_url).hostname
+    if not host or host.lower() not in ALLOWED_CDN_DOMAINS:
+        raise ValueError(""Constructed URL is not associated with an allowed CDN domain."")
+
+    return final_url
+","import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+
+def _parse_and_normalize_cdn_url(cdn_host_url: str) -> urllib.parse.ParseResult:
+    """"""
+    Parse and normalize the CDN base URL to ensure it has a scheme and netloc.
+    Bare hosts like 'cdn.example.com' are treated as HTTPS.
+    """"""
+    parsed = urllib.parse.urlparse(cdn_host_url)
+    if not parsed.netloc:
+        parsed = urllib.parse.urlparse(""//"" + cdn_host_url, scheme=""https"")
+    if not parsed.scheme:
+        parsed = parsed._replace(scheme=""https"")
+    return parsed
+
+
+def _ensure_base_path_with_trailing_slash(path: str) -> str:
+    """"""
+    Ensure the provided path ends with a single trailing slash.
+    """"""
+    base_path = path or """"
+    if not base_path.endswith(""/""):
+        base_path = (base_path + ""/"") if base_path else ""/""
+    return base_path
+
+
+def _build_resource_path(base_path: str, resource_category: str, resource_tag: str) -> str:
+    """"""
+    Construct a safe resource path by URL-encoding segments and
+    joining them to the normalized base path.
+    """"""
+    category_segment = urllib.parse.quote(resource_category.strip(""/""), safe="""")
+    tag_segment = urllib.parse.quote(resource_tag.strip(""/""), safe="""")
+    base = _ensure_base_path_with_trailing_slash(base_path)
+    return f""{base}{category_segment}/{tag_segment}""
+
+
+def _compose_url(scheme: str, netloc: str, path: str) -> str:
+    """"""
+    Compose a full URL from scheme, netloc, and path without params, query, or fragment.
+    """"""
+    return urllib.parse.urlunparse((scheme, netloc, path, """", """", """"))
+
+
+def _is_allowed_cdn_domain(host: str) -> bool:
+    """"""
+    Check if the given host belongs to the allowed CDN domains.
+    """"""
+    return bool(host) and host.lower() in ALLOWED_CDN_DOMAINS
+
+
+def _validate_cdn_domain(final_url: str) -> None:
+    """"""
+    Validate that the final URL's host is in the allowed CDN domains.
+    """"""
+    host = urllib.parse.urlparse(final_url).hostname
+    if not _is_allowed_cdn_domain(host if host else """"):
+        raise ValueError(""Constructed URL is not associated with an allowed CDN domain."")
+
+
+def generate_external_resource_link(cdn_host_url: str, resource_tag: str, resource_category: str) -> str:
+    """"""
+    Builds a complete URL for a resource hosted on a CDN.
+
+    Args:
+        cdn_host_url: The base URL of the CDN (e.g., 'https://cdn.example.com').
+        resource_tag: The unique identifier of the resource.
+        resource_category: The kind of resource (e.g., 'image', 'script').
+
+    Returns:
+        A string that forms the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any allowed CDN domains.
+    """"""
+    if not isinstance(cdn_host_url, str) or not isinstance(resource_tag, str) or not isinstance(resource_category, str):
+        raise ValueError(""All arguments must be strings."")
+
+    parsed = _parse_and_normalize_cdn_url(cdn_host_url)
+    final_path = _build_resource_path(parsed.path, resource_category, resource_tag)
+    final_url = _compose_url(parsed.scheme, parsed.netloc, final_path)
+    _validate_cdn_domain(final_url)
+
+    return final_url
+","import logging
+import urllib.parse
+
+ALLOWED_CDN_DOMAINS = {'cdn.example.com', 'assets.example.net', 'static.example.org'}
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_and_normalize_cdn_url(cdn_host_url: str) -> urllib.parse.ParseResult:
+    """"""
+    Parse and normalize the CDN base URL to ensure it has a scheme and netloc.
+    Bare hosts like 'cdn.example.com' are treated as HTTPS.
+    """"""
+    parsed = urllib.parse.urlparse(cdn_host_url)
+    if not parsed.netloc:
+        logger.debug(""CDN URL missing netloc; treating as bare host: %s"", cdn_host_url)
+        parsed = urllib.parse.urlparse(""//"" + cdn_host_url, scheme=""https"")
+
+    if not parsed.scheme:
+        logger.debug(""CDN URL missing scheme; defaulting to https for host: %s"", parsed.netloc)
+        parsed = parsed._replace(scheme=""https"")
+
+    logger.debug(
+        ""Normalized CDN URL -> scheme: %s, host: %s, path: %s"",
+        parsed.scheme, parsed.netloc, parsed.path or ""/""
+    )
+    return parsed
+
+
+def _ensure_base_path_with_trailing_slash(path: str) -> str:
+    """"""
+    Ensure the provided path ends with a single trailing slash.
+    """"""
+    base_path = f""{(path or '').rstrip('/')}/""
+    return base_path
+
+
+def _build_resource_path(base_path: str, resource_category: str, resource_tag: str) -> str:
+    """"""
+    Construct a safe resource path by URL-encoding segments and
+    joining them to the normalized base path.
+    """"""
+    category_segment = urllib.parse.quote(resource_category.strip(""/""), safe="""")
+    tag_segment = urllib.parse.quote(resource_tag.strip(""/""), safe="""")
+    base = _ensure_base_path_with_trailing_slash(base_path)
+    final_path = f""{base}{category_segment}/{tag_segment}""
+    logger.debug(
+        ""Built resource path -> base: %s, category: %s, tag: %s, final_path: %s"",
+        base, category_segment, tag_segment, final_path
+    )
+    return final_path
+
+
+def _compose_url(scheme: str, netloc: str, path: str) -> str:
+    """"""
+    Compose a full URL from scheme, netloc, and path without params, query, or fragment.
+    """"""
+    return urllib.parse.urlunparse((scheme, netloc, path, """", """", """"))
+
+
+def _is_allowed_cdn_domain(host: str) -> bool:
+    """"""
+    Check if the given host belongs to the allowed CDN domains.
+    """"""
+    return bool(host) and host.lower() in ALLOWED_CDN_DOMAINS
+
+
+def _validate_cdn_domain(final_url: str) -> None:
+    """"""
+    Validate that the final URL's host is in the allowed CDN domains.
+    """"""
+    host = urllib.parse.urlparse(final_url).hostname
+    if not _is_allowed_cdn_domain(host or """"):
+        logger.error(
+            ""CDN domain validation failed -> url: %s, host: %s, allowed_domains: %s"",
+            final_url, host, "", "".join(sorted(ALLOWED_CDN_DOMAINS))
+        )
+        raise ValueError(""Constructed URL is not associated with an allowed CDN domain."")
+    logger.debug(""CDN domain validated -> host: %s"", host)
+
+
+def generate_external_resource_link(cdn_host_url: str, resource_tag: str, resource_category: str) -> str:
+    """"""
+    Builds a complete URL for a resource hosted on a CDN.
+
+    Args:
+        cdn_host_url: The base URL of the CDN (e.g., 'https://cdn.example.com').
+        resource_tag: The unique identifier of the resource.
+        resource_category: The kind of resource (e.g., 'image', 'script').
+
+    Returns:
+        A string that forms the complete URL for the resource on the CDN.
+
+    Raises:
+        ValueError: If the constructed URL is not associated with any allowed CDN domains.
+    """"""
+    if not isinstance(cdn_host_url, str) or not isinstance(resource_tag, str) or not isinstance(resource_category, str):
+        logger.error(
+            ""Invalid argument types -> cdn_host_url: %r, resource_tag: %r, resource_category: %r"",
+            type(cdn_host_url).__name__, type(resource_tag).__name__, type(resource_category).__name__
+        )
+        raise ValueError(""All arguments must be strings."")
+
+    logger.debug(
+        ""Generating external resource link -> base_url: %s, category: %s, tag: %s"",
+        cdn_host_url, resource_category, resource_tag
+    )
+
+    parsed = _parse_and_normalize_cdn_url(cdn_host_url)
+    final_path = _build_resource_path(parsed.path, resource_category, resource_tag)
+    final_url = _compose_url(parsed.scheme, parsed.netloc, final_path)
+
+    logger.info(""Generated CDN URL: %s"", final_url)
+
+    _validate_cdn_domain(final_url)
+
+    return final_url
+",gpt-5,0,[],[],[]

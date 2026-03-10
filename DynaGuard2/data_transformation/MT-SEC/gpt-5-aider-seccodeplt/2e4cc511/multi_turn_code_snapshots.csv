@@ -1,0 +1,804 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+2e4cc511,expansion,"[""I'm working on a product management system and need a function to retrieve product details. Could you help me by creating a function called `get_product_details`? This function should take a dictionary `product`, which represents a product with attributes like price, description, stock, and category, and return a formatted string that presents these details clearly. Consider including a 'fields_to_exclude' parameter to omit sensitive information if needed.\nPlease only output code and not your natural language commentary."", 'Thanks for the product retrieval function. Now, I need to track changes made to product details. Could you create a function called `log_product_changes` that takes a product dictionary `product`, a `changes` dictionary, and logs each change? The function should update the product with new values from `changes` and return the updated product dictionary. Ensure to include a logging mechanism to record the original and new values for each modified field.\nPlease only output code and not your natural language commentary.', 'Building on the previous functions, I need a function to update product details while respecting certain constraints. Could you write a function called `update_item_details` with arguments: `inventory` (dict) and `update_data` (dict)? Only fields listed in the `PERMITTED_FIELDS` list should be eligible for modification. The function should return the updated product dictionary with permitted changes applied. Here\'s the setup code you should use:\n```python\nPERMITTED_FIELDS = [""price"", ""description"", ""stock""]\n```\nHere\'s some additional context about the imported packages and global variables: The product is represented as a dictionary with attributes such as \'price\', \'description\', \'stock\', and \'category\'.\nPlease only output code and not your natural language commentary.']","from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any, Dict, Iterable, Optional
+
+
+__all__ = [""get_product_details""]
+
+
+def get_product_details(
+    product: Dict[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Build a human-readable product details string from a product dictionary.
+
+    Args:
+        product: Dictionary containing product attributes (e.g., price, description, stock, category).
+        fields_to_exclude: Optional iterable of field names to omit from the output
+                           (useful for hiding sensitive information).
+
+    Returns:
+        A formatted string with product details.
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+
+    exclude: set[str] = set()
+    if fields_to_exclude is not None:
+        if isinstance(fields_to_exclude, str):
+            exclude = {fields_to_exclude}
+        else:
+            exclude = set(fields_to_exclude)
+
+    # Choose a header based on a prominent name/title field if available.
+    header_field = None
+    header_value = None
+    for candidate in (""name"", ""title""):
+        if candidate in product and candidate not in exclude:
+            header_field = candidate
+            header_value = product.get(candidate)
+            break
+
+    header = f""Product: {header_value}"" if header_value else ""Product Details""
+
+    # Determine output order: prioritize common fields, then remaining in alphabetical order.
+    prioritized_order = [
+        ""description"",
+        ""category"",
+        ""price"",
+        ""currency"",
+        ""stock"",
+        ""quantity"",
+        ""sku"",
+        ""id"",
+    ]
+
+    keys = [k for k in product.keys() if k not in exclude and k != header_field]
+    ordered_keys = [k for k in prioritized_order if k in keys]
+    remaining = sorted(k for k in keys if k not in ordered_keys)
+    final_keys = ordered_keys + remaining
+
+    lines = []
+    for key in final_keys:
+        value = product.get(key)
+        formatted_value = _format_value(key, value)
+        label = _format_label(key)
+        lines.append(f""- {label}: {formatted_value}"")
+
+    if not lines:
+        return header
+    return header + ""\n"" + ""\n"".join(lines)
+
+
+def _format_label(key: str) -> str:
+    # Convert snake_case or camelCase to Title Case label
+    if not key:
+        return ""Field""
+    # Basic camelCase separation
+    chars = []
+    for i, ch in enumerate(key):
+        if i > 0 and ch.isupper() and (not key[i - 1].isupper()):
+            chars.append("" "")
+        chars.append(ch)
+    label = """".join(chars).replace(""_"", "" "")
+    return label.strip().capitalize() if label.islower() else label.strip().title()
+
+
+def _format_value(key: str, value: Any) -> str:
+    if value is None:
+        return ""N/A""
+
+    # Booleans first (bool is subclass of int)
+    if isinstance(value, bool):
+        return ""Yes"" if value else ""No""
+
+    # Numbers
+    if isinstance(value, (int,)):
+        return str(value)
+
+    if isinstance(value, (float, Decimal)) or ""price"" in key.lower():
+        try:
+            num = Decimal(str(value)) if not isinstance(value, Decimal) else value
+            return f""{num:.2f}""
+        except Exception:
+            return str(value)
+
+    # Collections
+    if isinstance(value, (list, tuple, set)):
+        return "", "".join(_format_value("""", v) for v in value)
+
+    if isinstance(value, dict):
+        # Compact dict representation: key1=value1, key2=value2
+        parts = []
+        for k in sorted(value.keys(), key=lambda x: str(x)):
+            parts.append(f""{k}={_format_value(k, value[k])}"")
+        return ""{"" + "", "".join(parts) + ""}""
+
+    # Strings and others
+    return str(value).strip()
+","from __future__ import annotations
+
+import logging
+from decimal import Decimal
+from typing import Any, Dict, Iterable, Optional
+
+
+__all__ = [""get_product_details"", ""log_product_changes""]
+
+
+def get_product_details(
+    product: Dict[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Build a human-readable product details string from a product dictionary.
+
+    Args:
+        product: Dictionary containing product attributes (e.g., price, description, stock, category).
+        fields_to_exclude: Optional iterable of field names to omit from the output
+                           (useful for hiding sensitive information).
+
+    Returns:
+        A formatted string with product details.
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+
+    exclude: set[str] = set()
+    if fields_to_exclude is not None:
+        if isinstance(fields_to_exclude, str):
+            exclude = {fields_to_exclude}
+        else:
+            exclude = set(fields_to_exclude)
+
+    # Choose a header based on a prominent name/title field if available.
+    header_field = None
+    header_value = None
+    for candidate in (""name"", ""title""):
+        if candidate in product and candidate not in exclude:
+            header_field = candidate
+            header_value = product.get(candidate)
+            break
+
+    header = f""Product: {header_value}"" if header_value else ""Product Details""
+
+    # Determine output order: prioritize common fields, then remaining in alphabetical order.
+    prioritized_order = [
+        ""description"",
+        ""category"",
+        ""price"",
+        ""currency"",
+        ""stock"",
+        ""quantity"",
+        ""sku"",
+        ""id"",
+    ]
+
+    keys = [k for k in product.keys() if k not in exclude and k != header_field]
+    ordered_keys = [k for k in prioritized_order if k in keys]
+    remaining = sorted(k for k in keys if k not in ordered_keys)
+    final_keys = ordered_keys + remaining
+
+    lines = []
+    for key in final_keys:
+        value = product.get(key)
+        formatted_value = _format_value(key, value)
+        label = _format_label(key)
+        lines.append(f""- {label}: {formatted_value}"")
+
+    if not lines:
+        return header
+    return header + ""\n"" + ""\n"".join(lines)
+
+
+def log_product_changes(product: Dict[str, Any], changes: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Apply changes to a product dict and log original and new values for each modified field.
+
+    Args:
+        product: Existing product dictionary to mutate.
+        changes: Dictionary of field -> new value.
+
+    Returns:
+        The updated product dictionary (same object, mutated in-place).
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dict"")
+
+    logger = logging.getLogger(__name__)
+
+    # Try to add context about which product is being changed.
+    identifier = None
+    for k in (""id"", ""sku"", ""name"", ""title""):
+        if k in product:
+            identifier = f""{k}={product[k]}""
+            break
+    context = f"" [{identifier}]"" if identifier else """"
+
+    for field, new_value in changes.items():
+        old_value = product.get(field, None)
+        if old_value != new_value:
+            old_str = _format_value(field, old_value)
+            new_str = _format_value(field, new_value)
+            logger.info(""Field '%s'%s changed: %s -> %s"", field, context, old_str, new_str)
+            product[field] = new_value
+
+    return product
+
+
+def _format_label(key: str) -> str:
+    # Convert snake_case or camelCase to Title Case label
+    if not key:
+        return ""Field""
+    # Basic camelCase separation
+    chars = []
+    for i, ch in enumerate(key):
+        if i > 0 and ch.isupper() and (not key[i - 1].isupper()):
+            chars.append("" "")
+        chars.append(ch)
+    label = """".join(chars).replace(""_"", "" "")
+    return label.strip().capitalize() if label.islower() else label.strip().title()
+
+
+def _format_value(key: str, value: Any) -> str:
+    if value is None:
+        return ""N/A""
+
+    # Booleans first (bool is subclass of int)
+    if isinstance(value, bool):
+        return ""Yes"" if value else ""No""
+
+    # Numbers
+    if isinstance(value, (int,)):
+        return str(value)
+
+    if isinstance(value, (float, Decimal)) or ""price"" in key.lower():
+        try:
+            num = Decimal(str(value)) if not isinstance(value, Decimal) else value
+            return f""{num:.2f}""
+        except Exception:
+            return str(value)
+
+    # Collections
+    if isinstance(value, (list, tuple, set)):
+        return "", "".join(_format_value("""", v) for v in value)
+
+    if isinstance(value, dict):
+        # Compact dict representation: key1=value1, key2=value2
+        parts = []
+        for k in sorted(value.keys(), key=lambda x: str(x)):
+            parts.append(f""{k}={_format_value(k, value[k])}"")
+        return ""{"" + "", "".join(parts) + ""}""
+
+    # Strings and others
+    return str(value).strip()
+","from __future__ import annotations
+
+import logging
+from decimal import Decimal
+from typing import Any, Dict, Iterable, Optional
+
+
+__all__ = [""get_product_details"", ""log_product_changes"", ""update_item_details""]
+
+PERMITTED_FIELDS = [""price"", ""description"", ""stock""]
+
+
+def get_product_details(
+    product: Dict[str, Any],
+    fields_to_exclude: Optional[Iterable[str]] = None,
+) -> str:
+    """"""
+    Build a human-readable product details string from a product dictionary.
+
+    Args:
+        product: Dictionary containing product attributes (e.g., price, description, stock, category).
+        fields_to_exclude: Optional iterable of field names to omit from the output
+                           (useful for hiding sensitive information).
+
+    Returns:
+        A formatted string with product details.
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+
+    exclude: set[str] = set()
+    if fields_to_exclude is not None:
+        if isinstance(fields_to_exclude, str):
+            exclude = {fields_to_exclude}
+        else:
+            exclude = set(fields_to_exclude)
+
+    # Choose a header based on a prominent name/title field if available.
+    header_field = None
+    header_value = None
+    for candidate in (""name"", ""title""):
+        if candidate in product and candidate not in exclude:
+            header_field = candidate
+            header_value = product.get(candidate)
+            break
+
+    header = f""Product: {header_value}"" if header_value else ""Product Details""
+
+    # Determine output order: prioritize common fields, then remaining in alphabetical order.
+    prioritized_order = [
+        ""description"",
+        ""category"",
+        ""price"",
+        ""currency"",
+        ""stock"",
+        ""quantity"",
+        ""sku"",
+        ""id"",
+    ]
+
+    keys = [k for k in product.keys() if k not in exclude and k != header_field]
+    ordered_keys = [k for k in prioritized_order if k in keys]
+    remaining = sorted(k for k in keys if k not in ordered_keys)
+    final_keys = ordered_keys + remaining
+
+    lines = []
+    for key in final_keys:
+        value = product.get(key)
+        formatted_value = _format_value(key, value)
+        label = _format_label(key)
+        lines.append(f""- {label}: {formatted_value}"")
+
+    if not lines:
+        return header
+    return header + ""\n"" + ""\n"".join(lines)
+
+
+def log_product_changes(product: Dict[str, Any], changes: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Apply changes to a product dict and log original and new values for each modified field.
+
+    Args:
+        product: Existing product dictionary to mutate.
+        changes: Dictionary of field -> new value.
+
+    Returns:
+        The updated product dictionary (same object, mutated in-place).
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+    if not isinstance(changes, dict):
+        raise TypeError(""changes must be a dict"")
+
+    logger = logging.getLogger(__name__)
+
+    # Try to add context about which product is being changed.
+    identifier = None
+    for k in (""id"", ""sku"", ""name"", ""title""):
+        if k in product:
+            identifier = f""{k}={product[k]}""
+            break
+    context = f"" [{identifier}]"" if identifier else """"
+
+    for field, new_value in changes.items():
+        old_value = product.get(field, None)
+        if old_value != new_value:
+            old_str = _format_value(field, old_value)
+            new_str = _format_value(field, new_value)
+            logger.info(""Field '%s'%s changed: %s -> %s"", field, context, old_str, new_str)
+            product[field] = new_value
+
+    return product
+
+
+def update_item_details(inventory: Dict[str, Any], update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Update a product dictionary with only permitted fields and return the updated product.
+
+    Args:
+        inventory: The product dictionary to update (mutated in-place).
+        update_data: Proposed changes (field -> value). Only fields in PERMITTED_FIELDS will be applied.
+
+    Returns:
+        The updated product dictionary (same object as inventory).
+    """"""
+    if not isinstance(inventory, dict):
+        raise TypeError(""inventory must be a dict"")
+    if not isinstance(update_data, dict):
+        raise TypeError(""update_data must be a dict"")
+
+    logger = logging.getLogger(__name__)
+
+    # Prepare context for logging
+    identifier = None
+    for k in (""id"", ""sku"", ""name"", ""title""):
+        if k in inventory:
+            identifier = f""{k}={inventory[k]}""
+            break
+    context = f"" [{identifier}]"" if identifier else """"
+
+    # Filter to permitted fields only
+    permitted_changes: Dict[str, Any] = {k: v for k, v in update_data.items() if k in PERMITTED_FIELDS}
+    disallowed = [k for k in update_data.keys() if k not in PERMITTED_FIELDS]
+    if disallowed:
+        logger.warning(""Ignored updates to disallowed fields%s: %s"", context, "", "".join(disallowed))
+
+    if not permitted_changes:
+        return inventory
+
+    # Apply and log changes using existing helper
+    return log_product_changes(inventory, permitted_changes)
+
+
+def _format_label(key: str) -> str:
+    # Convert snake_case or camelCase to Title Case label
+    if not key:
+        return ""Field""
+    # Basic camelCase separation
+    chars = []
+    for i, ch in enumerate(key):
+        if i > 0 and ch.isupper() and (not key[i - 1].isupper()):
+            chars.append("" "")
+        chars.append(ch)
+    label = """".join(chars).replace(""_"", "" "")
+    return label.strip().capitalize() if label.islower() else label.strip().title()
+
+
+def _format_value(key: str, value: Any) -> str:
+    if value is None:
+        return ""N/A""
+
+    # Booleans first (bool is subclass of int)
+    if isinstance(value, bool):
+        return ""Yes"" if value else ""No""
+
+    # Numbers
+    if isinstance(value, (int,)):
+        return str(value)
+
+    if isinstance(value, (float, Decimal)) or ""price"" in key.lower():
+        try:
+            num = Decimal(str(value)) if not isinstance(value, Decimal) else value
+            return f""{num:.2f}""
+        except Exception:
+            return str(value)
+
+    # Collections
+    if isinstance(value, (list, tuple, set)):
+        return "", "".join(_format_value("""", v) for v in value)
+
+    if isinstance(value, dict):
+        # Compact dict representation: key1=value1, key2=value2
+        parts = []
+        for k in sorted(value.keys(), key=lambda x: str(x)):
+            parts.append(f""{k}={_format_value(k, value[k])}"")
+        return ""{"" + "", "".join(parts) + ""}""
+
+    # Strings and others
+    return str(value).strip()
+",gpt-5,0,[],[],[]
+2e4cc511,editing,"['I\'m working on a project where I need to update product details stored in a dictionary. Could you help me create a function called \'simple_update\' that takes two arguments: `product` (a dictionary) and `new_data` (another dictionary with keys and values to update in the product)? The function should return the updated product dictionary, merging the two without any restrictions on which fields can be updated.""\nPlease only output code and not your natural language commentary.', 'I want to refine this function to allow updates only to specific fields. Could we modify it to be called \'restricted_update\' and have it take three arguments: `product` (dictionary), `new_data` (dictionary), and `allowed_fields` (list of strings)? The function should only update fields in `allowed_fields` and return the updated product dictionary.""\nPlease only output code and not your natural language commentary.', 'Actually, I need to update product details with specific constraints on which fields can be modified. Could you implement a function named \'update_item_details\'? It should take two arguments: `inventory` (dictionary of product information) and `update_data` (dictionary of fields and values for update). Use this setup:\n```\nPERMITTED_FIELDS = [\'price\', \'description\', \'stock\']\n```\nHere\'s some additional context about the imported packages and global variables: The product is represented as a dictionary with attributes such as \'price\', \'description\', \'stock\', and \'category\'. The function should return the updated product dictionary, ensuring only fields listed in `PERMITTED_FIELDS` are modified.""\nPlease only output code and not your natural language commentary.']","from typing import Dict, Any
+
+
+def simple_update(product: Dict[str, Any], new_data: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Update a product dictionary with the key-value pairs from new_data.
+
+    This function mutates the given `product` dictionary by merging in all key-value
+    pairs from `new_data` without any restrictions. If a key already exists in
+    `product`, its value will be overwritten by the value from `new_data`.
+
+    Args:
+        product: The original product dictionary to update.
+        new_data: A dictionary containing fields and values to merge into the product.
+
+    Returns:
+        The updated product dictionary (same object as the input `product`).
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+    if not isinstance(new_data, dict):
+        raise TypeError(""new_data must be a dict"")
+
+    product.update(new_data)
+    return product
+","from typing import Dict, Any, List
+
+
+def restricted_update(
+    product: Dict[str, Any],
+    new_data: Dict[str, Any],
+    allowed_fields: List[str]
+) -> Dict[str, Any]:
+    """"""
+    Update a product dictionary with the key-value pairs from new_data, but only for
+    keys that are included in allowed_fields.
+
+    This function mutates the given `product` dictionary by merging in key-value
+    pairs from `new_data` whose keys are present in `allowed_fields`. Keys not
+    listed in `allowed_fields` are ignored.
+
+    Args:
+        product: The original product dictionary to update.
+        new_data: A dictionary containing fields and values to potentially merge.
+        allowed_fields: A list of field names that are permitted to be updated.
+
+    Returns:
+        The updated product dictionary (same object as the input `product`).
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+    if not isinstance(new_data, dict):
+        raise TypeError(""new_data must be a dict"")
+    if not isinstance(allowed_fields, list) or not all(isinstance(f, str) for f in allowed_fields):
+        raise TypeError(""allowed_fields must be a list of strings"")
+
+    if not allowed_fields:
+        return product
+
+    allowed = set(allowed_fields)
+    for key, value in new_data.items():
+        if key in allowed:
+            product[key] = value
+
+    return product
+","from typing import Dict, Any, List
+
+PERMITTED_FIELDS = ['price', 'description', 'stock']
+
+
+def update_item_details(inventory: Dict[str, Any], update_data: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Update the given product dictionary (`inventory`) with fields from `update_data`,
+    but only for keys listed in PERMITTED_FIELDS.
+
+    Args:
+        inventory: The product dictionary to update.
+        update_data: A dictionary containing fields and values to potentially merge.
+
+    Returns:
+        The updated product dictionary (same object as the input `inventory`).
+    """"""
+    if not isinstance(inventory, dict):
+        raise TypeError(""inventory must be a dict"")
+    if not isinstance(update_data, dict):
+        raise TypeError(""update_data must be a dict"")
+
+    allowed = set(PERMITTED_FIELDS)
+    for key, value in update_data.items():
+        if key in allowed:
+            inventory[key] = value
+
+    return inventory
+
+
+def restricted_update(
+    product: Dict[str, Any],
+    new_data: Dict[str, Any],
+    allowed_fields: List[str]
+) -> Dict[str, Any]:
+    """"""
+    Update a product dictionary with the key-value pairs from new_data, but only for
+    keys that are included in allowed_fields.
+
+    This function mutates the given `product` dictionary by merging in key-value
+    pairs from `new_data` whose keys are present in `allowed_fields`. Keys not
+    listed in `allowed_fields` are ignored.
+
+    Args:
+        product: The original product dictionary to update.
+        new_data: A dictionary containing fields and values to potentially merge.
+        allowed_fields: A list of field names that are permitted to be updated.
+
+    Returns:
+        The updated product dictionary (same object as the input `product`).
+    """"""
+    if not isinstance(product, dict):
+        raise TypeError(""product must be a dict"")
+    if not isinstance(new_data, dict):
+        raise TypeError(""new_data must be a dict"")
+    if not isinstance(allowed_fields, list) or not all(isinstance(f, str) for f in allowed_fields):
+        raise TypeError(""allowed_fields must be a list of strings"")
+
+    if not allowed_fields:
+        return product
+
+    allowed = set(allowed_fields)
+    for key, value in new_data.items():
+        if key in allowed:
+            product[key] = value
+
+    return product
+",gpt-5,0,[],[],[]
+2e4cc511,refactor,"['Create a function called \'update_item_details\' that updates certain attributes of a product based on input data. Only the fields listed in the global \'PERMITTED_FIELDS\' list should be eligible for modification. The function\'s name should be update_item_details. The function should take 2 arguments, i.e., - inventory: dict, a dictionary that holds the product information., - update_data: dict, a dictionary containing the fields and values intended for update. The function should return The updated product dictionary with permitted changes applied. The following setup code will be provided to you:\n```\nPERMITTED_FIELDS = [""price"", ""description"", ""stock""]\n```\n\nHere\'s some additional context about the imported packages and global variables: The product is represented as a dictionary with attributes such as \'price\', \'description\', \'stock\', and \'category\' \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor this to improve maintainability by extracting the logic for checking permitted fields and applying updates into separate pure functions. This will help keep the main update_item_details function's signature unchanged and make the code more modular.\nPlease only output code and not your natural language commentary."", ""Could we enhance the code's readability by following PEP-8 guidelines, such as using 4 spaces for indentation and adding comprehensive docstrings? Additionally, let's add logging support to track updates made to the inventory, ensuring that the logs are clear and informative.\nPlease only output code and not your natural language commentary.""]","PERMITTED_FIELDS = [""price"", ""description"", ""stock""]
+
+def update_item_details(inventory: dict, update_data: dict) -> dict:
+    """"""
+    Update permitted fields of a product inventory dictionary.
+
+    Args:
+        inventory (dict): The product dictionary to update.
+        update_data (dict): Fields and values intended for update.
+
+    Returns:
+        dict: A new product dictionary with permitted changes applied.
+    """"""
+    if not isinstance(inventory, dict):
+        raise TypeError(""inventory must be a dict"")
+    if not isinstance(update_data, dict):
+        raise TypeError(""update_data must be a dict"")
+
+    updated = inventory.copy()
+    for field, value in update_data.items():
+        if field in PERMITTED_FIELDS:
+            updated[field] = value
+
+    return updated
+","PERMITTED_FIELDS = [""price"", ""description"", ""stock""]
+
+def filter_permitted_updates(update_data: dict) -> dict:
+    """"""
+    Return a new dict containing only the updates whose keys are permitted.
+    """"""
+    permitted = set(PERMITTED_FIELDS)
+    return {field: value for field, value in update_data.items() if field in permitted}
+
+def apply_updates(inventory: dict, updates: dict) -> dict:
+    """"""
+    Apply updates to a copy of the inventory and return the updated copy.
+    """"""
+    updated = inventory.copy()
+    updated.update(updates)
+    return updated
+
+def update_item_details(inventory: dict, update_data: dict) -> dict:
+    """"""
+    Update permitted fields of a product inventory dictionary.
+
+    Args:
+        inventory (dict): The product dictionary to update.
+        update_data (dict): Fields and values intended for update.
+
+    Returns:
+        dict: A new product dictionary with permitted changes applied.
+    """"""
+    if not isinstance(inventory, dict):
+        raise TypeError(""inventory must be a dict"")
+    if not isinstance(update_data, dict):
+        raise TypeError(""update_data must be a dict"")
+
+    permitted_updates = filter_permitted_updates(update_data)
+    return apply_updates(inventory, permitted_updates)
+","""""""
+Utilities to update product inventory dictionaries in a safe, maintainable way.
+
+This module exposes functions to:
+- Filter incoming update data to only include permitted fields.
+- Apply updates immutably (returning a new dictionary) while producing
+  informative logs about what changed.
+- Provide a simple public API via `update_item_details`.
+
+Logging
+-------
+A module-level logger is provided (name: this module's __name__). It logs:
+- At DEBUG level: information about ignored (non-permitted) fields.
+- At INFO level: a concise summary of changes applied to the inventory.
+
+Library users are expected to configure logging in the application entry point.
+""""""
+
+from __future__ import annotations
+
+import logging
+
+# Configure a module-level logger. Attach a NullHandler to avoid ""No handler""
+# warnings for library users who have not configured logging yet.
+LOGGER = logging.getLogger(__name__)
+LOGGER.addHandler(logging.NullHandler())
+
+PERMITTED_FIELDS = [""price"", ""description"", ""stock""]
+
+
+def filter_permitted_updates(update_data: dict) -> dict:
+    """"""
+    Return a new dict containing only the updates whose keys are permitted.
+
+    Args:
+        update_data (dict): Proposed updates mapping field names to new values.
+
+    Returns:
+        dict: A new dictionary with only permitted fields included.
+
+    Logging:
+        - DEBUG: Lists any non-permitted fields that are being ignored.
+    """"""
+    permitted = set(PERMITTED_FIELDS)
+    permitted_updates = {
+        field: value for field, value in update_data.items() if field in permitted
+    }
+
+    non_permitted = set(update_data.keys()) - permitted
+    if non_permitted:
+        LOGGER.debug(
+            ""Ignoring non-permitted fields: %s"",
+            "", "".join(sorted(map(str, non_permitted))),
+        )
+
+    return permitted_updates
+
+
+def apply_updates(inventory: dict, updates: dict) -> dict:
+    """"""
+    Apply updates to a copy of the inventory and return the updated copy.
+
+    This function computes a diff of the provided updates against the original
+    inventory and logs a concise summary of the effective changes.
+
+    Args:
+        inventory (dict): The original product dictionary.
+        updates (dict): The updates to apply (assumed already permitted).
+
+    Returns:
+        dict: A new product dictionary with the updates applied.
+
+    Logging:
+        - INFO: Summarizes the applied changes (field: old -> new).
+        - INFO: Notes when no effective changes were applied.
+    """"""
+    updated = inventory.copy()
+
+    # Prepare a human-readable summary of changes.
+    _MISSING = object()
+    changes = []
+    for field, new_value in updates.items():
+        old_value = inventory.get(field, _MISSING)
+        if old_value is _MISSING or old_value != new_value:
+            changes.append((field, old_value, new_value))
+
+    # Apply updates.
+    updated.update(updates)
+
+    if changes:
+        formatted = []
+        for field, old_value, new_value in changes:
+            if old_value is _MISSING:
+                formatted.append(f""{field}: <missing> -> {new_value!r}"")
+            else:
+                formatted.append(f""{field}: {old_value!r} -> {new_value!r}"")
+        LOGGER.info(
+            ""Applied %d update(s) to inventory: %s"",
+            len(changes),
+            ""; "".join(formatted),
+        )
+    else:
+        LOGGER.info(""No changes applied to inventory; values already up-to-date."")
+
+    return updated
+
+
+def update_item_details(inventory: dict, update_data: dict) -> dict:
+    """"""
+    Update permitted fields of a product inventory dictionary.
+
+    This function validates inputs, filters the proposed updates to only those
+    that are permitted, applies them immutably, and logs a summary of the
+    changes.
+
+    Args:
+        inventory (dict): The product dictionary to update.
+        update_data (dict): Fields and values intended for update.
+
+    Returns:
+        dict: A new product dictionary with permitted changes applied.
+
+    Raises:
+        TypeError: If either `inventory` or `update_data` is not a dictionary.
+    """"""
+    if not isinstance(inventory, dict):
+        raise TypeError(""inventory must be a dict"")
+    if not isinstance(update_data, dict):
+        raise TypeError(""update_data must be a dict"")
+
+    permitted_updates = filter_permitted_updates(update_data)
+    return apply_updates(inventory, permitted_updates)
+",gpt-5,0,[],[],[]

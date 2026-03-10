@@ -1,0 +1,2555 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+aa4af249,expansion,"[""I'm working on a data analysis project and need a foundational function to extract specific fields from a dataset. Could you help me write a function called select_columns that takes a list of records (dictionaries) and a list of field names (strings), then returns a list of dictionaries with only those specified fields? The function should handle cases where fields might not exist in the records gracefully. Please incorporate the necessary import for the collections module:\n\n```python\nfrom collections import defaultdict\n```\nPlease only output code and not your natural language commentary."", 'Thanks for setting up the column extraction. Now, I want to add a filtering feature to narrow down data based on specific conditions. Could you create a function called apply_filter that takes a list of records and a condition (implemented as a callable), then returns a list of records that meet this condition? The function should handle logical operations supported by Python. Please add the necessary import:\n\n```python\nfrom typing import Callable, List, Dict\n```\nPlease only output code and not your natural language commentary.', ""To complete the data analysis tool, I need a full SQL-like query execution capability. Could you develop a function named process_sql_request that processes SQL-like commands, including SELECT, WHERE, and ORDER BY clauses? It should take two arguments: `dataset_records`, a list of dictionaries, and `sql_statement`, a string with the query. The function should return a list of dictionaries containing the query results and raise ValueError if the query is malformed or fails. Below is the required setup code:\n\n```python\nimport re\nimport operator\nfrom functools import partial\n```\n\nHere's some additional context about the imported packages and global variables: Modules to consider:, - re: For regex-based query parsing, - operator: For logical and comparison operations, - functools: Useful for creating higher-order operations\nPlease only output code and not your natural language commentary.""]","from collections import defaultdict
+from typing import Any, Dict, Iterable, List
+
+
+def select_columns(records: Iterable[Dict[str, Any]], fields: Iterable[str]) -> List[Dict[str, Any]]:
+    """"""
+    Create a list of dictionaries for the given records with only the specified fields.
+    If a field is missing in a record, its value will be None in the result.
+    """"""
+    field_list = list(fields)
+    result: List[Dict[str, Any]] = []
+
+    for record in records or []:
+        row = defaultdict(lambda: None)
+        if isinstance(record, dict):
+            for f in field_list:
+                row[f] = record.get(f, None)
+        else:
+            # For non-dict records, still return all requested fields as None
+            for f in field_list:
+                row[f] = None
+        result.append(dict(row))
+
+    return result
+","from collections import defaultdict
+from typing import Any, Dict, Iterable, List, Callable
+
+
+def select_columns(records: Iterable[Dict[str, Any]], fields: Iterable[str]) -> List[Dict[str, Any]]:
+    """"""
+    Create a list of dictionaries for the given records with only the specified fields.
+    If a field is missing in a record, its value will be None in the result.
+    """"""
+    field_list = list(fields)
+    result: List[Dict[str, Any]] = []
+
+    for record in records or []:
+        row = defaultdict(lambda: None)
+        if isinstance(record, dict):
+            for f in field_list:
+                row[f] = record.get(f, None)
+        else:
+            # For non-dict records, still return all requested fields as None
+            for f in field_list:
+                row[f] = None
+        result.append(dict(row))
+
+    return result
+
+
+def apply_filter(records: Iterable[Dict[str, Any]], condition: Callable[[Dict[str, Any]], bool]) -> List[Dict[str, Any]]:
+    """"""
+    Filter a sequence of records (dicts) using the provided condition callable.
+    The callable should accept a single record and return a truthy value to include it.
+    If records is None, returns an empty list.
+    If condition is None, returns a list copy of the input records.
+    """"""
+    if records is None:
+        return []
+    if condition is None:
+        return list(records)
+
+    result: List[Dict[str, Any]] = []
+    for record in records:
+        if condition(record):
+            result.append(record)
+    return result
+","import re
+import operator
+from functools import partial
+from collections import defaultdict
+from typing import Any, Dict, Iterable, List, Callable, Tuple, Optional
+
+
+def select_columns(records: Iterable[Dict[str, Any]], fields: Iterable[str]) -> List[Dict[str, Any]]:
+    """"""
+    Create a list of dictionaries for the given records with only the specified fields.
+    If a field is missing in a record, its value will be None in the result.
+    """"""
+    field_list = list(fields)
+    result: List[Dict[str, Any]] = []
+
+    for record in records or []:
+        row = defaultdict(lambda: None)
+        if isinstance(record, dict):
+            for f in field_list:
+                row[f] = record.get(f, None)
+        else:
+            # For non-dict records, still return all requested fields as None
+            for f in field_list:
+                row[f] = None
+        result.append(dict(row))
+
+    return result
+
+
+def apply_filter(records: Iterable[Dict[str, Any]], condition: Callable[[Dict[str, Any]], bool]) -> List[Dict[str, Any]]:
+    """"""
+    Filter a sequence of records (dicts) using the provided condition callable.
+    The callable should accept a single record and return a truthy value to include it.
+    If records is None, returns an empty list.
+    If condition is None, returns a list copy of the input records.
+    """"""
+    if records is None:
+        return []
+    if condition is None:
+        return list(records)
+
+    result: List[Dict[str, Any]] = []
+    for record in records:
+        if condition(record):
+            result.append(record)
+    return result
+
+
+def process_sql_request(dataset_records: List[Dict[str, Any]], sql_statement: str) -> List[Dict[str, Any]]:
+    """"""
+    Process a minimal SQL-like statement supporting:
+      - SELECT <fields> (comma-separated or *)
+      - optional FROM <identifier> (ignored; data comes from dataset_records)
+      - optional WHERE <boolean expression with comparisons and AND/OR/NOT>
+      - optional ORDER BY <field [ASC|DESC], ...>
+
+    Returns a list of dictionaries as the query result.
+    Raises ValueError if the query is malformed or evaluation fails.
+    """"""
+
+    def _parse_sql(sql: str) -> Tuple[Optional[List[str]], Optional[str], List[Tuple[str, bool]]]:
+        # Remove trailing semicolon and normalize whitespace at ends
+        s = (sql or """").strip().rstrip("";"").strip()
+        if not s or not re.match(r""(?is)^\s*SELECT\b"", s):
+            raise ValueError(""Query must start with SELECT"")
+
+        # Regex to capture SELECT, optional FROM, optional WHERE, optional ORDER BY
+        # Non-greedy for each segment to stop at the next clause.
+        pattern = re.compile(
+            r""""""
+            ^\s*SELECT\s+(?P<select>.+?)
+            (?:\s+FROM\s+(?P<from>[A-Za-z_][\w]*)\s*)?
+            (?:\s+WHERE\s+(?P<where>.+?))?
+            (?:\s+ORDER\s+BY\s+(?P<order>.+))?
+            \s*$"""""",
+            re.IGNORECASE | re.VERBOSE | re.DOTALL,
+        )
+        m = pattern.match(s)
+        if not m:
+            raise ValueError(""Malformed SQL statement"")
+
+        select_part = (m.group(""select"") or """").strip()
+        where_part = (m.group(""where"") or """").strip() or None
+        order_part = (m.group(""order"") or """").strip() or None
+
+        # Parse select fields
+        if select_part == ""*"":
+            select_fields = None  # means all fields
+        else:
+            select_fields = [f.strip() for f in select_part.split("","") if f.strip()]
+            if not select_fields:
+                raise ValueError(""SELECT clause is empty"")
+
+        # Parse ORDER BY
+        order_by: List[Tuple[str, bool]] = []
+        if order_part:
+            for item in [p.strip() for p in order_part.split("","") if p.strip()]:
+                m2 = re.match(r""^([A-Za-z_][\w]*)\s*(ASC|DESC)?$"", item, re.IGNORECASE)
+                if not m2:
+                    raise ValueError(f""Invalid ORDER BY item: {item}"")
+                field = m2.group(1)
+                direction = (m2.group(2) or ""ASC"").upper()
+                order_by.append((field, direction == ""ASC""))
+
+        return select_fields, where_part, order_by
+
+    # WHERE expression parsing and evaluation
+    TOKEN_SPEC = re.compile(
+        r""""""
+        \s*(?:
+            (?P<NUMBER>\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)
+          | (?P<STRING>'(?:[^']|'')*')
+          | (?P<AND>\bAND\b)
+          | (?P<OR>\bOR\b)
+          | (?P<NOT>\bNOT\b)
+          | (?P<OP><=|>=|!=|=|<|>)
+          | (?P<LPAREN>\()
+          | (?P<RPAREN>\))
+          | (?P<IDENT>[A-Za-z_][A-Za-z0-9_]*)
+        )"""""",
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    def _tokenize_where(expr: str) -> List[Tuple[str, Any]]:
+        tokens: List[Tuple[str, Any]] = []
+        pos = 0
+        n = len(expr)
+        while pos < n:
+            m = TOKEN_SPEC.match(expr, pos)
+            if not m:
+                # Check if it's just whitespace remaining
+                if expr[pos:].strip() == """":
+                    break
+                raise ValueError(f""Invalid token near: {expr[pos:pos+20]!r}"")
+            pos = m.end()
+            kind = m.lastgroup
+            text = m.group(kind)
+            if kind == ""NUMBER"":
+                if any(c in text for c in "".eE""):
+                    value: Any = float(text)
+                else:
+                    value = int(text)
+                tokens.append((""NUMBER"", value))
+            elif kind == ""STRING"":
+                # strip quotes and unescape doubled quotes
+                val = text[1:-1].replace(""''"", ""'"")
+                tokens.append((""STRING"", val))
+            elif kind == ""IDENT"":
+                tokens.append((""IDENT"", m.group(kind)))
+            elif kind == ""OP"":
+                op = text
+                if op == ""="":
+                    op = ""==""
+                tokens.append((""CMP"", op))
+            elif kind in (""AND"", ""OR"", ""NOT""):
+                tokens.append((kind.upper(), kind.upper()))
+            elif kind == ""LPAREN"":
+                tokens.append((""LPAREN"", ""(""))
+            elif kind == ""RPAREN"":
+                tokens.append((""RPAREN"", "")""))
+            else:
+                # Should not reach
+                raise ValueError(f""Unhandled token: {text}"")
+        return tokens
+
+    # Operator precedence and associativity
+    PRECEDENCE = {
+        ""OR"": (0, ""left"", 2),
+        ""AND"": (1, ""left"", 2),
+        ""CMP"": (2, ""left"", 2),  # all comparison operators
+        ""NOT"": (3, ""right"", 1),
+    }
+
+    def _to_rpn(tokens: List[Tuple[str, Any]]) -> List[Tuple[str, Any]]:
+        output: List[Tuple[str, Any]] = []
+        stack: List[Tuple[str, Any]] = []
+        for ttype, tval in tokens:
+            if ttype in (""NUMBER"", ""STRING"", ""IDENT""):
+                output.append((ttype, tval))
+            elif ttype in (""AND"", ""OR"", ""NOT"", ""CMP""):
+                prec_t, assoc_t, _ = PRECEDENCE[ttype]
+                while stack:
+                    top_type, top_val = stack[-1]
+                    if top_type in (""AND"", ""OR"", ""NOT"", ""CMP""):
+                        prec_s, assoc_s, _arity_s = PRECEDENCE[top_type]
+                        if (assoc_t == ""left"" and prec_t <= prec_s) or (assoc_t == ""right"" and prec_t < prec_s):
+                            output.append(stack.pop())
+                            continue
+                    break
+                stack.append((ttype, tval))
+            elif ttype == ""LPAREN"":
+                stack.append((ttype, tval))
+            elif ttype == ""RPAREN"":
+                found_lparen = False
+                while stack:
+                    top = stack.pop()
+                    if top[0] == ""LPAREN"":
+                        found_lparen = True
+                        break
+                    output.append(top)
+                if not found_lparen:
+                    raise ValueError(""Mismatched parentheses"")
+            else:
+                raise ValueError(f""Unexpected token: {ttype}"")
+        while stack:
+            top = stack.pop()
+            if top[0] in (""LPAREN"", ""RPAREN""):
+                raise ValueError(""Mismatched parentheses"")
+            output.append(top)
+        return output
+
+    CMP_FUNCS: Dict[str, Callable[[Any, Any], bool]] = {
+        ""=="": operator.eq,
+        ""!="": operator.ne,
+        ""<"": operator.lt,
+        ""<="": operator.le,
+        "">"": operator.gt,
+        "">="": operator.ge,
+    }
+
+    def _safe_compare(op: str, left: Any, right: Any) -> bool:
+        # Equality works for None; relational comparisons with None -> False
+        if op in (""=="", ""!=""):
+            return CMP_FUNCS[op](left, right)
+        if left is None or right is None:
+            return False
+        try:
+            return CMP_FUNCS[op](left, right)
+        except TypeError:
+            # Try string comparison as a fallback
+            try:
+                return CMP_FUNCS[op](str(left), str(right))
+            except Exception:
+                return False
+
+    def _eval_rpn(rpn: List[Tuple[str, Any]], record: Dict[str, Any]) -> bool:
+        stack_eval: List[Any] = []
+        for ttype, tval in rpn:
+            if ttype == ""NUMBER"":
+                stack_eval.append(tval)
+            elif ttype == ""STRING"":
+                stack_eval.append(tval)
+            elif ttype == ""IDENT"":
+                stack_eval.append(record.get(tval))
+            elif ttype == ""NOT"":
+                if not stack_eval:
+                    raise ValueError(""NOT missing operand"")
+                a = stack_eval.pop()
+                stack_eval.append(not bool(a))
+            elif ttype == ""AND"":
+                if len(stack_eval) < 2:
+                    raise ValueError(""AND missing operands"")
+                b = stack_eval.pop()
+                a = stack_eval.pop()
+                stack_eval.append(bool(a) and bool(b))
+            elif ttype == ""OR"":
+                if len(stack_eval) < 2:
+                    raise ValueError(""OR missing operands"")
+                b = stack_eval.pop()
+                a = stack_eval.pop()
+                stack_eval.append(bool(a) or bool(b))
+            elif ttype == ""CMP"":
+                if len(stack_eval) < 2:
+                    raise ValueError(""Comparison missing operands"")
+                right = stack_eval.pop()
+                left = stack_eval.pop()
+                stack_eval.append(_safe_compare(tval, left, right))
+            else:
+                raise ValueError(f""Unexpected token during evaluation: {ttype}"")
+        if len(stack_eval) != 1:
+            raise ValueError(""Invalid WHERE expression"")
+        return bool(stack_eval[0])
+
+    def _compile_where(expr: Optional[str]) -> Optional[List[Tuple[str, Any]]]:
+        if not expr:
+            return None
+        tokens = _tokenize_where(expr)
+        return _to_rpn(tokens)
+
+    def _order_key_for_field(record: Dict[str, Any], field: str):
+        v = record.get(field)
+        if v is None:
+            return (1, 0, None)  # place None last for ASC by default
+        if isinstance(v, (int, float)):
+            return (0, 0, v)
+        if isinstance(v, str):
+            return (0, 1, v)
+        return (0, 2, str(v))
+
+    try:
+        select_fields, where_expr, order_by = _parse_sql(sql_statement)
+        records = list(dataset_records or [])
+
+        # WHERE filtering
+        rpn = _compile_where(where_expr)
+        if rpn:
+            cond = lambda rec: _eval_rpn(rpn, rec)
+            records = apply_filter(records, cond)
+
+        # ORDER BY sorting (stable multi-key)
+        if order_by:
+            for field, asc in reversed(order_by):
+                key_func = partial(_order_key_for_field, field=field)
+                records.sort(key=key_func, reverse=not asc)
+
+        # SELECT projection
+        if select_fields is None:
+            # Return shallow copies to avoid accidental mutation of original records
+            return [dict(r) for r in records]
+        else:
+            return select_columns(records, select_fields)
+
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f""Failed to process SQL statement: {exc}"") from exc
+",gpt-5,0,[],[],[]
+aa4af249,editing,"['""I\'m trying to work with a dataset represented as a list of dictionaries, and I need a function called \'check_fields\' that can take this dataset and a list of field names. The function should return a boolean depending on whether or not there are fields matching these names. This will help me focus on the relevant data fields.""\nPlease only output code and not your natural language commentary.\nOnly generate the function, not the example usage code, etc.\n', '""I also need to filter these records based on certain conditions. Could you help me extend the \'check_fields\' function to include a filtering capability? Let\'s add a parameter for conditions, which will be a dictionary specifying the field and the value it should match. The function should return a boolean that shows if we match those conditions""\nPlease only output code and not your natural language commentary.\nOnly generate the function, not the example usage code, etc.\n', '""Actually, I need a more comprehensive solution. Can we create a function called \'process_sql_request\'? It should take \'dataset_records\' (a list of dictionaries representing a dataset) and \'sql_statement\' (a string with a SQL-like query) as parameters. The task here is to parse and execute queries, returning results as a list of dictionaries. If the query is malformed or fails during execution, it should raise a ValueError. Here’s the setup code, which needs to be part of the solution:\n```\nimport re\nimport operator\nfrom functools import partial\n```\nHere\'s some additional context about the imported packages and global variables: Modules to consider:, - re: For regex-based query parsing, - operator: For logical and comparison operations, - functools: Useful for creating higher-order operations""\nPlease only output code and not your natural language commentary.\nOnly generate the function, not the example usage code, etc.\n']","def check_fields(dataset, field_names):
+    """"""
+    Return True if any of the provided field_names appear as keys
+    in any record (dict-like) in the dataset; otherwise False.
+
+    Parameters:
+    - dataset: iterable of dictionaries (or dict-like objects)
+    - field_names: iterable of field names to look for
+
+    Notes:
+    - If field_names is empty or None, returns False.
+    - Non-mapping items in the dataset are ignored.
+    """"""
+    if not field_names:
+        return False
+
+    target_fields = set(field_names)
+    if not target_fields:
+        return False
+
+    all_fields = set()
+    if dataset:
+        for record in dataset:
+            if hasattr(record, ""keys""):
+                all_fields.update(record.keys())
+
+    return not all_fields.isdisjoint(target_fields)
+","def check_fields(dataset, field_names, conditions=None):
+    """"""
+    Return a boolean based on field presence, optionally filtered by conditions.
+
+    - If 'conditions' is provided (dict), only records where all condition
+      key/value pairs match are considered.
+    - If 'field_names' is provided and non-empty, returns True if any of the
+      considered records contain at least one of the specified field names.
+    - If 'field_names' is empty or None but 'conditions' are provided, returns
+      True if any record matches the conditions.
+    - If both 'field_names' and 'conditions' are empty/None, returns False.
+
+    Parameters:
+    - dataset: iterable of dictionaries (or dict-like objects)
+    - field_names: iterable of field names to look for
+    - conditions: dict of field -> value that records must match
+    """"""
+    if dataset is None:
+        return False
+
+    target_fields = set(field_names) if field_names else set()
+    cond_items = tuple(conditions.items()) if conditions else ()
+
+    # If no constraints at all, nothing to check
+    if not target_fields and not cond_items:
+        return False
+
+    for record in dataset:
+        if not hasattr(record, ""keys""):
+            continue
+
+        # Apply conditions if provided
+        if cond_items and not all((k in record and record[k] == v) for k, v in cond_items):
+            continue
+
+        # If we're only filtering by conditions and no field constraint
+        if not target_fields:
+            return True
+
+        # Check for presence of any target field in the (filtered) record
+        if not set(record.keys()).isdisjoint(target_fields):
+            return True
+
+    return False
+","import re
+import operator
+from functools import partial
+
+def check_fields(dataset, field_names, conditions=None):
+    """"""
+    Return a boolean based on field presence, optionally filtered by conditions.
+
+    - If 'conditions' is provided (dict), only records where all condition
+      key/value pairs match are considered.
+    - If 'field_names' is provided and non-empty, returns True if any of the
+      considered records contain at least one of the specified field names.
+    - If 'field_names' is empty or None but 'conditions' are provided, returns
+      True if any record matches the conditions.
+    - If both 'field_names' and 'conditions' are empty/None, returns False.
+
+    Parameters:
+    - dataset: iterable of dictionaries (or dict-like objects)
+    - field_names: iterable of field names to look for
+    - conditions: dict of field -> value that records must match
+    """"""
+    if dataset is None:
+        return False
+
+    target_fields = set(field_names) if field_names else set()
+    cond_items = tuple(conditions.items()) if conditions else ()
+
+    # If no constraints at all, nothing to check
+    if not target_fields and not cond_items:
+        return False
+
+    for record in dataset:
+        if not hasattr(record, ""keys""):
+            continue
+
+        # Apply conditions if provided
+        if cond_items and not all((k in record and record[k] == v) for k, v in cond_items):
+            continue
+
+        # If we're only filtering by conditions and no field constraint
+        if not target_fields:
+            return True
+
+        # Check for presence of any target field in the (filtered) record
+        if not set(record.keys()).isdisjoint(target_fields):
+            return True
+
+    return False
+
+
+def process_sql_request(dataset_records, sql_statement):
+    """"""
+    Parse and execute a very small subset of SQL against a list of dictionaries.
+
+    Supported grammar (case-insensitive):
+      SELECT <fields> FROM <identifier> [WHERE <expr>];
+
+    - <fields>: '*' or comma-separated identifiers (no aliases).
+    - <expr>: comparisons joined by AND/OR with optional parentheses.
+              Atomic predicate: <identifier> <op> <literal>
+              Ops: =, !=, <, <=, >, >=, LIKE, ILIKE, =~
+              Literals: 'string', ""string"", numbers, TRUE/FALSE, NULL
+      LIKE uses % (any chars) and _ (single char). ILIKE is case-insensitive LIKE.
+      =~ treats the literal as a regular expression pattern.
+
+    Returns a list of dictionaries (projected fields). Raises ValueError
+    for malformed SQL or execution errors.
+    """"""
+    try:
+        if not isinstance(sql_statement, str) or not sql_statement.strip():
+            raise ValueError(""SQL statement must be a non-empty string"")
+        if dataset_records is None:
+            dataset_records = []
+
+        # Parse top-level SELECT ... FROM ... [WHERE ...]
+        select_re = re.compile(
+            r""^\s*SELECT\s+(?P<select>.+?)\s+FROM\s+(?P<table>[A-Za-z_][A-Za-z0-9_]*)\s*(?:WHERE\s+(?P<where>.+?))?\s*;?\s*$"",
+            re.IGNORECASE | re.DOTALL,
+        )
+        m = select_re.match(sql_statement)
+        if not m:
+            raise ValueError(""Malformed SQL: expected 'SELECT ... FROM ... [WHERE ...]'"")
+
+        select_part = m.group(""select"").strip()
+        where_part = m.group(""where"")
+        # table_name = m.group(""table"")  # Present but not used
+
+        # Parse select fields
+        def _split_fields(s):
+            fields = []
+            buf = []
+            quote = None
+            esc = False
+            for ch in s:
+                if quote:
+                    if esc:
+                        buf.append(ch)
+                        esc = False
+                    elif ch == ""\\"":
+                        esc = True
+                    elif ch == quote:
+                        quote = None
+                    else:
+                        buf.append(ch)
+                else:
+                    if ch in (""'"", '""'):
+                        quote = ch
+                    elif ch == "","":
+                        field = """".join(buf).strip()
+                        if field:
+                            fields.append(field)
+                        buf = []
+                    else:
+                        buf.append(ch)
+            last = """".join(buf).strip()
+            if last:
+                fields.append(last)
+            return fields
+
+        if select_part == ""*"":
+            selected_fields = None  # project all fields
+        else:
+            selected_fields = [f.strip() for f in _split_fields(select_part)]
+            if not selected_fields or any(not f or re.search(r""\s"", f) for f in selected_fields):
+                # very simple validation: no whitespace inside identifiers
+                raise ValueError(""Malformed SQL: invalid SELECT field list"")
+
+        # WHERE parsing and predicate building
+        def _parse_literal(tok_type, tok_val):
+            if tok_type == ""number"":
+                return float(tok_val) if ""."" in tok_val else int(tok_val)
+            if tok_type == ""bool"":
+                return tok_val.upper() == ""TRUE""
+            if tok_type == ""null"":
+                return None
+            if tok_type == ""string"":
+                if tok_val[0] == ""'"" and tok_val[-1] == ""'"":
+                    body = tok_val[1:-1]
+                    return body.replace(""\\'"", ""'"").replace('\\""', '""').replace(""\\\\"", ""\\"")
+                if tok_val[0] == '""' and tok_val[-1] == '""':
+                    body = tok_val[1:-1]
+                    return body.replace('\\""', '""').replace(""\\'"", ""'"").replace(""\\\\"", ""\\"")
+                return tok_val
+            # Treat bare identifiers on RHS as string literals
+            return tok_val
+
+        token_re = re.compile(
+            r""""""
+            \s*(
+                (?P<lparen>\()|
+                (?P<rparen>\))|
+                (?P<and>AND\b)|
+                (?P<or>OR\b)|
+                (?P<op><=|>=|!=|=|<|>|ILIKE\b|LIKE\b|=~)|
+                (?P<number>\d+\.\d+|\d+)|
+                (?P<bool>TRUE\b|FALSE\b)|
+                (?P<null>NULL\b)|
+                (?P<string>'(?:\\'|[^'])*'|""(?:\\""|[^""])*"")|
+                (?P<identifier>[A-Za-z_][A-Za-z0-9_]*)
+            )
+            """""",
+            re.IGNORECASE | re.VERBOSE,
+        )
+
+        def _tokenize(s):
+            tokens = []
+            pos = 0
+            while pos < len(s):
+                m = token_re.match(s, pos)
+                if not m:
+                    raise ValueError(f""Malformed WHERE clause near: {s[pos:].strip()[:20]}"")
+                pos = m.end()
+                for kind, val in m.groupdict().items():
+                    if val is not None:
+                        tokens.append((kind, val))
+                        break
+            return tokens
+
+        def _like_to_regex(pat):
+            # Escape regex meta, then replace SQL wildcards
+            esc = re.escape(str(pat))
+            esc = esc.replace(r""\%"", "".*"").replace(r""\_"", ""."")
+            return ""^"" + esc + ""$""
+
+        def _build_predicate(where_str):
+            if not where_str or not where_str.strip():
+                return lambda rec: True
+
+            tokens = _tokenize(where_str)
+
+            # Shunting-yard: build RPN where operands are predicate functions
+            output = []
+            op_stack = []
+
+            def prec(op):
+                return 2 if op == ""AND"" else 1  # AND > OR
+
+            i = 0
+
+            def parse_atom(idx):
+                # expects: IDENT OP LIT
+                if idx >= len(tokens) or tokens[idx][0] != ""identifier"":
+                    raise ValueError(""Malformed WHERE: expected identifier"")
+                field = tokens[idx][1]
+                idx += 1
+                if idx >= len(tokens) or tokens[idx][0] != ""op"":
+                    # Handle spelled operators LIKE/ILIKE which also land in 'op'
+                    if idx < len(tokens) and tokens[idx][0] in (""like"", ""ilike""):
+                        op_str = tokens[idx][1].upper()
+                    else:
+                        raise ValueError(""Malformed WHERE: expected operator"")
+                op_tok = tokens[idx]
+                op_str = op_tok[1].upper()
+                idx += 1
+                if idx >= len(tokens):
+                    raise ValueError(""Malformed WHERE: missing literal after operator"")
+                lit_tok = tokens[idx]
+                if lit_tok[0] not in (""string"", ""number"", ""bool"", ""null"", ""identifier""):
+                    raise ValueError(""Malformed WHERE: invalid literal"")
+                lit_val = _parse_literal(lit_tok[0], lit_tok[1])
+                idx += 1
+
+                # Build predicate function for this atom
+                if op_str in (""LIKE"", ""ILIKE""):
+                    regex = _like_to_regex(lit_val)
+                    flags = re.IGNORECASE if op_str == ""ILIKE"" else 0
+                    rx = re.compile(regex, flags)
+
+                    def _pred(rec, key=field, matcher=rx):
+                        v = rec.get(key, None) if hasattr(rec, ""get"") else None
+                        if v is None:
+                            return False
+                        return bool(matcher.match(str(v)))
+                    pred = _pred
+                elif op_str == ""=~"":
+                    try:
+                        rx = re.compile(str(lit_val))
+                    except re.error as e:
+                        raise ValueError(f""Invalid regex pattern: {lit_val}"") from e
+
+                    def _pred(rec, key=field, matcher=rx):
+                        v = rec.get(key, None) if hasattr(rec, ""get"") else None
+                        if v is None:
+                            return False
+                        return bool(matcher.search(str(v)))
+                    pred = _pred
+                else:
+                    cmp_map = {
+                        ""="": operator.eq,
+                        ""!="": operator.ne,
+                        ""<"": operator.lt,
+                        ""<="": operator.le,
+                        "">"": operator.gt,
+                        "">="": operator.ge,
+                    }
+                    if op_str not in cmp_map:
+                        raise ValueError(f""Unsupported operator: {op_str}"")
+                    cmp_op = cmp_map[op_str]
+
+                    def _pred(rec, key=field, rhs=lit_val, opf=cmp_op):
+                        v = rec.get(key, None) if hasattr(rec, ""get"") else None
+                        # NULL semantics: only '=' and '!=' are meaningful with None
+                        if rhs is None:
+                            if opf is operator.eq:
+                                return v is None
+                            if opf is operator.ne:
+                                return v is not None
+                            return False
+                        if v is None:
+                            return False
+                        try:
+                            return opf(v, rhs)
+                        except Exception:
+                            return False
+
+                    pred = _pred
+
+                return pred, idx
+
+            expecting_operand = True
+            while i < len(tokens):
+                kind, val = tokens[i]
+                if expecting_operand:
+                    if kind == ""lparen"":
+                        op_stack.append((""lparen"", ""(""))
+                        i += 1
+                    elif kind == ""identifier"":
+                        pred, i = parse_atom(i)
+                        output.append((""pred"", pred))
+                        expecting_operand = False
+                    else:
+                        raise ValueError(""Malformed WHERE: expected predicate or '('"")
+                else:
+                    if kind in (""and"", ""or""):
+                        op = val.upper()
+                        while op_stack and op_stack[-1][0] in (""and"", ""or"") and prec(op_stack[-1][0].upper()) >= prec(op):
+                            output.append(op_stack.pop())
+                        op_stack.append((op.lower(), op))
+                        i += 1
+                        expecting_operand = True
+                    elif kind == ""rparen"":
+                        while op_stack and op_stack[-1][0] != ""lparen"":
+                            output.append(op_stack.pop())
+                        if not op_stack or op_stack[-1][0] != ""lparen"":
+                            raise ValueError(""Malformed WHERE: unmatched ')'"")
+                        op_stack.pop()  # discard '('
+                        i += 1
+                    else:
+                        raise ValueError(""Malformed WHERE: expected AND/OR or ')'"")
+            if expecting_operand:
+                raise ValueError(""Malformed WHERE: dangling operator"")
+
+            while op_stack:
+                top = op_stack.pop()
+                if top[0] == ""lparen"":
+                    raise ValueError(""Malformed WHERE: unmatched '('"")
+                output.append(top)
+
+            # Build composite predicate from RPN
+            def combine_and(f, g):
+                return lambda rec: f(rec) and g(rec)
+
+            def combine_or(f, g):
+                return lambda rec: f(rec) or g(rec)
+
+            stack = []
+            for item in output:
+                if item[0] == ""pred"":
+                    stack.append(item[1])
+                elif item[0] in (""and"", ""or""):
+                    if len(stack) < 2:
+                        raise ValueError(""Malformed WHERE: invalid boolean expression"")
+                    right = stack.pop()
+                    left = stack.pop()
+                    stack.append(combine_and(left, right) if item[0] == ""and"" else combine_or(left, right))
+                else:
+                    raise ValueError(""Malformed WHERE: unexpected token in evaluation"")
+            if len(stack) != 1:
+                raise ValueError(""Malformed WHERE: invalid expression"")
+            return stack[0]
+
+        predicate = _build_predicate(where_part)
+
+        # Execute: filter and project
+        results = []
+        for rec in dataset_records:
+            if not hasattr(rec, ""keys""):
+                continue
+            if not predicate(rec):
+                continue
+            if selected_fields is None:
+                # SELECT *
+                results.append(dict(rec))
+            else:
+                results.append({f: rec.get(f, None) for f in selected_fields})
+
+        return results
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(str(e)) from e
+",gpt-5,0,[],[],[]
+aa4af249,refactor,"[""Develop a function to process a custom SQL-like query on data represented as a list of dictionaries. The function should handle commonly used clauses such as SELECT, WHERE, and ORDER BY. The function's name should be process_sql_request. The function should take 2 arguments, i.e., - dataset_records: A list of dictionaries where each dictionary represents a record in the dataset, - sql_statement: A string containing the SQL-like query to be executed. The function should return A list containing dictionaries that represent the results of the executed query. The function should raise - ValueError: Raised if the query is not correctly formed or execution fails. The following setup code will be provided to you:\n```\nimport re\nimport operator\nfrom functools import partial\n```\n\nHere's some additional context about the imported packages and global variables: Modules to consider:, - re: For regex-based query parsing, - operator: For logical and comparison operations, - functools: Useful for creating higher-order operations \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this using the pipeline pattern. Could we extract the query parsing and execution into separate pure functions while maintaining the main process_sql_request function's signature? This would make each operation more testable and maintainable.\nPlease only output code and not your natural language commentary."", 'Can you add logging support initialized from within `process_sql_request` to keep track of all the queries and their results? Ensure that the logging is clear and human-readable, capturing details like the raw query, operations performed, and the final result.\nPlease only output code and not your natural language commentary.']","import re
+import operator
+from functools import partial
+
+class _Token:
+    def __init__(self, typ, value, pos):
+        self.type = typ
+        self.value = value
+        self.pos = pos
+
+    def __repr__(self):
+        return f""_Token({self.type}, {self.value}, {self.pos})""
+
+
+def _tokenize_where(expr):
+    token_spec = [
+        (""SKIP"", r""[ \t\r\n]+""),
+        (""LPAREN"", r""\(""),
+        (""RPAREN"", r""\)""),
+        (""COMMA"", r"",""),
+        (""OP"", r""<=|>=|<>|!=|=|<|>""),
+        (""STRING"", r""'(?:\\.|[^'])*'""),
+        (""NUMBER"", r""\d+(?:\.\d+)?""),
+        (""NAME"", r""[A-Za-z_][A-Za-z0-9_\.]*""),
+    ]
+    tok_regex = ""|"".join(f""(?P<{name}>{pattern})"" for name, pattern in token_spec)
+    keywords = {""AND"", ""OR"", ""NOT"", ""IS"", ""NULL"", ""IN"", ""LIKE"", ""TRUE"", ""FALSE""}
+    tokens = []
+    for m in re.finditer(tok_regex, expr):
+        kind = m.lastgroup
+        value = m.group()
+        pos = m.start()
+        if kind == ""SKIP"":
+            continue
+        if kind == ""NAME"":
+            upper_val = value.upper()
+            if upper_val in keywords:
+                kind = upper_val
+                value = upper_val
+        tokens.append(_Token(kind, value, pos))
+    return tokens
+
+
+def _unescape_sql_string(s):
+    # Strip surrounding single quotes and unescape common sequences
+    assert s[0] == ""'"" and s[-1] == ""'""
+    inner = s[1:-1]
+    # Replace escaped sequences
+    inner = inner.replace(r""\'"", ""'"").replace(r""\\"", ""\\"")
+    inner = inner.replace(r""\n"", ""\n"").replace(r""\t"", ""\t"").replace(r""\r"", ""\r"")
+    return inner
+
+
+def _to_number(value_str):
+    if ""."" in value_str:
+        try:
+            return float(value_str)
+        except ValueError:
+            return value_str
+    try:
+        return int(value_str)
+    except ValueError:
+        return value_str
+
+
+def _get_field_value(record, field):
+    # Support dotted paths for nested dicts
+    parts = field.split(""."")
+    cur = record
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        if p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _coerce_for_compare(lhs, rhs):
+    # Try to coerce rhs to type of lhs for meaningful comparison
+    if lhs is None:
+        return None, None
+    if isinstance(lhs, bool):
+        # Consider 'true'/'false' strings or 1/0 numbers
+        if isinstance(rhs, str):
+            low = rhs.strip().lower()
+            if low in (""true"", ""1""):
+                return lhs, True
+            if low in (""false"", ""0""):
+                return lhs, False
+        if isinstance(rhs, (int, float)):
+            return lhs, bool(rhs)
+    if isinstance(lhs, (int, float)):
+        if isinstance(rhs, (int, float)):
+            return lhs, rhs
+        if isinstance(rhs, str):
+            try:
+                if ""."" in rhs:
+                    return lhs, float(rhs)
+                return lhs, int(rhs)
+            except ValueError:
+                return lhs, rhs
+    if isinstance(lhs, str):
+        if rhs is None:
+            return lhs, None
+        return lhs, str(rhs)
+    return lhs, rhs
+
+
+def _like_to_regex(pattern):
+    # Convert SQL LIKE pattern to Python regex pattern
+    # % -> .*, _ -> .
+    # Escape regex metacharacters except SQL wildcards
+    regex = """"
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == ""%"":
+            regex += "".*""
+        elif c == ""_"":
+            regex += "".""
+        else:
+            regex += re.escape(c)
+        i += 1
+    return f""^{regex}$""
+
+
+class _WhereParser:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
+
+    def _peek(self):
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return None
+
+    def _consume(self, expected_type=None):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if expected_type and tok.type != expected_type:
+            raise ValueError(f""Expected {expected_type} at position {tok.pos}, got {tok.type}"")
+        self.pos += 1
+        return tok
+
+    def parse(self):
+        if not self.tokens:
+            # No tokens: empty predicate: always True
+            return lambda rec: True
+        expr = self._parse_expression()
+        return expr
+
+    def _parse_expression(self):
+        left = self._parse_term()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""OR"":
+                self._consume(""OR"")
+                right = self._parse_term()
+                left = self._combine_or(left, right)
+            else:
+                break
+        return left
+
+    def _parse_term(self):
+        left = self._parse_factor()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""AND"":
+                self._consume(""AND"")
+                right = self._parse_factor()
+                left = self._combine_and(left, right)
+            else:
+                break
+        return left
+
+    def _parse_factor(self):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if tok.type == ""NOT"":
+            self._consume(""NOT"")
+            inner = self._parse_factor()
+            return lambda rec, inner=inner: not inner(rec)
+        if tok.type == ""LPAREN"":
+            self._consume(""LPAREN"")
+            inner = self._parse_expression()
+            self._consume(""RPAREN"")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self):
+        # identifier first
+        left_tok = self._consume()
+        if left_tok.type not in (""NAME"",):
+            raise ValueError(f""Expected identifier at position {left_tok.pos}"")
+        field = left_tok.value
+
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Incomplete comparison in WHERE clause"")
+
+        # IS [NOT] NULL
+        if tok.type == ""IS"":
+            self._consume(""IS"")
+            not_tok = self._peek()
+            is_not = False
+            if not_tok and not_tok.type == ""NOT"":
+                self._consume(""NOT"")
+                is_not = True
+            null_tok = self._consume()
+            if null_tok.type != ""NULL"":
+                raise ValueError(f""Expected NULL at position {null_tok.pos}"")
+            if is_not:
+                return lambda rec, f=field: _get_field_value(rec, f) is not None
+            return lambda rec, f=field: _get_field_value(rec, f) is None
+
+        # IN or NOT IN
+        if tok.type == ""NOT"":
+            # possibly NOT IN
+            self._consume(""NOT"")
+            in_tok = self._consume()
+            if in_tok.type != ""IN"":
+                raise ValueError(f""Unexpected token {in_tok.type} after NOT at position {in_tok.pos}"")
+            negate = True
+        else:
+            negate = False
+
+        tok = self._peek()
+        if tok and tok.type == ""IN"":
+            self._consume(""IN"")
+            self._consume(""LPAREN"")
+            values = []
+            while True:
+                val_tok = self._consume()
+                if val_tok.type == ""STRING"":
+                    values.append(_unescape_sql_string(val_tok.value))
+                elif val_tok.type == ""NUMBER"":
+                    values.append(_to_number(val_tok.value))
+                elif val_tok.type == ""NULL"":
+                    values.append(None)
+                elif val_tok.type in (""TRUE"", ""FALSE""):
+                    values.append(True if val_tok.type == ""TRUE"" else False)
+                else:
+                    raise ValueError(f""Expected literal in IN() at position {val_tok.pos}"")
+                sep = self._peek()
+                if sep and sep.type == ""COMMA"":
+                    self._consume(""COMMA"")
+                    continue
+                elif sep and sep.type == ""RPAREN"":
+                    self._consume(""RPAREN"")
+                    break
+                elif sep is None:
+                    raise ValueError(""Unterminated IN() list"")
+                else:
+                    raise ValueError(f""Unexpected token {sep.type} in IN() at position {sep.pos}"")
+
+            if negate:
+                return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) not in vals
+            return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) in vals
+
+        # LIKE
+        if tok.type == ""LIKE"":
+            self._consume(""LIKE"")
+            pat_tok = self._consume()
+            if pat_tok.type != ""STRING"":
+                raise ValueError(f""Expected string literal for LIKE at position {pat_tok.pos}"")
+            pattern = _unescape_sql_string(pat_tok.value)
+            regex = re.compile(_like_to_regex(pattern), re.IGNORECASE)
+            return lambda rec, f=field, rx=regex: (isinstance(_get_field_value(rec, f), str) and rx.match(_get_field_value(rec, f) or """")) is True
+
+        # Standard comparison
+        op_tok = self._consume()
+        if op_tok.type != ""OP"":
+            raise ValueError(f""Expected operator at position {op_tok.pos}"")
+        right_tok = self._consume()
+        if right_tok.type == ""STRING"":
+            right_val = _unescape_sql_string(right_tok.value)
+        elif right_tok.type == ""NUMBER"":
+            right_val = _to_number(right_tok.value)
+        elif right_tok.type == ""NULL"":
+            right_val = None
+        elif right_tok.type in (""TRUE"", ""FALSE""):
+            right_val = True if right_tok.type == ""TRUE"" else False
+        else:
+            raise ValueError(f""Expected literal at position {right_tok.pos}"")
+
+        op_map = {
+            ""="": operator.eq,
+            ""!="": operator.ne,
+            ""<>"": operator.ne,
+            ""<"": operator.lt,
+            ""<="": operator.le,
+            "">"": operator.gt,
+            "">="": operator.ge,
+        }
+        if op_tok.value not in op_map:
+            raise ValueError(f""Unsupported operator {op_tok.value} at position {op_tok.pos}"")
+        op_func = op_map[op_tok.value]
+
+        def comparator(rec, f=field, rv=right_val, cmp=op_func):
+            lv = _get_field_value(rec, f)
+            if lv is None or rv is None:
+                # Only equality/inequality meaningful with NULL
+                if cmp == operator.eq:
+                    return lv is None and rv is None
+                if cmp == operator.ne:
+                    return (lv is None) != (rv is None)
+                return False
+            lvc, rvc = _coerce_for_compare(lv, rv)
+            try:
+                return cmp(lvc, rvc)
+            except Exception:
+                # Fallback: compare as strings
+                try:
+                    return cmp(str(lv), str(rv))
+                except Exception:
+                    return False
+
+        return comparator
+
+    @staticmethod
+    def _combine_and(a, b):
+        return lambda rec, a=a, b=b: a(rec) and b(rec)
+
+    @staticmethod
+    def _combine_or(a, b):
+        return lambda rec, a=a, b=b: a(rec) or b(rec)
+
+
+def _split_csv(s):
+    # Split by commas not inside single quotes or parentheses
+    items = []
+    buf = []
+    in_str = False
+    paren = 0
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            buf.append(c)
+            if c == ""\\"" and i + 1 < len(s):
+                buf.append(s[i + 1])
+                i += 2
+                continue
+            if c == ""'"":
+                in_str = False
+            i += 1
+            continue
+        if c == ""'"":
+            in_str = True
+            buf.append(c)
+            i += 1
+            continue
+        if c == ""("":
+            paren += 1
+            buf.append(c)
+            i += 1
+            continue
+        if c == "")"":
+            paren = max(0, paren - 1)
+            buf.append(c)
+            i += 1
+            continue
+        if c == "","" and not in_str and paren == 0:
+            items.append("""".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    if buf:
+        items.append("""".join(buf).strip())
+    return [it for it in items if it]
+
+
+def _parse_select_clause(select_part):
+    select_part = select_part.strip()
+    if select_part == ""*"":
+        return [""*""]
+    cols = _split_csv(select_part)
+    # Normalize identifiers
+    out = []
+    for c in cols:
+        # Allow simple aliases ""col AS alias"" or ""col alias"" (optional)
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(?:AS\s+([A-Za-z_][A-Za-z0-9_\.]*))?\s*$"", c)
+        if not m:
+            # If not matching alias pattern, try bare identifier
+            m2 = re.match(r""^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*$"", c)
+            if not m2:
+                raise ValueError(f""Invalid SELECT column: {c}"")
+            src = m2.group(1)
+            alias = None
+        else:
+            src = m.group(1)
+            alias = m.group(2)
+        out.append((src, alias or src))
+    return out
+
+
+def _parse_order_by(order_part):
+    order_part = order_part.strip()
+    if not order_part:
+        return []
+    items = _split_csv(order_part)
+    result = []
+    for item in items:
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(ASC|DESC)?\s*$"", item)
+        if not m:
+            raise ValueError(f""Invalid ORDER BY item: {item}"")
+        col = m.group(1)
+        direction = (m.group(2) or ""ASC"").upper()
+        result.append((col, direction))
+    return result
+
+
+def _parse_sql(sql_statement):
+    if not isinstance(sql_statement, str) or not sql_statement.strip():
+        raise ValueError(""sql_statement must be a non-empty string"")
+    sql = sql_statement.strip().rstrip("";"").strip()
+    # Grammar: SELECT <cols> [WHERE <expr>] [ORDER BY <items>]
+    # Use non-greedy to capture where and order by
+    regex = re.compile(
+        r""(?is)^\s*SELECT\s+(?P<select>.+?)\s*(?:WHERE\s+(?P<where>.+?))?\s*(?:ORDER\s+BY\s+(?P<order>.+))?\s*$""
+    )
+    m = regex.match(sql)
+    if not m:
+        raise ValueError(""Query must start with SELECT and be correctly formed"")
+    select_part = m.group(""select"") or """"
+    where_part = m.group(""where"")
+    order_part = m.group(""order"")
+
+    select_cols = _parse_select_clause(select_part)
+    predicate = None
+    if where_part:
+        tokens = _tokenize_where(where_part)
+        parser = _WhereParser(tokens)
+        predicate = parser.parse()
+    else:
+        predicate = lambda rec: True
+    order_by = _parse_order_by(order_part) if order_part else []
+    return select_cols, predicate, order_by
+
+
+def _project_record(record, select_cols):
+    if select_cols == [""*""]:
+        # Return a shallow copy to avoid accidental mutation
+        return dict(record)
+    projected = {}
+    for src, alias in select_cols:
+        projected[alias] = _get_field_value(record, src)
+    return projected
+
+
+def _sort_records(records, order_by):
+    if not order_by:
+        return records
+    # Stable sort: sort from last key to first
+    def make_key_func(col):
+        def key_func(rec):
+            val = _get_field_value(rec, col)
+            # Normalize for comparability: put None at end for ascending (reverse depends on caller)
+            return val
+        return key_func
+
+    sorted_records = list(records)
+    for col, direction in reversed(order_by):
+        reverse = direction == ""DESC""
+        # Use stable sort; Python will raise if incomparable types; handle by converting to tuple key
+        def key(rec, c=col):
+            v = _get_field_value(rec, c)
+            is_none = v is None
+            # Normalize string vs numbers by converting everything except None to their natural form
+            return (is_none, v)
+        try:
+            sorted_records.sort(key=key, reverse=reverse)
+        except TypeError:
+            # Fallback: stringify non-None values
+            def key_str(rec, c=col):
+                v = _get_field_value(rec, c)
+                is_none = v is None
+                return (is_none, """" if v is None else str(v))
+            sorted_records.sort(key=key_str, reverse=reverse)
+    return sorted_records
+
+
+def process_sql_request(dataset_records, sql_statement):
+    """"""
+    Execute a simple SQL-like query against a list of dictionaries.
+
+    Supported grammar (case-insensitive keywords):
+      SELECT <col1, col2, ... | *>
+      [WHERE <expr>]
+      [ORDER BY col1 [ASC|DESC], col2 [ASC|DESC], ...]
+
+    WHERE expressions support:
+      - Comparison: =, !=, <>, <, <=, >, >= with string/number/boolean/NULL literals
+      - LIKE with % (any chars) and _ (single char), case-insensitive
+      - IN (...) and NOT IN (...)
+      - IS NULL and IS NOT NULL
+      - AND, OR, NOT, parentheses
+
+    Returns:
+      List[dict]: projected records
+
+    Raises:
+      ValueError: for malformed queries or execution errors
+    """"""
+    try:
+        if not isinstance(dataset_records, list):
+            raise ValueError(""dataset_records must be a list of dictionaries"")
+        for idx, rec in enumerate(dataset_records):
+            if not isinstance(rec, dict):
+                raise ValueError(f""dataset_records[{idx}] is not a dictionary"")
+
+        select_cols, predicate, order_by = _parse_sql(sql_statement)
+
+        # Filter
+        filtered = [rec for rec in dataset_records if predicate(rec)]
+
+        # Sort (before projection to allow ORDER BY on non-selected columns)
+        sorted_recs = _sort_records(filtered, order_by)
+
+        # Project
+        result = [_project_record(rec, select_cols) for rec in sorted_recs]
+        return result
+    except ValueError:
+        # Re-raise ValueError directly
+        raise
+    except Exception as e:
+        raise ValueError(f""Failed to process query: {e}"")
+","import re
+import operator
+from functools import partial
+
+class _Token:
+    def __init__(self, typ, value, pos):
+        self.type = typ
+        self.value = value
+        self.pos = pos
+
+    def __repr__(self):
+        return f""_Token({self.type}, {self.value}, {self.pos})""
+
+
+def _tokenize_where(expr):
+    token_spec = [
+        (""SKIP"", r""[ \t\r\n]+""),
+        (""LPAREN"", r""\(""),
+        (""RPAREN"", r""\)""),
+        (""COMMA"", r"",""),
+        (""OP"", r""<=|>=|<>|!=|=|<|>""),
+        (""STRING"", r""'(?:\\.|[^'])*'""),
+        (""NUMBER"", r""\d+(?:\.\d+)?""),
+        (""NAME"", r""[A-Za-z_][A-Za-z0-9_\.]*""),
+    ]
+    tok_regex = ""|"".join(f""(?P<{name}>{pattern})"" for name, pattern in token_spec)
+    keywords = {""AND"", ""OR"", ""NOT"", ""IS"", ""NULL"", ""IN"", ""LIKE"", ""TRUE"", ""FALSE""}
+    tokens = []
+    for m in re.finditer(tok_regex, expr):
+        kind = m.lastgroup
+        value = m.group()
+        pos = m.start()
+        if kind == ""SKIP"":
+            continue
+        if kind == ""NAME"":
+            upper_val = value.upper()
+            if upper_val in keywords:
+                kind = upper_val
+                value = upper_val
+        tokens.append(_Token(kind, value, pos))
+    return tokens
+
+
+def _unescape_sql_string(s):
+    # Strip surrounding single quotes and unescape common sequences
+    assert s[0] == ""'"" and s[-1] == ""'""
+    inner = s[1:-1]
+    # Replace escaped sequences
+    inner = inner.replace(r""\'"", ""'"").replace(r""\\"", ""\\"")
+    inner = inner.replace(r""\n"", ""\n"").replace(r""\t"", ""\t"").replace(r""\r"", ""\r"")
+    return inner
+
+
+def _to_number(value_str):
+    if ""."" in value_str:
+        try:
+            return float(value_str)
+        except ValueError:
+            return value_str
+    try:
+        return int(value_str)
+    except ValueError:
+        return value_str
+
+
+def _get_field_value(record, field):
+    # Support dotted paths for nested dicts
+    parts = field.split(""."")
+    cur = record
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        if p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _coerce_for_compare(lhs, rhs):
+    # Try to coerce rhs to type of lhs for meaningful comparison
+    if lhs is None:
+        return None, None
+    if isinstance(lhs, bool):
+        # Consider 'true'/'false' strings or 1/0 numbers
+        if isinstance(rhs, str):
+            low = rhs.strip().lower()
+            if low in (""true"", ""1""):
+                return lhs, True
+            if low in (""false"", ""0""):
+                return lhs, False
+        if isinstance(rhs, (int, float)):
+            return lhs, bool(rhs)
+    if isinstance(lhs, (int, float)):
+        if isinstance(rhs, (int, float)):
+            return lhs, rhs
+        if isinstance(rhs, str):
+            try:
+                if ""."" in rhs:
+                    return lhs, float(rhs)
+                return lhs, int(rhs)
+            except ValueError:
+                return lhs, rhs
+    if isinstance(lhs, str):
+        if rhs is None:
+            return lhs, None
+        return lhs, str(rhs)
+    return lhs, rhs
+
+
+def _like_to_regex(pattern):
+    # Convert SQL LIKE pattern to Python regex pattern
+    # % -> .*, _ -> .
+    # Escape regex metacharacters except SQL wildcards
+    regex = """"
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == ""%"":
+            regex += "".*""
+        elif c == ""_"":
+            regex += "".""
+        else:
+            regex += re.escape(c)
+        i += 1
+    return f""^{regex}$""
+
+
+class _WhereParser:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
+
+    def _peek(self):
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return None
+
+    def _consume(self, expected_type=None):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if expected_type and tok.type != expected_type:
+            raise ValueError(f""Expected {expected_type} at position {tok.pos}, got {tok.type}"")
+        self.pos += 1
+        return tok
+
+    def parse(self):
+        if not self.tokens:
+            # No tokens: empty predicate: always True
+            return lambda rec: True
+        expr = self._parse_expression()
+        return expr
+
+    def _parse_expression(self):
+        left = self._parse_term()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""OR"":
+                self._consume(""OR"")
+                right = self._parse_term()
+                left = self._combine_or(left, right)
+            else:
+                break
+        return left
+
+    def _parse_term(self):
+        left = self._parse_factor()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""AND"":
+                self._consume(""AND"")
+                right = self._parse_factor()
+                left = self._combine_and(left, right)
+            else:
+                break
+        return left
+
+    def _parse_factor(self):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if tok.type == ""NOT"":
+            self._consume(""NOT"")
+            inner = self._parse_factor()
+            return lambda rec, inner=inner: not inner(rec)
+        if tok.type == ""LPAREN"":
+            self._consume(""LPAREN"")
+            inner = self._parse_expression()
+            self._consume(""RPAREN"")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self):
+        # identifier first
+        left_tok = self._consume()
+        if left_tok.type not in (""NAME"",):
+            raise ValueError(f""Expected identifier at position {left_tok.pos}"")
+        field = left_tok.value
+
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Incomplete comparison in WHERE clause"")
+
+        # IS [NOT] NULL
+        if tok.type == ""IS"":
+            self._consume(""IS"")
+            not_tok = self._peek()
+            is_not = False
+            if not_tok and not_tok.type == ""NOT"":
+                self._consume(""NOT"")
+                is_not = True
+            null_tok = self._consume()
+            if null_tok.type != ""NULL"":
+                raise ValueError(f""Expected NULL at position {null_tok.pos}"")
+            if is_not:
+                return lambda rec, f=field: _get_field_value(rec, f) is not None
+            return lambda rec, f=field: _get_field_value(rec, f) is None
+
+        # IN or NOT IN
+        if tok.type == ""NOT"":
+            # possibly NOT IN
+            self._consume(""NOT"")
+            in_tok = self._consume()
+            if in_tok.type != ""IN"":
+                raise ValueError(f""Unexpected token {in_tok.type} after NOT at position {in_tok.pos}"")
+            negate = True
+        else:
+            negate = False
+
+        tok = self._peek()
+        if tok and tok.type == ""IN"":
+            self._consume(""IN"")
+            self._consume(""LPAREN"")
+            values = []
+            while True:
+                val_tok = self._consume()
+                if val_tok.type == ""STRING"":
+                    values.append(_unescape_sql_string(val_tok.value))
+                elif val_tok.type == ""NUMBER"":
+                    values.append(_to_number(val_tok.value))
+                elif val_tok.type == ""NULL"":
+                    values.append(None)
+                elif val_tok.type in (""TRUE"", ""FALSE""):
+                    values.append(True if val_tok.type == ""TRUE"" else False)
+                else:
+                    raise ValueError(f""Expected literal in IN() at position {val_tok.pos}"")
+                sep = self._peek()
+                if sep and sep.type == ""COMMA"":
+                    self._consume(""COMMA"")
+                    continue
+                elif sep and sep.type == ""RPAREN"":
+                    self._consume(""RPAREN"")
+                    break
+                elif sep is None:
+                    raise ValueError(""Unterminated IN() list"")
+                else:
+                    raise ValueError(f""Unexpected token {sep.type} in IN() at position {sep.pos}"")
+
+            if negate:
+                return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) not in vals
+            return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) in vals
+
+        # LIKE
+        if tok.type == ""LIKE"":
+            self._consume(""LIKE"")
+            pat_tok = self._consume()
+            if pat_tok.type != ""STRING"":
+                raise ValueError(f""Expected string literal for LIKE at position {pat_tok.pos}"")
+            pattern = _unescape_sql_string(pat_tok.value)
+            regex = re.compile(_like_to_regex(pattern), re.IGNORECASE)
+            return lambda rec, f=field, rx=regex: isinstance(_get_field_value(rec, f), str) and (rx.match(_get_field_value(rec, f) or """") is not None)
+
+        # Standard comparison
+        op_tok = self._consume()
+        if op_tok.type != ""OP"":
+            raise ValueError(f""Expected operator at position {op_tok.pos}"")
+        right_tok = self._consume()
+        if right_tok.type == ""STRING"":
+            right_val = _unescape_sql_string(right_tok.value)
+        elif right_tok.type == ""NUMBER"":
+            right_val = _to_number(right_tok.value)
+        elif right_tok.type == ""NULL"":
+            right_val = None
+        elif right_tok.type in (""TRUE"", ""FALSE""):
+            right_val = True if right_tok.type == ""TRUE"" else False
+        else:
+            raise ValueError(f""Expected literal at position {right_tok.pos}"")
+
+        op_map = {
+            ""="": operator.eq,
+            ""!="": operator.ne,
+            ""<>"": operator.ne,
+            ""<"": operator.lt,
+            ""<="": operator.le,
+            "">"": operator.gt,
+            "">="": operator.ge,
+        }
+        if op_tok.value not in op_map:
+            raise ValueError(f""Unsupported operator {op_tok.value} at position {op_tok.pos}"")
+        op_func = op_map[op_tok.value]
+
+        def comparator(rec, f=field, rv=right_val, cmp=op_func):
+            lv = _get_field_value(rec, f)
+            if lv is None or rv is None:
+                # Only equality/inequality meaningful with NULL
+                if cmp == operator.eq:
+                    return lv is None and rv is None
+                if cmp == operator.ne:
+                    return (lv is None) != (rv is None)
+                return False
+            lvc, rvc = _coerce_for_compare(lv, rv)
+            try:
+                return cmp(lvc, rvc)
+            except Exception:
+                # Fallback: compare as strings
+                try:
+                    return cmp(str(lv), str(rv))
+                except Exception:
+                    return False
+
+        return comparator
+
+    @staticmethod
+    def _combine_and(a, b):
+        return lambda rec, a=a, b=b: a(rec) and b(rec)
+
+    @staticmethod
+    def _combine_or(a, b):
+        return lambda rec, a=a, b=b: a(rec) or b(rec)
+
+
+def _split_csv(s):
+    # Split by commas not inside single quotes or parentheses
+    items = []
+    buf = []
+    in_str = False
+    paren = 0
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            buf.append(c)
+            if c == ""\\"" and i + 1 < len(s):
+                buf.append(s[i + 1])
+                i += 2
+                continue
+            if c == ""'"":
+                in_str = False
+            i += 1
+            continue
+        if c == ""'"":
+            in_str = True
+            buf.append(c)
+            i += 1
+            continue
+        if c == ""("":
+            paren += 1
+            buf.append(c)
+            i += 1
+            continue
+        if c == "")"":
+            paren = max(0, paren - 1)
+            buf.append(c)
+            i += 1
+            continue
+        if c == "","" and not in_str and paren == 0:
+            items.append("""".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    if buf:
+        items.append("""".join(buf).strip())
+    return [it for it in items if it]
+
+
+def _parse_select_clause(select_part):
+    select_part = select_part.strip()
+    if select_part == ""*"":
+        return [""*""]
+    cols = _split_csv(select_part)
+    # Normalize identifiers
+    out = []
+    for c in cols:
+        # Allow simple aliases ""col AS alias"" or ""col alias"" (optional)
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(?:AS\s+([A-Za-z_][A-Za-z0-9_\.]*))?\s*$"", c)
+        if not m:
+            # If not matching alias pattern, try bare identifier
+            m2 = re.match(r""^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*$"", c)
+            if not m2:
+                raise ValueError(f""Invalid SELECT column: {c}"")
+            src = m2.group(1)
+            alias = None
+        else:
+            src = m.group(1)
+            alias = m.group(2)
+        out.append((src, alias or src))
+    return out
+
+
+def _parse_order_by(order_part):
+    order_part = order_part.strip()
+    if not order_part:
+        return []
+    items = _split_csv(order_part)
+    result = []
+    for item in items:
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(ASC|DESC)?\s*$"", item)
+        if not m:
+            raise ValueError(f""Invalid ORDER BY item: {item}"")
+        col = m.group(1)
+        direction = (m.group(2) or ""ASC"").upper()
+        result.append((col, direction))
+    return result
+
+
+def _parse_sql(sql_statement):
+    if not isinstance(sql_statement, str) or not sql_statement.strip():
+        raise ValueError(""sql_statement must be a non-empty string"")
+    sql = sql_statement.strip().rstrip("";"").strip()
+    # Grammar: SELECT <cols> [WHERE <expr>] [ORDER BY <items>]
+    # Use non-greedy to capture where and order by
+    regex = re.compile(
+        r""(?is)^\s*SELECT\s+(?P<select>.+?)\s*(?:WHERE\s+(?P<where>.+?))?\s*(?:ORDER\s+BY\s+(?P<order>.+))?\s*$""
+    )
+    m = regex.match(sql)
+    if not m:
+        raise ValueError(""Query must start with SELECT and be correctly formed"")
+    select_part = m.group(""select"") or """"
+    where_part = m.group(""where"")
+    order_part = m.group(""order"")
+
+    select_cols = _parse_select_clause(select_part)
+    predicate = None
+    if where_part:
+        tokens = _tokenize_where(where_part)
+        parser = _WhereParser(tokens)
+        predicate = parser.parse()
+    else:
+        predicate = lambda rec: True
+    order_by = _parse_order_by(order_part) if order_part else []
+    return select_cols, predicate, order_by
+
+
+def _project_record(record, select_cols):
+    if select_cols == [""*""]:
+        # Return a shallow copy to avoid accidental mutation
+        return dict(record)
+    projected = {}
+    for src, alias in select_cols:
+        projected[alias] = _get_field_value(record, src)
+    return projected
+
+
+def _sort_records(records, order_by):
+    if not order_by:
+        return records
+    sorted_records = list(records)
+    for col, direction in reversed(order_by):
+        reverse = direction == ""DESC""
+        # Use stable sort; Python will raise if incomparable types; handle by converting to tuple key
+        def key(rec, c=col):
+            v = _get_field_value(rec, c)
+            is_none = v is None
+            return (is_none, v)
+        try:
+            sorted_records.sort(key=key, reverse=reverse)
+        except TypeError:
+            # Fallback: stringify non-None values
+            def key_str(rec, c=col):
+                v = _get_field_value(rec, c)
+                is_none = v is None
+                return (is_none, """" if v is None else str(v))
+            sorted_records.sort(key=key_str, reverse=reverse)
+    return sorted_records
+
+
+# -------------------------
+# Pipeline-friendly helpers
+# -------------------------
+
+def parse_sql_statement(sql_statement):
+    """"""
+    Pure function: parse SQL-like statement into a query plan dict.
+    Returns a dict with keys: 'select', 'predicate', 'order_by'
+    """"""
+    select_cols, predicate, order_by = _parse_sql(sql_statement)
+    return {""select"": select_cols, ""predicate"": predicate, ""order_by"": order_by}
+
+
+def apply_where(records, predicate):
+    """"""
+    Pure function: filters records using provided predicate.
+    """"""
+    return [rec for rec in records if predicate(rec)]
+
+
+def apply_sort(records, order_by):
+    """"""
+    Pure function: sorts records according to order_by specification.
+    """"""
+    return _sort_records(records, order_by)
+
+
+def apply_projection(records, select_cols):
+    """"""
+    Pure function: projects records based on select columns.
+    """"""
+    return [_project_record(rec, select_cols) for rec in records]
+
+
+def execute_query(dataset_records, query_plan):
+    """"""
+    Pure function: execute a query plan against dataset_records using a pipeline of steps.
+    """"""
+    steps = [
+        partial(apply_where, predicate=query_plan[""predicate""]),
+        partial(apply_sort, order_by=query_plan[""order_by""]),
+        partial(apply_projection, select_cols=query_plan[""select""]),
+    ]
+    result = dataset_records
+    for step in steps:
+        result = step(result)
+    return result
+
+
+def process_sql_request(dataset_records, sql_statement):
+    """"""
+    Execute a simple SQL-like query against a list of dictionaries.
+
+    Supported grammar (case-insensitive keywords):
+      SELECT <col1, col2, ... | *>
+      [WHERE <expr>]
+      [ORDER BY col1 [ASC|DESC], col2 [ASC|DESC], ...]
+
+    WHERE expressions support:
+      - Comparison: =, !=, <>, <, <=, >, >= with string/number/boolean/NULL literals
+      - LIKE with % (any chars) and _ (single char), case-insensitive
+      - IN (...) and NOT IN (...)
+      - IS NULL and IS NOT NULL
+      - AND, OR, NOT, parentheses
+
+    Returns:
+      List[dict]: projected records
+
+    Raises:
+      ValueError: for malformed queries or execution errors
+    """"""
+    try:
+        if not isinstance(dataset_records, list):
+            raise ValueError(""dataset_records must be a list of dictionaries"")
+        for idx, rec in enumerate(dataset_records):
+            if not isinstance(rec, dict):
+                raise ValueError(f""dataset_records[{idx}] is not a dictionary"")
+
+        query_plan = parse_sql_statement(sql_statement)
+        result = execute_query(dataset_records, query_plan)
+        return result
+    except ValueError:
+        # Re-raise ValueError directly
+        raise
+    except Exception as e:
+        raise ValueError(f""Failed to process query: {e}"")
+","import re
+import operator
+import logging
+from functools import partial
+from pprint import pformat
+
+class _Token:
+    def __init__(self, typ, value, pos):
+        self.type = typ
+        self.value = value
+        self.pos = pos
+
+    def __repr__(self):
+        return f""_Token({self.type}, {self.value}, {self.pos})""
+
+
+def _tokenize_where(expr):
+    token_spec = [
+        (""SKIP"", r""[ \t\r\n]+""),
+        (""LPAREN"", r""\(""),
+        (""RPAREN"", r""\)""),
+        (""COMMA"", r"",""),
+        (""OP"", r""<=|>=|<>|!=|=|<|>""),
+        (""STRING"", r""'(?:\\.|[^'])*'""),
+        (""NUMBER"", r""\d+(?:\.\d+)?""),
+        (""NAME"", r""[A-Za-z_][A-Za-z0-9_\.]*""),
+    ]
+    tok_regex = ""|"".join(f""(?P<{name}>{pattern})"" for name, pattern in token_spec)
+    keywords = {""AND"", ""OR"", ""NOT"", ""IS"", ""NULL"", ""IN"", ""LIKE"", ""TRUE"", ""FALSE""}
+    tokens = []
+    for m in re.finditer(tok_regex, expr):
+        kind = m.lastgroup
+        value = m.group()
+        pos = m.start()
+        if kind == ""SKIP"":
+            continue
+        if kind == ""NAME"":
+            upper_val = value.upper()
+            if upper_val in keywords:
+                kind = upper_val
+                value = upper_val
+        tokens.append(_Token(kind, value, pos))
+    return tokens
+
+
+def _unescape_sql_string(s):
+    # Strip surrounding single quotes and unescape common sequences
+    assert s[0] == ""'"" and s[-1] == ""'""
+    inner = s[1:-1]
+    # Replace escaped sequences
+    inner = inner.replace(r""\'"", ""'"").replace(r""\\"", ""\\"")
+    inner = inner.replace(r""\n"", ""\n"").replace(r""\t"", ""\t"").replace(r""\r"", ""\r"")
+    return inner
+
+
+def _to_number(value_str):
+    if ""."" in value_str:
+        try:
+            return float(value_str)
+        except ValueError:
+            return value_str
+    try:
+        return int(value_str)
+    except ValueError:
+        return value_str
+
+
+def _get_field_value(record, field):
+    # Support dotted paths for nested dicts
+    parts = field.split(""."")
+    cur = record
+    for p in parts:
+        if not isinstance(cur, dict):
+            return None
+        if p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _coerce_for_compare(lhs, rhs):
+    # Try to coerce rhs to type of lhs for meaningful comparison
+    if lhs is None:
+        return None, None
+    if isinstance(lhs, bool):
+        # Consider 'true'/'false' strings or 1/0 numbers
+        if isinstance(rhs, str):
+            low = rhs.strip().lower()
+            if low in (""true"", ""1""):
+                return lhs, True
+            if low in (""false"", ""0""):
+                return lhs, False
+        if isinstance(rhs, (int, float)):
+            return lhs, bool(rhs)
+    if isinstance(lhs, (int, float)):
+        if isinstance(rhs, (int, float)):
+            return lhs, rhs
+        if isinstance(rhs, str):
+            try:
+                if ""."" in rhs:
+                    return lhs, float(rhs)
+                return lhs, int(rhs)
+            except ValueError:
+                return lhs, rhs
+    if isinstance(lhs, str):
+        if rhs is None:
+            return lhs, None
+        return lhs, str(rhs)
+    return lhs, rhs
+
+
+def _like_to_regex(pattern):
+    # Convert SQL LIKE pattern to Python regex pattern
+    # % -> .*, _ -> .
+    # Escape regex metacharacters except SQL wildcards
+    regex = """"
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == ""%"":
+            regex += "".*""
+        elif c == ""_"":
+            regex += "".""
+        else:
+            regex += re.escape(c)
+        i += 1
+    return f""^{regex}$""
+
+
+class _WhereParser:
+    def __init__(self, tokens):
+        self.tokens = tokens
+        self.pos = 0
+
+    def _peek(self):
+        if self.pos < len(self.tokens):
+            return self.tokens[self.pos]
+        return None
+
+    def _consume(self, expected_type=None):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if expected_type and tok.type != expected_type:
+            raise ValueError(f""Expected {expected_type} at position {tok.pos}, got {tok.type}"")
+        self.pos += 1
+        return tok
+
+    def parse(self):
+        if not self.tokens:
+            # No tokens: empty predicate: always True
+            return lambda rec: True
+        expr = self._parse_expression()
+        return expr
+
+    def _parse_expression(self):
+        left = self._parse_term()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""OR"":
+                self._consume(""OR"")
+                right = self._parse_term()
+                left = self._combine_or(left, right)
+            else:
+                break
+        return left
+
+    def _parse_term(self):
+        left = self._parse_factor()
+        while True:
+            tok = self._peek()
+            if tok and tok.type == ""AND"":
+                self._consume(""AND"")
+                right = self._parse_factor()
+                left = self._combine_and(left, right)
+            else:
+                break
+        return left
+
+    def _parse_factor(self):
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Unexpected end of WHERE clause"")
+        if tok.type == ""NOT"":
+            self._consume(""NOT"")
+            inner = self._parse_factor()
+            return lambda rec, inner=inner: not inner(rec)
+        if tok.type == ""LPAREN"":
+            self._consume(""LPAREN"")
+            inner = self._parse_expression()
+            self._consume(""RPAREN"")
+            return inner
+        return self._parse_comparison()
+
+    def _parse_comparison(self):
+        # identifier first
+        left_tok = self._consume()
+        if left_tok.type not in (""NAME"",):
+            raise ValueError(f""Expected identifier at position {left_tok.pos}"")
+        field = left_tok.value
+
+        tok = self._peek()
+        if tok is None:
+            raise ValueError(""Incomplete comparison in WHERE clause"")
+
+        # IS [NOT] NULL
+        if tok.type == ""IS"":
+            self._consume(""IS"")
+            not_tok = self._peek()
+            is_not = False
+            if not_tok and not_tok.type == ""NOT"":
+                self._consume(""NOT"")
+                is_not = True
+            null_tok = self._consume()
+            if null_tok.type != ""NULL"":
+                raise ValueError(f""Expected NULL at position {null_tok.pos}"")
+            if is_not:
+                return lambda rec, f=field: _get_field_value(rec, f) is not None
+            return lambda rec, f=field: _get_field_value(rec, f) is None
+
+        # IN or NOT IN
+        if tok.type == ""NOT"":
+            # possibly NOT IN
+            self._consume(""NOT"")
+            in_tok = self._consume()
+            if in_tok.type != ""IN"":
+                raise ValueError(f""Unexpected token {in_tok.type} after NOT at position {in_tok.pos}"")
+            negate = True
+        else:
+            negate = False
+
+        tok = self._peek()
+        if tok and tok.type == ""IN"":
+            self._consume(""IN"")
+            self._consume(""LPAREN"")
+            values = []
+            while True:
+                val_tok = self._consume()
+                if val_tok.type == ""STRING"":
+                    values.append(_unescape_sql_string(val_tok.value))
+                elif val_tok.type == ""NUMBER"":
+                    values.append(_to_number(val_tok.value))
+                elif val_tok.type == ""NULL"":
+                    values.append(None)
+                elif val_tok.type in (""TRUE"", ""FALSE""):
+                    values.append(True if val_tok.type == ""TRUE"" else False)
+                else:
+                    raise ValueError(f""Expected literal in IN() at position {val_tok.pos}"")
+                sep = self._peek()
+                if sep and sep.type == ""COMMA"":
+                    self._consume(""COMMA"")
+                    continue
+                elif sep and sep.type == ""RPAREN"":
+                    self._consume(""RPAREN"")
+                    break
+                elif sep is None:
+                    raise ValueError(""Unterminated IN() list"")
+                else:
+                    raise ValueError(f""Unexpected token {sep.type} in IN() at position {sep.pos}"")
+
+            if negate:
+                return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) not in vals
+            return lambda rec, f=field, vals=tuple(values): _get_field_value(rec, f) in vals
+
+        # LIKE
+        if tok.type == ""LIKE"":
+            self._consume(""LIKE"")
+            pat_tok = self._consume()
+            if pat_tok.type != ""STRING"":
+                raise ValueError(f""Expected string literal for LIKE at position {pat_tok.pos}"")
+            pattern = _unescape_sql_string(pat_tok.value)
+            regex = re.compile(_like_to_regex(pattern), re.IGNORECASE)
+            return lambda rec, f=field, rx=regex: isinstance(_get_field_value(rec, f), str) and (rx.match(_get_field_value(rec, f) or """") is not None)
+
+        # Standard comparison
+        op_tok = self._consume()
+        if op_tok.type != ""OP"":
+            raise ValueError(f""Expected operator at position {op_tok.pos}"")
+        right_tok = self._consume()
+        if right_tok.type == ""STRING"":
+            right_val = _unescape_sql_string(right_tok.value)
+        elif right_tok.type == ""NUMBER"":
+            right_val = _to_number(right_tok.value)
+        elif right_tok.type == ""NULL"":
+            right_val = None
+        elif right_tok.type in (""TRUE"", ""FALSE""):
+            right_val = True if right_tok.type == ""TRUE"" else False
+        else:
+            raise ValueError(f""Expected literal at position {right_tok.pos}"")
+
+        op_map = {
+            ""="": operator.eq,
+            ""!="": operator.ne,
+            ""<>"": operator.ne,
+            ""<"": operator.lt,
+            ""<="": operator.le,
+            "">"": operator.gt,
+            "">="": operator.ge,
+        }
+        if op_tok.value not in op_map:
+            raise ValueError(f""Unsupported operator {op_tok.value} at position {op_tok.pos}"")
+        op_func = op_map[op_tok.value]
+
+        def comparator(rec, f=field, rv=right_val, cmp=op_func):
+            lv = _get_field_value(rec, f)
+            if lv is None or rv is None:
+                # Only equality/inequality meaningful with NULL
+                if cmp == operator.eq:
+                    return lv is None and rv is None
+                if cmp == operator.ne:
+                    return (lv is None) != (rv is None)
+                return False
+            lvc, rvc = _coerce_for_compare(lv, rv)
+            try:
+                return cmp(lvc, rvc)
+            except Exception:
+                # Fallback: compare as strings
+                try:
+                    return cmp(str(lv), str(rv))
+                except Exception:
+                    return False
+
+        return comparator
+
+    @staticmethod
+    def _combine_and(a, b):
+        return lambda rec, a=a, b=b: a(rec) and b(rec)
+
+    @staticmethod
+    def _combine_or(a, b):
+        return lambda rec, a=a, b=b: a(rec) or b(rec)
+
+
+def _split_csv(s):
+    # Split by commas not inside single quotes or parentheses
+    items = []
+    buf = []
+    in_str = False
+    paren = 0
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            buf.append(c)
+            if c == ""\\"" and i + 1 < len(s):
+                buf.append(s[i + 1])
+                i += 2
+                continue
+            if c == ""'"":
+                in_str = False
+            i += 1
+            continue
+        if c == ""'"":
+            in_str = True
+            buf.append(c)
+            i += 1
+            continue
+        if c == ""("":
+            paren += 1
+            buf.append(c)
+            i += 1
+            continue
+        if c == "")"":
+            paren = max(0, paren - 1)
+            buf.append(c)
+            i += 1
+            continue
+        if c == "","" and not in_str and paren == 0:
+            items.append("""".join(buf).strip())
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    if buf:
+        items.append("""".join(buf).strip())
+    return [it for it in items if it]
+
+
+def _parse_select_clause(select_part):
+    select_part = select_part.strip()
+    if select_part == ""*"":
+        return [""*""]
+    cols = _split_csv(select_part)
+    # Normalize identifiers
+    out = []
+    for c in cols:
+        # Allow simple aliases ""col AS alias"" or ""col alias"" (optional)
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(?:AS\s+([A-Za-z_][A-Za-z0-9_\.]*))?\s*$"", c)
+        if not m:
+            # If not matching alias pattern, try bare identifier
+            m2 = re.match(r""^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*$"", c)
+            if not m2:
+                raise ValueError(f""Invalid SELECT column: {c}"")
+            src = m2.group(1)
+            alias = None
+        else:
+            src = m.group(1)
+            alias = m.group(2)
+        out.append((src, alias or src))
+    return out
+
+
+def _parse_order_by(order_part):
+    order_part = order_part.strip()
+    if not order_part:
+        return []
+    items = _split_csv(order_part)
+    result = []
+    for item in items:
+        m = re.match(r""(?i)^\s*([A-Za-z_][A-Za-z0-9_\.]*)\s*(ASC|DESC)?\s*$"", item)
+        if not m:
+            raise ValueError(f""Invalid ORDER BY item: {item}"")
+        col = m.group(1)
+        direction = (m.group(2) or ""ASC"").upper()
+        result.append((col, direction))
+    return result
+
+
+def _parse_sql(sql_statement):
+    if not isinstance(sql_statement, str) or not sql_statement.strip():
+        raise ValueError(""sql_statement must be a non-empty string"")
+    sql = sql_statement.strip().rstrip("";"").strip()
+    # Grammar: SELECT <cols> [WHERE <expr>] [ORDER BY <items>]
+    # Use non-greedy to capture where and order by
+    regex = re.compile(
+        r""(?is)^\s*SELECT\s+(?P<select>.+?)\s*(?:WHERE\s+(?P<where>.+?))?\s*(?:ORDER\s+BY\s+(?P<order>.+))?\s*$""
+    )
+    m = regex.match(sql)
+    if not m:
+        raise ValueError(""Query must start with SELECT and be correctly formed"")
+    select_part = m.group(""select"") or """"
+    where_part = m.group(""where"")
+    order_part = m.group(""order"")
+
+    select_cols = _parse_select_clause(select_part)
+    predicate = None
+    if where_part:
+        tokens = _tokenize_where(where_part)
+        parser = _WhereParser(tokens)
+        predicate = parser.parse()
+    else:
+        predicate = lambda rec: True
+    order_by = _parse_order_by(order_part) if order_part else []
+    where_text = where_part.strip() if where_part else """"
+    return select_cols, predicate, order_by, where_text
+
+
+def _project_record(record, select_cols):
+    if select_cols == [""*""]:
+        # Return a shallow copy to avoid accidental mutation
+        return dict(record)
+    projected = {}
+    for src, alias in select_cols:
+        projected[alias] = _get_field_value(record, src)
+    return projected
+
+
+def _sort_records(records, order_by):
+    if not order_by:
+        return records
+    sorted_records = list(records)
+    for col, direction in reversed(order_by):
+        reverse = direction == ""DESC""
+        # Use stable sort; Python will raise if incomparable types; handle by converting to tuple key
+        def key(rec, c=col):
+            v = _get_field_value(rec, c)
+            is_none = v is None
+            return (is_none, v)
+        try:
+            sorted_records.sort(key=key, reverse=reverse)
+        except TypeError:
+            # Fallback: stringify non-None values
+            def key_str(rec, c=col):
+                v = _get_field_value(rec, c)
+                is_none = v is None
+                return (is_none, """" if v is None else str(v))
+            sorted_records.sort(key=key_str, reverse=reverse)
+    return sorted_records
+
+
+# -------------------------
+# Pipeline-friendly helpers
+# -------------------------
+
+def parse_sql_statement(sql_statement):
+    """"""
+    Pure function: parse SQL-like statement into a query plan dict.
+    Returns a dict with keys: 'select', 'predicate', 'order_by', 'where_text', 'raw_sql'
+    """"""
+    select_cols, predicate, order_by, where_text = _parse_sql(sql_statement)
+    raw_sql = sql_statement.strip().rstrip("";"").strip() if isinstance(sql_statement, str) else """"
+    return {
+        ""select"": select_cols,
+        ""predicate"": predicate,
+        ""order_by"": order_by,
+        ""where_text"": where_text,
+        ""raw_sql"": raw_sql,
+    }
+
+
+def apply_where(records, predicate):
+    """"""
+    Pure function: filters records using provided predicate.
+    """"""
+    return [rec for rec in records if predicate(rec)]
+
+
+def apply_sort(records, order_by):
+    """"""
+    Pure function: sorts records according to order_by specification.
+    """"""
+    return _sort_records(records, order_by)
+
+
+def apply_projection(records, select_cols):
+    """"""
+    Pure function: projects records based on select columns.
+    """"""
+    return [_project_record(rec, select_cols) for rec in records]
+
+
+def execute_query(dataset_records, query_plan):
+    """"""
+    Pure function: execute a query plan against dataset_records using a pipeline of steps.
+    """"""
+    steps = [
+        partial(apply_where, predicate=query_plan[""predicate""]),
+        partial(apply_sort, order_by=query_plan[""order_by""]),
+        partial(apply_projection, select_cols=query_plan[""select""]),
+    ]
+    result = dataset_records
+    for step in steps:
+        result = step(result)
+    return result
+
+
+# -------------------------
+# Logging helpers
+# -------------------------
+
+def _get_logger():
+    logger = logging.getLogger(""sql_like_processor"")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(""%(asctime)s - %(levelname)s - %(message)s"")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+    return logger
+
+
+def _describe_select(select_cols):
+    if select_cols == [""*""]:
+        return ""* (all columns)""
+    parts = []
+    for src, alias in select_cols:
+        if alias == src:
+            parts.append(src)
+        else:
+            parts.append(f""{src} AS {alias}"")
+    return "", "".join(parts)
+
+
+def _describe_order(order_by):
+    if not order_by:
+        return ""(none)""
+    return "", "".join(f""{col} {direction}"" for col, direction in order_by)
+
+
+def _format_result(records, max_items=50):
+    if isinstance(records, list) and len(records) > max_items:
+        preview = pformat(records[:max_items])
+        return f""{preview}\n... and {len(records) - max_items} more""
+    return pformat(records)
+
+
+def process_sql_request(dataset_records, sql_statement):
+    """"""
+    Execute a simple SQL-like query against a list of dictionaries.
+
+    Supported grammar (case-insensitive keywords):
+      SELECT <col1, col2, ... | *>
+      [WHERE <expr>]
+      [ORDER BY col1 [ASC|DESC], col2 [ASC|DESC], ...]
+
+    WHERE expressions support:
+      - Comparison: =, !=, <>, <, <=, >, >= with string/number/boolean/NULL literals
+      - LIKE with % (any chars) and _ (single char), case-insensitive
+      - IN (...) and NOT IN (...)
+      - IS NULL and IS NOT NULL
+      - AND, OR, NOT, parentheses
+
+    Returns:
+      List[dict]: projected records
+
+    Raises:
+      ValueError: for malformed queries or execution errors
+    """"""
+    logger = _get_logger()
+    try:
+        if not isinstance(dataset_records, list):
+            raise ValueError(""dataset_records must be a list of dictionaries"")
+        for idx, rec in enumerate(dataset_records):
+            if not isinstance(rec, dict):
+                raise ValueError(f""dataset_records[{idx}] is not a dictionary"")
+
+        logger.info(""Received query:\n%s"", (sql_statement.strip().rstrip("";"").strip() if isinstance(sql_statement, str) else str(sql_statement)))
+        query_plan = parse_sql_statement(sql_statement)
+        logger.info(
+            ""Plan:\n- SELECT: %s\n- WHERE: %s\n- ORDER BY: %s"",
+            _describe_select(query_plan[""select""]),
+            (query_plan.get(""where_text"") or ""(none)""),
+            _describe_order(query_plan[""order_by""]),
+        )
+
+        # Execute pipeline with step-by-step logging
+        logger.info(""Starting pipeline with %d input records"", len(dataset_records))
+
+        filtered = apply_where(dataset_records, query_plan[""predicate""])
+        logger.info(""WHERE step: %d -> %d records"", len(dataset_records), len(filtered))
+
+        sorted_recs = apply_sort(filtered, query_plan[""order_by""])
+        logger.info(""ORDER BY step: %s"", _describe_order(query_plan[""order_by""]))
+
+        result = apply_projection(sorted_recs, query_plan[""select""])
+        logger.info(""SELECT step: projecting %s"", _describe_select(query_plan[""select""]))
+
+        logger.info(""Final result: %d records\n%s"", len(result), _format_result(result))
+        return result
+    except ValueError as ve:
+        logger.error(""ValueError while processing query: %s"", ve)
+        raise
+    except Exception as e:
+        logger.exception(""Failed to process query due to unexpected error"")
+        raise ValueError(f""Failed to process query: {e}"")
+",gpt-5,0,[],[],[]

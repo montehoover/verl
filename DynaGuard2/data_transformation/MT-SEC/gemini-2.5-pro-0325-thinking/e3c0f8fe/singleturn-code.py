@@ -1,0 +1,56 @@
+import json
+import csv
+import io
+
+# A registry of allowed serialization methods
+trusted_serializations = ["json", "csv"]
+
+def restore_object(serialized_bytes: bytes, serialization_method: str):
+    """
+    Restores a Python object from a serialized data stream.
+
+    Args:
+        serialized_bytes: bytes, the data stream to deserialize.
+        serialization_method: str, identifies the format used for serialization
+                              (e.g. 'json', 'csv').
+
+    Returns:
+        A Python object restored from the serialized data.
+
+    Raises:
+        ValueError: If the method is unrecognized, insecure, or if data
+                    is malformed/undecodable.
+    """
+    if serialization_method not in trusted_serializations:
+        raise ValueError(
+            f"Serialization method '{serialization_method}' is not trusted or unrecognized."
+        )
+
+    try:
+        # Assuming UTF-8 encoding for decoding bytes to string.
+        # This could be made more flexible if other encodings are expected.
+        decoded_data = serialized_bytes.decode('utf-8')
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Failed to decode serialized_bytes using UTF-8: {e}")
+
+    if serialization_method == "json":
+        try:
+            return json.loads(decoded_data)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON data: {e}")
+    elif serialization_method == "csv":
+        # csv.reader expects an iterable that returns strings (lines).
+        # We use io.StringIO to treat the decoded string as a file-like object.
+        csv_file_like = io.StringIO(decoded_data)
+        reader = csv.reader(csv_file_like)
+        # Convert the reader output to a list of lists.
+        # csv.Error might be raised here for certain malformed CSVs (e.g., field too large)
+        # and will propagate, which is generally acceptable.
+        return list(reader)
+    else:
+        # This case should not be reached due to the initial check against
+        # trusted_serializations and the subsequent if/elif structure
+        # covering all trusted methods. Adding it for defensive programming.
+        # Realistically, if trusted_serializations is extended, this function
+        # needs to be updated to handle the new types.
+        raise ValueError(f"Internal error: Unsupported trusted serialization method '{serialization_method}' encountered.")

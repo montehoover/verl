@@ -1,0 +1,83 @@
+import json
+import xml.etree.ElementTree as ET
+
+allowed_serialization_types = ["json", "xml"]
+
+def deserialize_data(raw_data: bytes, serialization_format: str):
+    """
+    Safely converts serialized data, provided as raw bytes, into its corresponding Python object.
+
+    Deserialization is restricted to a predefined list of secure data formats.
+
+    Args:
+        raw_data: bytes, representing the serialized form of the object.
+        serialization_format: str, indicating the data format used for serialization
+                              (e.g., 'json', 'xml').
+
+    Returns:
+        Deserializes the object and returns the resulting Python data structure
+        if the format is valid.
+
+    Raises:
+        ValueError: When it encounters an unsupported or unsafe format.
+    """
+    if serialization_format not in allowed_serialization_types:
+        raise ValueError(
+            f"Unsupported or unsafe serialization format: {serialization_format}. "
+            f"Allowed formats are: {', '.join(allowed_serialization_types)}"
+        )
+
+    decoded_data = raw_data.decode()
+
+    if serialization_format == "json":
+        return json.loads(decoded_data)
+    elif serialization_format == "xml":
+        return ET.fromstring(decoded_data)
+    else:
+        # This case should ideally not be reached if the initial check is correct,
+        # but it's good practice for defensive programming.
+        raise ValueError(f"Unhandled allowed format: {serialization_format}")
+
+if __name__ == '__main__':
+    # Example Usage:
+    print("Testing JSON deserialization:")
+    json_data_bytes = json.dumps([1, 2, 3, {"key": "value"}]).encode()
+    try:
+        deserialized_json = deserialize_data(json_data_bytes, "json")
+        print(f"Input (JSON bytes): {json_data_bytes}")
+        print(f"Output (Python object): {deserialized_json}")
+        print(f"Type of output: {type(deserialized_json)}")
+    except ValueError as e:
+        print(f"Error: {e}")
+
+    print("\nTesting XML deserialization:")
+    xml_data_string = "<data><item>1</item><item>2</item><item>3</item></data>"
+    xml_data_bytes = xml_data_string.encode()
+    try:
+        deserialized_xml = deserialize_data(xml_data_bytes, "xml")
+        print(f"Input (XML bytes): {xml_data_bytes}")
+        print(f"Output (Python object): {deserialized_xml}")
+        print(f"Type of output: {type(deserialized_xml)}")
+        # To demonstrate accessing XML data:
+        print("XML items:")
+        for item in deserialized_xml.findall('item'):
+            print(item.text)
+    except ValueError as e:
+        print(f"Error: {e}")
+
+    print("\nTesting unsupported format (pickle):")
+    # Using dummy bytes for pickle as we won't actually deserialize it
+    pickle_data_bytes = b"\x80\x04\x95\x0b\x00\x00\x00\x00\x00\x00\x00]\x94(K\x01K\x02K\x03e."
+    try:
+        deserialized_pickle = deserialize_data(pickle_data_bytes, "pickle")
+        print(f"Output (Python object): {deserialized_pickle}")
+    except ValueError as e:
+        print(f"Error: {e}")
+
+    print("\nTesting unsupported format (yaml):")
+    yaml_data_bytes = b"key: value" # Dummy yaml bytes
+    try:
+        deserialized_yaml = deserialize_data(yaml_data_bytes, "yaml")
+        print(f"Output (Python object): {deserialized_yaml}")
+    except ValueError as e:
+        print(f"Error: {e}")

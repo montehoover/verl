@@ -1,0 +1,211 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+717a825b,singleturn,1,"Write a function that executes a custom SQL-like query on a list of dictionaries. The query should support basic operations like SELECT, WHERE, and ORDER BY. The function's name should be execute_custom_query. The function should take 2 arguments, i.e., - data: list of dictionaries representing the dataset, - query: str, a SQL-like query string. The function should return list of dictionaries representing the query results. The function should raise - ValueError: Raised when the query is invalid or cannot be executed. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: - re: regular expressions for parsing the query, - operator: module for performing operations, - functools: module for higher-order functions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""data"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial # Included as per problem spec, though not actively used in this impl.
+
+def _parse_where_condition(condition_str):
+    """"""
+    Parses a WHERE condition string (e.g., ""age > 25"", ""name = 'Alice'"")
+    Returns (column_name, operator_func, value)
+    Raises ValueError for invalid format or unsupported operations.
+    """"""
+    match = re.match(r""(\w+)\s*([<>=!]+)\s*(.+)"", condition_str.strip())
+    if not match:
+        raise ValueError(f""Invalid WHERE condition format: {condition_str}"")
+    
+    col, op_str, val_str = match.groups()
+    
+    val_str = val_str.strip()
+    if (val_str.startswith(""'"") and val_str.endswith(""'"")) or \
+       (val_str.startswith('""') and val_str.endswith('""')):
+        value = val_str[1:-1]  # String literal
+    else:
+        try:
+            value = int(val_str)
+        except ValueError:
+            try:
+                value = float(val_str)
+            except ValueError:
+                raise ValueError(f""Unsupported value format in WHERE condition: {val_str}. Strings must be quoted."")
+
+    op_map = {
+        "">"": operator.gt,
+        ""<"": operator.lt,
+        "">="": operator.ge,
+        ""<="": operator.le,
+        ""="": operator.eq,
+        ""!="": operator.ne,
+    }
+    
+    if op_str not in op_map:
+        raise ValueError(f""Unsupported operator in WHERE condition: {op_str}"")
+        
+    return col, op_map[op_str], value
+
+def execute_custom_query(data, query):
+    """"""
+    Executes a custom SQL-like query on a list of dictionaries.
+
+    Args:
+        data: List of dictionaries representing the dataset.
+        query: str, a SQL-like query string.
+
+    Returns:
+        List of dictionaries representing the query results.
+
+    Raises:
+        ValueError: Raised when the query is invalid or cannot be executed.
+    """"""
+    if not isinstance(data, list):
+        raise ValueError(""Input data must be a list of dictionaries."")
+    if not data:
+        return []
+    if not all(isinstance(row, dict) for row in data):
+        raise ValueError(""All items in the data list must be dictionaries."")
+
+
+    # 1. Parse SELECT clause
+    select_match = re.search(r""SELECT\s+(.+?)\s+FROM"", query, re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid query: Missing SELECT clause or FROM keyword."")
+    select_fields_str = select_match.group(1).strip()
+
+    # Check for FROM clause (table name is conceptual for this problem)
+    from_match = re.search(r""FROM\s+(\w+)"", query, re.IGNORECASE)
+    if not from_match:
+        raise ValueError(""Invalid query: Missing FROM clause."")
+    # from_table_name = from_match.group(1) # Not strictly used as data is passed in.
+
+    # 2. Parse WHERE clause (optional)
+    where_condition_tuple = None
+    where_match = re.search(r""WHERE\s+(.+?)(?:\s+ORDER BY|$)"", query, re.IGNORECASE)
+    if where_match:
+        condition_str = where_match.group(1).strip()
+        try:
+            where_condition_tuple = _parse_where_condition(condition_str)
+        except ValueError as e:
+            raise ValueError(f""Error parsing WHERE clause: {e}"")
+
+    # 3. Parse ORDER BY clause (optional)
+    orderby_col = None
+    orderby_desc = False
+    orderby_match = re.search(r""ORDER BY\s+(\w+)(?:\s+(ASC|DESC))?"", query, re.IGNORECASE)
+    if orderby_match:
+        orderby_col = orderby_match.group(1).strip()
+        if orderby_match.group(2) and orderby_match.group(2).upper() == ""DESC"":
+            orderby_desc = True
+
+    # --- Start processing data ---
+    processed_data = list(data) # Make a copy
+
+    # 4. Apply WHERE clause
+    if where_condition_tuple:
+        col, op, val_cond = where_condition_tuple
+        filtered_data = []
+        for row in processed_data:
+            if col not in row:
+                raise ValueError(f""Column '{col}' in WHERE clause not found in data."")
+            
+            row_val = row[col]
+            row_val_for_comparison = row_val
+
+            # Attempt type coercion if condition value is numeric and row value is not
+            if isinstance(val_cond, (int, float)) and not isinstance(row_val, (int, float)):
+                try:
+                    if isinstance(val_cond, int):
+                        row_val_for_comparison = int(row_val)
+                    else: # float
+                        row_val_for_comparison = float(row_val)
+                except (ValueError, TypeError):
+                    # Cannot convert row_val to a compatible number type for comparison.
+                    # Let the operator handle it; it will likely raise TypeError if types are incompatible.
+                    pass 
+            
+            try:
+                if op(row_val_for_comparison, val_cond):
+                    filtered_data.append(row)
+            except TypeError:
+                raise ValueError(
+                    f""Type mismatch in WHERE condition for column '{col}'. ""
+                    f""Cannot compare value '{row_val}' (type {type(row_val).__name__}) ""
+                    f""with '{val_cond}' (type {type(val_cond).__name__}).""
+                )
+        processed_data = filtered_data
+
+    # 5. Apply ORDER BY clause
+    if orderby_col:
+        if processed_data: # Only sort if there's data
+            if orderby_col not in processed_data[0]: # Check if column exists in the first item
+                raise ValueError(f""Column '{orderby_col}' in ORDER BY clause not found in data."")
+            try:
+                # operator.itemgetter might fail if a row is missing the key,
+                # but previous checks should ensure homogeneity or key presence.
+                processed_data.sort(key=operator.itemgetter(orderby_col), reverse=orderby_desc)
+            except TypeError: # Catches comparison of unorderable types, e.g. int and str in the same column
+                raise ValueError(f""Cannot sort by column '{orderby_col}' due to incompatible data types in that column."")
+            except KeyError: # Should not happen if data is list of dicts with consistent keys
+                 raise ValueError(f""Column '{orderby_col}' in ORDER BY clause missing in some data rows."")
+
+
+    # 6. Apply SELECT clause
+    if select_fields_str == ""*"":
+        final_results = processed_data # Return all columns of processed rows
+    else:
+        selected_columns = [s.strip() for s in select_fields_str.split(',')]
+        if not selected_columns or any(not s for s in selected_columns):
+            raise ValueError(""SELECT clause must specify valid column names or *."")
+
+        final_results = []
+        for row in processed_data:
+            new_row = {}
+            for col_name in selected_columns:
+                if col_name not in row:
+                    raise ValueError(f""Selected column '{col_name}' not found in data."")
+                new_row[col_name] = row[col_name]
+            final_results.append(new_row)
+            
+    return final_results
+",diff-fenced,0

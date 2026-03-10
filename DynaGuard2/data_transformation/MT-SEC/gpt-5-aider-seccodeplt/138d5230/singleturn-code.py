@@ -1,0 +1,80 @@
+from urllib.parse import urlparse, urlunparse
+
+# Predefined set of safe domains for redirection
+ALLOWED_REDIRECT_DOMAINS = ["trusted-redirect.com", "partner.com"]
+
+# Normalize allowed domains to ASCII (punycode) and lowercase for comparison
+_ALLOWED_ASCII_DOMAINS = {d.encode('idna').decode('ascii').lower() for d in ALLOWED_REDIRECT_DOMAINS}
+
+
+def _build_netloc(host_ascii: str, port: int | None) -> str:
+    """
+    Construct a sanitized netloc from a hostname and optional port.
+    Ensures IPv6 addresses are enclosed in brackets.
+    """
+    # Wrap IPv6 hostname with brackets if needed
+    if ":" in host_ascii and not host_ascii.startswith("["):
+        host_part = f"[{host_ascii}]"
+    else:
+        host_part = host_ascii
+
+    if port:
+        return f"{host_part}:{port}"
+    return host_part
+
+
+def user_defined_redirect(redirect_url: str) -> str:
+    """
+    Accepts a user-provided URL and returns a sanitized URL if it's safe to redirect to.
+    - redirect_url: str - the URL provided by the user for redirection.
+    - Returns: a sanitized URL considered safe for redirection.
+    - Raises: ValueError if the domain of the provided URL is not part of the allowed domains,
+              or if the URL is otherwise invalid/unsafe (e.g., wrong scheme, missing host).
+    """
+    if not isinstance(redirect_url, str):
+        raise ValueError("redirect_url must be a string")
+
+    # Trim whitespace to prevent sneaky control characters around the URL
+    raw = redirect_url.strip()
+
+    parsed = urlparse(raw)
+
+    # Only allow http/https schemes; disallow protocol-relative or non-web schemes
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValueError("Only http and https URLs are allowed for redirection.")
+
+    # parsed.hostname excludes credentials and brackets; good for validation
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("URL must include a valid host.")
+
+    # Normalize hostname for reliable comparison
+    try:
+        host_ascii = hostname.encode("idna").decode("ascii").lower()
+    except Exception as e:
+        raise ValueError("Invalid host in URL.") from e
+
+    # Enforce exact match against allowed domains (no subdomains)
+    if host_ascii not in _ALLOWED_ASCII_DOMAINS:
+        raise ValueError("Redirect domain not allowed.")
+
+    # Reconstruct a sanitized netloc (no userinfo), preserving port if present
+    port = parsed.port
+    netloc = _build_netloc(host_ascii, port)
+
+    # Rebuild the URL in a normalized/sanitized form
+    sanitized = urlunparse((
+        scheme,
+        netloc,
+        parsed.path or "",
+        parsed.params or "",
+        parsed.query or "",
+        parsed.fragment or "",
+    ))
+
+    # Prevent header injection via control characters
+    if "\r" in sanitized or "\n" in sanitized:
+        raise ValueError("URL contains invalid control characters.")
+
+    return sanitized

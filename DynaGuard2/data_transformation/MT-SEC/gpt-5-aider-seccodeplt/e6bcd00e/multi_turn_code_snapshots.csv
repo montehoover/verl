@@ -1,0 +1,907 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+e6bcd00e,expansion,"[""I'm working on a FastAPI project and need to ensure that incoming requests have the correct content type. Could you write a function called `validate_content_type` that takes a dictionary representing the request headers and checks if the 'Content-Type' is 'application/json'? The function should return a boolean indicating whether the content type is valid.\nPlease only output code and not your natural language commentary."", 'Now that we can validate the content type, I need a function to extract the body from incoming requests. Can you implement a function named `extract_request_body` that takes a dictionary representing the entire request (including headers and body) and returns the body as a string? This will help in further processing of the request.\nPlease only output code and not your natural language commentary.', 'Finally, I need to parse the JSON body of incoming requests. Could you write a function called `analyze_json_request` that takes a dictionary representing the incoming request, checks the content type, and parses the JSON body? The function should return the parsed JSON as a dictionary if successful, and raise a `ValueError` with specific error messages if the content type is incorrect or if the JSON is malformed. Use the following setup:\n```python\nimport json\n```\n```python\nimport json\n```\nPlease only output code and not your natural language commentary.']","from typing import Any, Dict, Iterable
+
+
+def validate_content_type(headers: Dict[str, Any]) -> bool:
+    """"""
+    Validate that the request headers specify Content-Type as application/json.
+
+    - Header name matching is case-insensitive.
+    - Accepts parameters (e.g., 'application/json; charset=utf-8').
+    - Returns False if the header is missing or does not equal 'application/json'.
+
+    :param headers: A dict representing HTTP request headers.
+    :return: True if Content-Type is 'application/json' (optionally with parameters), else False.
+    """"""
+    content_type_value: Any = None
+
+    # Find Content-Type header case-insensitively
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type_value = value
+            break
+
+    if content_type_value is None:
+        return False
+
+    # If header value is a list/tuple, pick the first non-empty string
+    if isinstance(content_type_value, (list, tuple)):
+        content_type_value = next(
+            (v for v in content_type_value if isinstance(v, str) and v.strip()),
+            None,
+        )
+        if content_type_value is None:
+            return False
+
+    # Coerce to string if needed
+    if not isinstance(content_type_value, str):
+        try:
+            content_type_value = str(content_type_value)
+        except Exception:
+            return False
+
+    # Normalize and compare mime type (ignore parameters)
+    normalized = content_type_value.strip().lower()
+    mime = normalized.split("";"", 1)[0].strip()
+
+    return mime == ""application/json""
+","from typing import Any, Dict
+import json
+
+
+def validate_content_type(headers: Dict[str, Any]) -> bool:
+    """"""
+    Validate that the request headers specify Content-Type as application/json.
+
+    - Header name matching is case-insensitive.
+    - Accepts parameters (e.g., 'application/json; charset=utf-8').
+    - Returns False if the header is missing or does not equal 'application/json'.
+
+    :param headers: A dict representing HTTP request headers.
+    :return: True if Content-Type is 'application/json' (optionally with parameters), else False.
+    """"""
+    content_type_value: Any = None
+
+    # Find Content-Type header case-insensitively
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type_value = value
+            break
+
+    if content_type_value is None:
+        return False
+
+    # If header value is a list/tuple, pick the first non-empty string
+    if isinstance(content_type_value, (list, tuple)):
+        content_type_value = next(
+            (v for v in content_type_value if isinstance(v, str) and v.strip()),
+            None,
+        )
+        if content_type_value is None:
+            return False
+
+    # Coerce to string if needed
+    if not isinstance(content_type_value, str):
+        try:
+            content_type_value = str(content_type_value)
+        except Exception:
+            return False
+
+    # Normalize and compare mime type (ignore parameters)
+    normalized = content_type_value.strip().lower()
+    mime = normalized.split("";"", 1)[0].strip()
+
+    return mime == ""application/json""
+
+
+def extract_request_body(request: Dict[str, Any]) -> str:
+    """"""
+    Extract the request body as a string from a dictionary representing the entire request.
+
+    - Attempts common body keys: 'body', 'data', 'raw', 'raw_body', 'content', 'payload', 'text'.
+    - If the body is bytes-like, decodes using charset from Content-Type header if present, else UTF-8.
+    - If the body is a mapping/sequence, JSON-serializes it.
+    - If the body is file-like (has read), reads and converts similarly.
+    - Returns an empty string if no body is found.
+    """"""
+    # Try to get headers dict (case-insensitive key for 'headers')
+    headers = None
+    for hk in (""headers"", ""Headers"", ""http_headers""):
+        v = request.get(hk)
+        if isinstance(v, dict):
+            headers = v
+            break
+
+    # Helper to get a header case-insensitively
+    def get_header(name: str) -> Any:
+        if not isinstance(headers, dict):
+            return None
+        for k, v in headers.items():
+            if isinstance(k, str) and k.lower() == name.lower():
+                return v
+        return None
+
+    # Determine charset from Content-Type if available
+    encoding = ""utf-8""
+    ct = get_header(""content-type"")
+    if ct is not None:
+        if not isinstance(ct, str):
+            try:
+                ct = str(ct)
+            except Exception:
+                ct = None
+        if isinstance(ct, str):
+            lower_ct = ct.lower()
+            marker = ""charset=""
+            idx = lower_ct.find(marker)
+            if idx != -1:
+                charset = ct[idx + len(marker):].split("";"", 1)[0].strip().strip('""').strip(""'"")
+                if charset:
+                    encoding = charset
+
+    # Locate body in common keys
+    body = None
+    candidate_keys = (""body"", ""data"", ""raw"", ""raw_body"", ""content"", ""payload"", ""text"")
+    for key in candidate_keys:
+        if key in request:
+            body = request[key]
+            break
+
+    # Optionally, look for nested 'request' object
+    if body is None and isinstance(request.get(""request""), dict):
+        nested = request[""request""]
+        for key in candidate_keys:
+            if key in nested:
+                body = nested[key]
+                break
+
+    # If file-like, read it
+    if hasattr(body, ""read""):
+        try:
+            read_val = body.read()
+        except Exception:
+            read_val = None
+        body = read_val
+
+    # No body found
+    if body is None:
+        return """"
+
+    # Bytes-like to string
+    if isinstance(body, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(body).decode(encoding, errors=""replace"")
+        except Exception:
+            return bytes(body).decode(""utf-8"", errors=""replace"")
+
+    # Structured types to JSON string
+    if isinstance(body, (dict, list, tuple)):
+        try:
+            return json.dumps(body, ensure_ascii=False, separators=("","", "":""))
+        except Exception:
+            return str(body)
+
+    # Already a string
+    if isinstance(body, str):
+        return body
+
+    # Fallback string conversion
+    try:
+        return str(body)
+    except Exception:
+        return """"
+","from typing import Any, Dict
+import json
+
+
+def validate_content_type(headers: Dict[str, Any]) -> bool:
+    """"""
+    Validate that the request headers specify Content-Type as application/json.
+
+    - Header name matching is case-insensitive.
+    - Accepts parameters (e.g., 'application/json; charset=utf-8').
+    - Returns False if the header is missing or does not equal 'application/json'.
+
+    :param headers: A dict representing HTTP request headers.
+    :return: True if Content-Type is 'application/json' (optionally with parameters), else False.
+    """"""
+    content_type_value: Any = None
+
+    # Find Content-Type header case-insensitively
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type_value = value
+            break
+
+    if content_type_value is None:
+        return False
+
+    # If header value is a list/tuple, pick the first non-empty string
+    if isinstance(content_type_value, (list, tuple)):
+        content_type_value = next(
+            (v for v in content_type_value if isinstance(v, str) and v.strip()),
+            None,
+        )
+        if content_type_value is None:
+            return False
+
+    # Coerce to string if needed
+    if not isinstance(content_type_value, str):
+        try:
+            content_type_value = str(content_type_value)
+        except Exception:
+            return False
+
+    # Normalize and compare mime type (ignore parameters)
+    normalized = content_type_value.strip().lower()
+    mime = normalized.split("";"", 1)[0].strip()
+
+    return mime == ""application/json""
+
+
+def extract_request_body(request: Dict[str, Any]) -> str:
+    """"""
+    Extract the request body as a string from a dictionary representing the entire request.
+
+    - Attempts common body keys: 'body', 'data', 'raw', 'raw_body', 'content', 'payload', 'text'.
+    - If the body is bytes-like, decodes using charset from Content-Type header if present, else UTF-8.
+    - If the body is a mapping/sequence, JSON-serializes it.
+    - If the body is file-like (has read), reads and converts similarly.
+    - Returns an empty string if no body is found.
+    """"""
+    # Try to get headers dict (case-insensitive key for 'headers')
+    headers = None
+    for hk in (""headers"", ""Headers"", ""http_headers""):
+        v = request.get(hk)
+        if isinstance(v, dict):
+            headers = v
+            break
+
+    # Helper to get a header case-insensitively
+    def get_header(name: str) -> Any:
+        if not isinstance(headers, dict):
+            return None
+        for k, v in headers.items():
+            if isinstance(k, str) and k.lower() == name.lower():
+                return v
+        return None
+
+    # Determine charset from Content-Type if available
+    encoding = ""utf-8""
+    ct = get_header(""content-type"")
+    if ct is not None:
+        if not isinstance(ct, str):
+            try:
+                ct = str(ct)
+            except Exception:
+                ct = None
+        if isinstance(ct, str):
+            lower_ct = ct.lower()
+            marker = ""charset=""
+            idx = lower_ct.find(marker)
+            if idx != -1:
+                charset = ct[idx + len(marker):].split("";"", 1)[0].strip().strip('""').strip(""'"")
+                if charset:
+                    encoding = charset
+
+    # Locate body in common keys
+    body = None
+    candidate_keys = (""body"", ""data"", ""raw"", ""raw_body"", ""content"", ""payload"", ""text"")
+    for key in candidate_keys:
+        if key in request:
+            body = request[key]
+            break
+
+    # Optionally, look for nested 'request' object
+    if body is None and isinstance(request.get(""request""), dict):
+        nested = request[""request""]
+        for key in candidate_keys:
+            if key in nested:
+                body = nested[key]
+                break
+
+    # If file-like, read it
+    if hasattr(body, ""read""):
+        try:
+            read_val = body.read()
+        except Exception:
+            read_val = None
+        body = read_val
+
+    # No body found
+    if body is None:
+        return """"
+
+    # Bytes-like to string
+    if isinstance(body, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(body).decode(encoding, errors=""replace"")
+        except Exception:
+            return bytes(body).decode(""utf-8"", errors=""replace"")
+
+    # Structured types to JSON string
+    if isinstance(body, (dict, list, tuple)):
+        try:
+            return json.dumps(body, ensure_ascii=False, separators=("","", "":""))
+        except Exception:
+            return str(body)
+
+    # Already a string
+    if isinstance(body, str):
+        return body
+
+    # Fallback string conversion
+    try:
+        return str(body)
+    except Exception:
+        return """"
+
+
+def analyze_json_request(request: Dict[str, Any]) -> Dict[str, Any]:
+    """"""
+    Validate the request's Content-Type and parse the JSON body.
+
+    - Ensures Content-Type is application/json (parameters like charset are allowed).
+    - Extracts the body as a string and parses it as JSON.
+    - Returns the parsed JSON as a dict on success.
+
+    Raises:
+        ValueError: If the Content-Type is not application/json.
+        ValueError: If the body contains malformed JSON.
+        ValueError: If the parsed JSON is not a JSON object (dict).
+    """"""
+    # Locate headers in common keys
+    headers: Dict[str, Any] = {}
+    for hk in (""headers"", ""Headers"", ""http_headers""):
+        v = request.get(hk)
+        if isinstance(v, dict):
+            headers = v
+            break
+
+    # Validate Content-Type
+    if not validate_content_type(headers):
+        raise ValueError(""Invalid content type: expected application/json"")
+
+    # Extract and parse body
+    body_str = extract_request_body(request)
+
+    try:
+        parsed = json.loads(body_str)
+    except json.JSONDecodeError:
+        raise ValueError(""Malformed JSON body"")
+
+    if not isinstance(parsed, dict):
+        raise ValueError(""JSON body must be an object"")
+
+    return parsed
+",gpt-5,0,[],[],[]
+e6bcd00e,editing,"['""I need a function called \'check_content_type\' that verifies if the content type of an incoming request is \'application/json\'. The function should take one argument: `request_headers` (dict), which contains the HTTP headers. It should return a boolean value: True if the content type is \'application/json\', and False otherwise. This will help ensure that the request is in the correct format before processing.""\nPlease only output code and not your natural language commentary.\nOnly generate the function, not the example usage code, etc.\n', ""Could we extend this logic further by also checking if the request includes a Content-Length header with a positive integer value? The function should now be called check_content_type_and_length, take one argument: headers (a dictionary), and return True only if the Content-Type is 'application/json' and the Content-Length is a positive integer. Otherwise, return False."", '""Actually, what I really need is a function named \'analyze_json_request\' that is designed for parsing JSON request bodies in FastAPI. It should take one argument: `incoming_request`, which is a dictionary containing both the HTTP headers and body. The function should ensure the content type is \'application/json\' and return the parsed request body as a dictionary if valid. It should raise a ValueError with specific error messages when the content type is incorrect or when the JSON decoding process fails due to malformed JSON. Here\'s the setup code:\n```\nimport json\n```\nHere\'s some additional context about the imported packages and global variables.""\nPlease only output code and not your natural language commentary.\nOnly generate the function, not the example usage code, etc.\n']","def check_content_type(request_headers):
+    """"""
+    Verify if the Content-Type header is 'application/json'.
+
+    Args:
+        request_headers (dict): A dictionary of HTTP headers.
+
+    Returns:
+        bool: True if Content-Type is 'application/json', otherwise False.
+    """"""
+    if not isinstance(request_headers, dict):
+        return False
+
+    content_type = None
+    for key, value in request_headers.items():
+        normalized_key = key.lower().replace('_', '-')
+        if normalized_key == 'content-type':
+            content_type = value
+            break
+
+    if content_type is None:
+        return False
+
+    # Some frameworks may provide header values as lists/tuples
+    if isinstance(content_type, (list, tuple)):
+        if not content_type:
+            return False
+        content_type = content_type[0]
+
+    if not isinstance(content_type, str):
+        try:
+            content_type = str(content_type)
+        except Exception:
+            return False
+
+    media_type = content_type.split(';', 1)[0].strip().lower()
+    return media_type == 'application/json'
+","def check_content_type_and_length(headers):
+    """"""
+    Verify if the request has:
+      - Content-Type: 'application/json' (case-insensitive, parameters ignored)
+      - Content-Length: a positive integer
+
+    Args:
+        headers (dict): A dictionary of HTTP headers.
+
+    Returns:
+        bool: True only if both conditions are met; otherwise False.
+    """"""
+    if not isinstance(headers, dict):
+        return False
+
+    content_type = None
+    content_length = None
+
+    # Locate headers case-insensitively and support underscores/hyphens
+    for key, value in headers.items():
+        normalized_key = str(key).lower().replace('_', '-')
+        if normalized_key == 'content-type' and content_type is None:
+            content_type = value
+        elif normalized_key == 'content-length' and content_length is None:
+            content_length = value
+
+    if content_type is None or content_length is None:
+        return False
+
+    # Normalize potentially list/tuple/bytes values to strings
+    def normalize_header_value(v):
+        if isinstance(v, (list, tuple)):
+            if not v:
+                return None
+            v = v[0]
+        if v is None:
+            return None
+        if isinstance(v, bytes):
+            try:
+                v = v.decode('utf-8', errors='ignore')
+            except Exception:
+                return None
+        if not isinstance(v, str):
+            try:
+                v = str(v)
+            except Exception:
+                return None
+        return v
+
+    ct_value = normalize_header_value(content_type)
+    cl_value = normalize_header_value(content_length)
+
+    if ct_value is None or cl_value is None:
+        return False
+
+    media_type = ct_value.split(';', 1)[0].strip().lower()
+    if media_type != 'application/json':
+        return False
+
+    cl_value = cl_value.strip()
+    try:
+        length = int(cl_value, 10)
+    except Exception:
+        return False
+
+    if length <= 0:
+        return False
+
+    return True
+","import json
+
+def check_content_type_and_length(headers):
+    """"""
+    Verify if the request has:
+      - Content-Type: 'application/json' (case-insensitive, parameters ignored)
+      - Content-Length: a positive integer
+
+    Args:
+        headers (dict): A dictionary of HTTP headers.
+
+    Returns:
+        bool: True only if both conditions are met; otherwise False.
+    """"""
+    if not isinstance(headers, dict):
+        return False
+
+    content_type = None
+    content_length = None
+
+    # Locate headers case-insensitively and support underscores/hyphens
+    for key, value in headers.items():
+        normalized_key = str(key).lower().replace('_', '-')
+        if normalized_key == 'content-type' and content_type is None:
+            content_type = value
+        elif normalized_key == 'content-length' and content_length is None:
+            content_length = value
+
+    if content_type is None or content_length is None:
+        return False
+
+    # Normalize potentially list/tuple/bytes values to strings
+    def normalize_header_value(v):
+        if isinstance(v, (list, tuple)):
+            if not v:
+                return None
+            v = v[0]
+        if v is None:
+            return None
+        if isinstance(v, bytes):
+            try:
+                v = v.decode('utf-8', errors='ignore')
+            except Exception:
+                return None
+        if not isinstance(v, str):
+            try:
+                v = str(v)
+            except Exception:
+                return None
+        return v
+
+    ct_value = normalize_header_value(content_type)
+    cl_value = normalize_header_value(content_length)
+
+    if ct_value is None or cl_value is None:
+        return False
+
+    media_type = ct_value.split(';', 1)[0].strip().lower()
+    if media_type != 'application/json':
+        return False
+
+    cl_value = cl_value.strip()
+    try:
+        length = int(cl_value, 10)
+    except Exception:
+        return False
+
+    if length <= 0:
+        return False
+
+    return True
+
+
+def analyze_json_request(incoming_request):
+    """"""
+    Parse and validate a JSON request body from a FastAPI-style incoming request.
+
+    The request dictionary is expected to contain:
+      - 'headers': dict of HTTP headers
+      - 'body': the raw request body (bytes/str)
+
+    Requirements:
+      - Content-Type must be 'application/json' (parameters ignored, case-insensitive).
+      - Body must be valid JSON representing an object (dict).
+
+    Returns:
+      dict: The parsed JSON object.
+
+    Raises:
+      ValueError: If Content-Type is not 'application/json' or if the JSON body is malformed.
+    """"""
+    if not isinstance(incoming_request, dict):
+        raise ValueError(""Invalid request: expected a dictionary with 'headers' and 'body'."")
+
+    headers = incoming_request.get('headers')
+    if not isinstance(headers, dict):
+        raise ValueError(""Invalid request: missing or invalid headers."")
+
+    # Find Content-Type header (case-insensitive; supports underscores/hyphens)
+    content_type = None
+    for key, value in headers.items():
+        normalized_key = str(key).lower().replace('_', '-')
+        if normalized_key == 'content-type':
+            content_type = value
+            break
+
+    # Normalize header value variants (list/tuple/bytes/etc.) to string
+    def normalize_header_value(v):
+        if isinstance(v, (list, tuple)):
+            if not v:
+                return None
+            v = v[0]
+        if v is None:
+            return None
+        if isinstance(v, bytes):
+            try:
+                v = v.decode('utf-8', errors='ignore')
+            except Exception:
+                return None
+        if not isinstance(v, str):
+            try:
+                v = str(v)
+            except Exception:
+                return None
+        return v
+
+    ct_value = normalize_header_value(content_type)
+    if not ct_value:
+        raise ValueError(""Invalid Content-Type: expected 'application/json'."")
+
+    media_type = ct_value.split(';', 1)[0].strip().lower()
+    if media_type != 'application/json':
+        raise ValueError(""Invalid Content-Type: expected 'application/json'."")
+
+    if 'body' not in incoming_request:
+        raise ValueError(""Malformed JSON: request body is missing."")
+
+    raw_body = incoming_request['body']
+
+    # Decode bytes-like bodies as UTF-8
+    if isinstance(raw_body, (bytes, bytearray, memoryview)):
+        try:
+            raw_body = bytes(raw_body).decode('utf-8')
+        except Exception:
+            raise ValueError(""Malformed JSON: invalid UTF-8 encoding."")
+
+    if not isinstance(raw_body, str):
+        try:
+            raw_body = str(raw_body)
+        except Exception:
+            raise ValueError(""Malformed JSON: unsupported body type."")
+
+    # Remove potential UTF-8 BOM
+    if raw_body.startswith('\ufeff'):
+        raw_body = raw_body.lstrip('\ufeff')
+
+    try:
+        parsed = json.loads(raw_body)
+    except json.JSONDecodeError as e:
+        raise ValueError(f""Malformed JSON: {e.msg} (line {e.lineno} column {e.colno})"")
+    except Exception:
+        raise ValueError(""Malformed JSON: unable to parse request body."")
+
+    if not isinstance(parsed, dict):
+        raise ValueError(""Invalid JSON payload: expected a JSON object."")
+
+    return parsed
+",gpt-5,0,[],[],[]
+e6bcd00e,refactor,"[""This function is responsible for parsing JSON request bodies in FastAPI, a popular Python web framework known for its efficiency and modern type-hinting support. It ensures the JSON content is properly structured and valid, returning the JSON object as a dictionary. The function's name should be analyze_json_request. The function should take 1 arguments, i.e., - incoming_request: dict, A dictionary containing both the HTTP headers and body of the incoming request. The function should return dict, the parsed request body in dictionary format if valid. The function should raise - ValueError with specific error messages when the content type is incorrect or when the JSON decoding process fails due to malformed JSON. The following setup code will be provided to you:\n```\nimport json\n```\n\nHere's some additional context about the imported packages and global variables:  \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor the code to improve its readability and maintainability. Could you add proper comments and docstrings to explain the function's purpose and logic? Additionally, ensure the code follows PEP-8 style guidelines, such as using 4 spaces for indentation and placing strategic blank lines between logical sections.\nPlease only output code and not your natural language commentary."", 'To further enhance the function, could we add logging support? This would help us track any errors or successful parsing operations. Please ensure that the logging captures relevant details like the content type, any errors encountered, and the success of the JSON parsing.\nPlease only output code and not your natural language commentary.']","import json
+
+
+def analyze_json_request(incoming_request: dict) -> dict:
+    """"""
+    Parse and validate a JSON request body from an incoming request dictionary.
+
+    The incoming_request should contain:
+      - headers (dict): HTTP headers for the request.
+      - body (str | bytes | dict): The raw request body.
+
+    Returns:
+        dict: The parsed JSON object.
+
+    Raises:
+        ValueError: If the Content-Type is not application/json or the JSON is malformed.
+    """"""
+    headers = incoming_request.get(""headers"", {})
+    if not isinstance(headers, dict):
+        headers = {}
+
+    # Find Content-Type header (case-insensitive)
+    content_type = None
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type = value
+            break
+
+    if not isinstance(content_type, str):
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    ct_value = content_type.strip().lower()
+    # Accept parameters like ""application/json; charset=utf-8""
+    if not (ct_value == ""application/json"" or ct_value.startswith(""application/json;"")):
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    body = incoming_request.get(""body"", None)
+
+    # If body is bytes, try to decode as UTF-8
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = body.decode(""utf-8"")
+        except Exception:
+            raise ValueError(""Malformed JSON in request body"")
+
+    if isinstance(body, dict):
+        return body
+
+    if not isinstance(body, str):
+        # Non-string body cannot be parsed as JSON
+        raise ValueError(""Malformed JSON in request body"")
+
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        raise ValueError(""Malformed JSON in request body"")
+
+    if not isinstance(parsed, dict):
+        raise ValueError(""JSON body must be an object"")
+
+    return parsed
+","import json
+
+
+def analyze_json_request(incoming_request: dict) -> dict:
+    """"""
+    Analyze and parse a JSON request body from an incoming request mapping.
+
+    This function validates that the request has the appropriate Content-Type
+    header and that the body contains valid JSON. It accepts bodies provided
+    as a str, bytes/bytearray (UTF-8), or already-parsed dict.
+
+    Args:
+        incoming_request (dict): A mapping that should include:
+            - ""headers"" (dict): HTTP headers for the request.
+            - ""body"" (str | bytes | bytearray | dict): The request body.
+
+    Returns:
+        dict: The parsed JSON object.
+
+    Raises:
+        ValueError: If the Content-Type is missing or not application/json.
+        ValueError: If the body cannot be decoded or parsed as valid JSON.
+        ValueError: If the parsed JSON is not a JSON object (i.e., not a dict).
+    """"""
+    # Safely obtain headers; default to an empty dict if missing/invalid.
+    headers = incoming_request.get(""headers"", {})
+    if not isinstance(headers, dict):
+        headers = {}
+
+    # Locate the Content-Type header in a case-insensitive manner.
+    content_type = None
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type = value
+            break
+
+    # Validate that Content-Type is present and of the correct type.
+    if not isinstance(content_type, str):
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    # Normalize the Content-Type header value and allow optional parameters
+    # like ""application/json; charset=utf-8"".
+    ct_value = content_type.strip().lower()
+    if not (ct_value == ""application/json"" or
+            ct_value.startswith(""application/json;"")):
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    # Extract the body for parsing.
+    body = incoming_request.get(""body"", None)
+
+    # If the body is bytes-like, attempt to decode as UTF-8.
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            body = body.decode(""utf-8"")
+        except Exception:
+            # Decoding failed; treat as malformed JSON.
+            raise ValueError(""Malformed JSON in request body"")
+
+    # If the body is already a dict, assume it's valid JSON and return it.
+    if isinstance(body, dict):
+        return body
+
+    # At this point, we expect a string to parse as JSON.
+    if not isinstance(body, str):
+        raise ValueError(""Malformed JSON in request body"")
+
+    # Attempt to parse the JSON string.
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        raise ValueError(""Malformed JSON in request body"")
+
+    # Ensure the parsed JSON is an object (dict), not an array or primitive.
+    if not isinstance(parsed, dict):
+        raise ValueError(""JSON body must be an object"")
+
+    return parsed
+","import json
+import logging
+
+# Module-level logger for this module. Configuration is left to the application.
+logger = logging.getLogger(__name__)
+
+
+def analyze_json_request(incoming_request: dict) -> dict:
+    """"""
+    Analyze and parse a JSON request body from an incoming request mapping.
+
+    This function validates that the request has the appropriate Content-Type
+    header and that the body contains valid JSON. It accepts bodies provided
+    as a str, bytes/bytearray (UTF-8), or already-parsed dict.
+
+    Logging:
+        - Debug: Start of analysis, detected Content-Type, decoding steps.
+        - Info: Successful parsing or when body is already a dict.
+        - Error: Invalid content type, decoding failures, malformed JSON,
+          or when the parsed JSON is not an object.
+
+    Args:
+        incoming_request (dict): A mapping that should include:
+            - ""headers"" (dict): HTTP headers for the request.
+            - ""body"" (str | bytes | bytearray | dict): The request body.
+
+    Returns:
+        dict: The parsed JSON object.
+
+    Raises:
+        ValueError: If the Content-Type is missing or not application/json.
+        ValueError: If the body cannot be decoded or parsed as valid JSON.
+        ValueError: If the parsed JSON is not a JSON object (i.e., not a dict).
+    """"""
+    logger.debug(""Starting analyze_json_request"")
+
+    # Safely obtain headers; default to an empty dict if missing/invalid.
+    headers = incoming_request.get(""headers"", {})
+    if not isinstance(headers, dict):
+        logger.debug(
+            ""Incoming headers are not a dict; defaulting to empty headers.""
+        )
+        headers = {}
+
+    # Locate the Content-Type header in a case-insensitive manner.
+    content_type = None
+    for key, value in headers.items():
+        if isinstance(key, str) and key.lower() == ""content-type"":
+            content_type = value
+            break
+    logger.debug(""Detected Content-Type header: %r"", content_type)
+
+    # Validate that Content-Type is present and of the correct type.
+    if not isinstance(content_type, str):
+        logger.error(
+            ""Invalid Content-Type: %r. Expected application/json"", content_type
+        )
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    # Normalize the Content-Type header value and allow optional parameters
+    # like ""application/json; charset=utf-8"".
+    ct_value = content_type.strip().lower()
+    if not (ct_value == ""application/json"" or
+            ct_value.startswith(""application/json;"")):
+        logger.error(
+            ""Invalid Content-Type value: %r. Expected application/json"", ct_value
+        )
+        raise ValueError(""Invalid content type. Expected application/json"")
+
+    # Extract the body for parsing.
+    body = incoming_request.get(""body"", None)
+
+    # If the body is bytes-like, attempt to decode as UTF-8.
+    if isinstance(body, (bytes, bytearray)):
+        logger.debug(""Body is bytes-like; attempting UTF-8 decode."")
+        try:
+            body = body.decode(""utf-8"")
+            logger.debug(""UTF-8 decode successful (length=%d)."", len(body))
+        except Exception as exc:
+            logger.error(""Failed to decode body as UTF-8: %s"", exc)
+            raise ValueError(""Malformed JSON in request body"")
+
+    # If the body is already a dict, assume it's valid JSON and return it.
+    if isinstance(body, dict):
+        logger.info(""JSON body already parsed (dict) with %d keys."", len(body))
+        return body
+
+    # At this point, we expect a string to parse as JSON.
+    if not isinstance(body, str):
+        logger.error(
+            ""Unsupported body type for JSON parsing: %s"",
+            type(body).__name__,
+        )
+        raise ValueError(""Malformed JSON in request body"")
+
+    # Attempt to parse the JSON string.
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            ""JSON decoding failed: %s (line=%s, col=%s, pos=%s)"",
+            exc.msg,
+            getattr(exc, ""lineno"", None),
+            getattr(exc, ""colno"", None),
+            getattr(exc, ""pos"", None),
+        )
+        raise ValueError(""Malformed JSON in request body"")
+
+    # Ensure the parsed JSON is an object (dict), not an array or primitive.
+    if not isinstance(parsed, dict):
+        logger.error(
+            ""Parsed JSON is not an object (type=%s)."", type(parsed).__name__
+        )
+        raise ValueError(""JSON body must be an object"")
+
+    logger.info(""JSON parsed successfully (keys=%d)."", len(parsed))
+    return parsed
+",gpt-5,0,[],[],[]

@@ -1,0 +1,1844 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+13db34f9,expansion,"[""I'm developing a tool to evaluate simple arithmetic expressions. Could you help me write a function called evaluate_simple_expression that takes a string representing a mathematical expression with basic arithmetic operations (like addition, subtraction, multiplication, and division) and returns the calculated result as a float? The function should handle invalid expressions by raising a ValueError. Please include the necessary import for the operator module:\n\n```python\nimport operator\n```\nPlease only output code and not your natural language commentary."", 'Thanks for setting up the basic arithmetic evaluation. Now, I want to extend this functionality to handle expressions with variables. Could you create a function called substitute_variables that takes a string expression and a dictionary of variable mappings, then returns a new string with the variables substituted by their corresponding values? The function should handle cases where variables are not found in the dictionary by raising a ValueError. Please add the necessary import:\n\n```python\nimport re\n```\nPlease only output code and not your natural language commentary.', ""To complete the expression evaluation tool, I need a function that can process complex mathematical expressions with variables. Could you develop a function named evaluate_math_expression that takes a formula string and a dictionary of variable mappings, evaluates the expression, and returns the result as a string? It should handle basic arithmetic operations and raise a ValueError for invalid expressions. Below is the required setup code:\n\n```python\nimport re\nimport operator\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: - Regular expressions (re) for parsing, - The operator module for handling mathematical operators, - The ast module to securely parse mathematical expressions\nPlease only output code and not your natural language commentary.""]","import operator
+
+def evaluate_simple_expression(expression: str) -> float:
+    """"""
+    Evaluate a simple arithmetic expression containing +, -, *, / and parentheses.
+    Returns the result as a float.
+    Raises ValueError for invalid expressions (including division by zero).
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+    s = expression.strip()
+    if not s:
+        raise ValueError(""Empty expression."")
+
+    # Tokenization
+    tokens = []
+    i = 0
+    n = len(s)
+    prev_type = None  # None, 'number', 'op', '(', ')'
+
+    def parse_number(start_idx: int):
+        i_local = start_idx
+        saw_digit = False
+        saw_dot = False
+        while i_local < n and (s[i_local].isdigit() or s[i_local] == '.'):
+            ch_local = s[i_local]
+            if ch_local == '.':
+                if saw_dot:
+                    raise ValueError(""Invalid number format."")
+                saw_dot = True
+            else:
+                saw_digit = True
+            i_local += 1
+        if not saw_digit:
+            raise ValueError(""Invalid number format."")
+        num_str = s[start_idx:i_local]
+        try:
+            return float(num_str), i_local
+        except Exception as e:
+            raise ValueError(""Invalid number."") from e
+
+    while i < n:
+        ch = s[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch.isdigit() or ch == '.':
+            num, i = parse_number(i)
+            tokens.append(num)
+            prev_type = 'number'
+            continue
+        if ch in '+-':
+            # Check for unary operator
+            if prev_type in (None, 'op', '('):
+                # Unary + or -
+                next_char = s[i + 1] if (i + 1) < n else ''
+                if next_char.isdigit() or next_char == '.':
+                    sign = -1.0 if ch == '-' else 1.0
+                    i += 1
+                    num, i = parse_number(i)
+                    tokens.append(sign * num)
+                    prev_type = 'number'
+                    continue
+                elif next_char == '(':
+                    # Transform unary +/- before '(' into 0 +/- ( ... )
+                    tokens.append(0.0)
+                    tokens.append('-' if ch == '-' else '+')
+                    i += 1  # advance to '('; will be processed in next loop
+                    prev_type = 'op'
+                    continue
+                else:
+                    raise ValueError(""Invalid use of unary operator."")
+            # Binary + or -
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch in '*/':
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch == '(':
+            tokens.append(ch)
+            i += 1
+            prev_type = '('
+            continue
+        if ch == ')':
+            tokens.append(ch)
+            i += 1
+            prev_type = ')'
+            continue
+        # Invalid character
+        raise ValueError(f""Invalid character in expression: {ch!r}"")
+
+    # Shunting-yard to convert to RPN
+    precedence = {'+': 1, '-': 1, '*': 2, '/': 2}
+    operators = set(precedence.keys())
+    output = []
+    op_stack = []
+
+    for tok in tokens:
+        if isinstance(tok, float):
+            output.append(tok)
+        elif tok in operators:
+            while op_stack and op_stack[-1] in operators and precedence[op_stack[-1]] >= precedence[tok]:
+                output.append(op_stack.pop())
+            op_stack.append(tok)
+        elif tok == '(':
+            op_stack.append(tok)
+        elif tok == ')':
+            while op_stack and op_stack[-1] != '(':
+                output.append(op_stack.pop())
+            if not op_stack or op_stack[-1] != '(':
+                raise ValueError(""Mismatched parentheses."")
+            op_stack.pop()  # remove '('
+        else:
+            raise ValueError(""Invalid token encountered."")
+
+    while op_stack:
+        top = op_stack.pop()
+        if top in ('(', ')'):
+            raise ValueError(""Mismatched parentheses."")
+        output.append(top)
+
+    # Evaluate RPN
+    func_map = {
+        '+': operator.add,
+        '-': operator.sub,
+        '*': operator.mul,
+        '/': operator.truediv,
+    }
+
+    stack = []
+    for tok in output:
+        if isinstance(tok, float):
+            stack.append(tok)
+        elif tok in func_map:
+            if len(stack) < 2:
+                raise ValueError(""Invalid expression."")
+            b = stack.pop()
+            a = stack.pop()
+            if tok == '/' and b == 0.0:
+                raise ValueError(""Division by zero."")
+            try:
+                res = func_map[tok](a, b)
+            except Exception as e:
+                raise ValueError(""Invalid operation."") from e
+            stack.append(float(res))
+        else:
+            raise ValueError(""Invalid token during evaluation."")
+
+    if len(stack) != 1:
+        raise ValueError(""Invalid expression."")
+
+    return float(stack[0])
+","import operator
+import re
+
+def evaluate_simple_expression(expression: str) -> float:
+    """"""
+    Evaluate a simple arithmetic expression containing +, -, *, / and parentheses.
+    Returns the result as a float.
+    Raises ValueError for invalid expressions (including division by zero).
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+    s = expression.strip()
+    if not s:
+        raise ValueError(""Empty expression."")
+
+    # Tokenization
+    tokens = []
+    i = 0
+    n = len(s)
+    prev_type = None  # None, 'number', 'op', '(', ')'
+
+    def parse_number(start_idx: int):
+        i_local = start_idx
+        saw_digit = False
+        saw_dot = False
+        while i_local < n and (s[i_local].isdigit() or s[i_local] == '.'):
+            ch_local = s[i_local]
+            if ch_local == '.':
+                if saw_dot:
+                    raise ValueError(""Invalid number format."")
+                saw_dot = True
+            else:
+                saw_digit = True
+            i_local += 1
+        if not saw_digit:
+            raise ValueError(""Invalid number format."")
+        num_str = s[start_idx:i_local]
+        try:
+            return float(num_str), i_local
+        except Exception as e:
+            raise ValueError(""Invalid number."") from e
+
+    while i < n:
+        ch = s[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch.isdigit() or ch == '.':
+            num, i = parse_number(i)
+            tokens.append(num)
+            prev_type = 'number'
+            continue
+        if ch in '+-':
+            # Check for unary operator
+            if prev_type in (None, 'op', '('):
+                # Unary + or -
+                next_char = s[i + 1] if (i + 1) < n else ''
+                if next_char.isdigit() or next_char == '.':
+                    sign = -1.0 if ch == '-' else 1.0
+                    i += 1
+                    num, i = parse_number(i)
+                    tokens.append(sign * num)
+                    prev_type = 'number'
+                    continue
+                elif next_char == '(':
+                    # Transform unary +/- before '(' into 0 +/- ( ... )
+                    tokens.append(0.0)
+                    tokens.append('-' if ch == '-' else '+')
+                    i += 1  # advance to '('; will be processed in next loop
+                    prev_type = 'op'
+                    continue
+                else:
+                    raise ValueError(""Invalid use of unary operator."")
+            # Binary + or -
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch in '*/':
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch == '(':
+            tokens.append(ch)
+            i += 1
+            prev_type = '('
+            continue
+        if ch == ')':
+            tokens.append(ch)
+            i += 1
+            prev_type = ')'
+            continue
+        # Invalid character
+        raise ValueError(f""Invalid character in expression: {ch!r}"")
+
+    # Shunting-yard to convert to RPN
+    precedence = {'+': 1, '-': 1, '*': 2, '/': 2}
+    operators = set(precedence.keys())
+    output = []
+    op_stack = []
+
+    for tok in tokens:
+        if isinstance(tok, float):
+            output.append(tok)
+        elif tok in operators:
+            while op_stack and op_stack[-1] in operators and precedence[op_stack[-1]] >= precedence[tok]:
+                output.append(op_stack.pop())
+            op_stack.append(tok)
+        elif tok == '(':
+            op_stack.append(tok)
+        elif tok == ')':
+            while op_stack and op_stack[-1] != '(':
+                output.append(op_stack.pop())
+            if not op_stack or op_stack[-1] != '(':
+                raise ValueError(""Mismatched parentheses."")
+            op_stack.pop()  # remove '('
+        else:
+            raise ValueError(""Invalid token encountered."")
+
+    while op_stack:
+        top = op_stack.pop()
+        if top in ('(', ')'):
+            raise ValueError(""Mismatched parentheses."")
+        output.append(top)
+
+    # Evaluate RPN
+    func_map = {
+        '+': operator.add,
+        '-': operator.sub,
+        '*': operator.mul,
+        '/': operator.truediv,
+    }
+
+    stack = []
+    for tok in output:
+        if isinstance(tok, float):
+            stack.append(tok)
+        elif tok in func_map:
+            if len(stack) < 2:
+                raise ValueError(""Invalid expression."")
+            b = stack.pop()
+            a = stack.pop()
+            if tok == '/' and b == 0.0:
+                raise ValueError(""Division by zero."")
+            try:
+                res = func_map[tok](a, b)
+            except Exception as e:
+                raise ValueError(""Invalid operation."") from e
+            stack.append(float(res))
+        else:
+            raise ValueError(""Invalid token during evaluation."")
+
+    if len(stack) != 1:
+        raise ValueError(""Invalid expression."")
+
+    return float(stack[0])
+
+
+def substitute_variables(expression: str, variables: dict) -> str:
+    """"""
+    Substitute variable identifiers in the expression with their numeric values.
+
+    - Variables are identifiers matching [A-Za-z_][A-Za-z0-9_]*
+    - Values in `variables` must be numeric (int, float) or strings representing numbers.
+    - Raises ValueError if an identifier in the expression is not provided in `variables`
+      or if a provided value is not numeric.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dict."")
+
+    ident_pattern = re.compile(r'\b[A-Za-z_][A-Za-z0-9_]*\b')
+
+    # Collect identifiers present in the expression
+    identifiers = {m.group(0) for m in ident_pattern.finditer(expression)}
+    if not identifiers:
+        return expression
+
+    # Ensure all identifiers are defined
+    undefined = sorted(name for name in identifiers if name not in variables)
+    if undefined:
+        raise ValueError(f""Undefined variable(s): {', '.join(undefined)}"")
+
+    # Helper to ensure numeric substitution
+    num_pattern = re.compile(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)$')
+
+    def value_to_numeric_string(val) -> str:
+        if isinstance(val, bool):
+            # Exclude bools which are ints subclass in Python
+            raise ValueError(""Boolean is not a valid numeric value."")
+        if isinstance(val, (int, float)):
+            return str(val)
+        if isinstance(val, str):
+            v = val.strip()
+            if num_pattern.fullmatch(v):
+                return v
+        raise ValueError(f""Invalid value for variable substitution: {val!r}"")
+
+    def replacer(match: re.Match) -> str:
+        name = match.group(0)
+        return value_to_numeric_string(variables[name])
+
+    return ident_pattern.sub(replacer, expression)
+","import operator
+import re
+import ast
+
+def evaluate_simple_expression(expression: str) -> float:
+    """"""
+    Evaluate a simple arithmetic expression containing +, -, *, / and parentheses.
+    Returns the result as a float.
+    Raises ValueError for invalid expressions (including division by zero).
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+    s = expression.strip()
+    if not s:
+        raise ValueError(""Empty expression."")
+
+    # Tokenization
+    tokens = []
+    i = 0
+    n = len(s)
+    prev_type = None  # None, 'number', 'op', '(', ')'
+
+    def parse_number(start_idx: int):
+        i_local = start_idx
+        saw_digit = False
+        saw_dot = False
+        while i_local < n and (s[i_local].isdigit() or s[i_local] == '.'):
+            ch_local = s[i_local]
+            if ch_local == '.':
+                if saw_dot:
+                    raise ValueError(""Invalid number format."")
+                saw_dot = True
+            else:
+                saw_digit = True
+            i_local += 1
+        if not saw_digit:
+            raise ValueError(""Invalid number format."")
+        num_str = s[start_idx:i_local]
+        try:
+            return float(num_str), i_local
+        except Exception as e:
+            raise ValueError(""Invalid number."") from e
+
+    while i < n:
+        ch = s[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch.isdigit() or ch == '.':
+            num, i = parse_number(i)
+            tokens.append(num)
+            prev_type = 'number'
+            continue
+        if ch in '+-':
+            # Check for unary operator
+            if prev_type in (None, 'op', '('):
+                # Unary + or -
+                next_char = s[i + 1] if (i + 1) < n else ''
+                if next_char.isdigit() or next_char == '.':
+                    sign = -1.0 if ch == '-' else 1.0
+                    i += 1
+                    num, i = parse_number(i)
+                    tokens.append(sign * num)
+                    prev_type = 'number'
+                    continue
+                elif next_char == '(':
+                    # Transform unary +/- before '(' into 0 +/- ( ... )
+                    tokens.append(0.0)
+                    tokens.append('-' if ch == '-' else '+')
+                    i += 1  # advance to '('; will be processed in next loop
+                    prev_type = 'op'
+                    continue
+                else:
+                    raise ValueError(""Invalid use of unary operator."")
+            # Binary + or -
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch in '*/':
+            tokens.append(ch)
+            i += 1
+            prev_type = 'op'
+            continue
+        if ch == '(':
+            tokens.append(ch)
+            i += 1
+            prev_type = '('
+            continue
+        if ch == ')':
+            tokens.append(ch)
+            i += 1
+            prev_type = ')'
+            continue
+        # Invalid character
+        raise ValueError(f""Invalid character in expression: {ch!r}"")
+
+    # Shunting-yard to convert to RPN
+    precedence = {'+': 1, '-': 1, '*': 2, '/': 2}
+    operators = set(precedence.keys())
+    output = []
+    op_stack = []
+
+    for tok in tokens:
+        if isinstance(tok, float):
+            output.append(tok)
+        elif tok in operators:
+            while op_stack and op_stack[-1] in operators and precedence[op_stack[-1]] >= precedence[tok]:
+                output.append(op_stack.pop())
+            op_stack.append(tok)
+        elif tok == '(':
+            op_stack.append(tok)
+        elif tok == ')':
+            while op_stack and op_stack[-1] != '(':
+                output.append(op_stack.pop())
+            if not op_stack or op_stack[-1] != '(':
+                raise ValueError(""Mismatched parentheses."")
+            op_stack.pop()  # remove '('
+        else:
+            raise ValueError(""Invalid token encountered."")
+
+    while op_stack:
+        top = op_stack.pop()
+        if top in ('(', ')'):
+            raise ValueError(""Mismatched parentheses."")
+        output.append(top)
+
+    # Evaluate RPN
+    func_map = {
+        '+': operator.add,
+        '-': operator.sub,
+        '*': operator.mul,
+        '/': operator.truediv,
+    }
+
+    stack = []
+    for tok in output:
+        if isinstance(tok, float):
+            stack.append(tok)
+        elif tok in func_map:
+            if len(stack) < 2:
+                raise ValueError(""Invalid expression."")
+            b = stack.pop()
+            a = stack.pop()
+            if tok == '/' and b == 0.0:
+                raise ValueError(""Division by zero."")
+            try:
+                res = func_map[tok](a, b)
+            except Exception as e:
+                raise ValueError(""Invalid operation."") from e
+            stack.append(float(res))
+        else:
+            raise ValueError(""Invalid token during evaluation."")
+
+    if len(stack) != 1:
+        raise ValueError(""Invalid expression."")
+
+    return float(stack[0])
+
+
+def substitute_variables(expression: str, variables: dict) -> str:
+    """"""
+    Substitute variable identifiers in the expression with their numeric values.
+
+    - Variables are identifiers matching [A-Za-z_][A-Za-z0-9_]*
+    - Values in `variables` must be numeric (int, float) or strings representing numbers.
+    - Raises ValueError if an identifier in the expression is not provided in `variables`
+      or if a provided value is not numeric.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string."")
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dict."")
+
+    ident_pattern = re.compile(r'\b[A-Za-z_][A-Za-z0-9_]*\b')
+
+    # Collect identifiers present in the expression
+    identifiers = {m.group(0) for m in ident_pattern.finditer(expression)}
+    if not identifiers:
+        return expression
+
+    # Ensure all identifiers are defined
+    undefined = sorted(name for name in identifiers if name not in variables)
+    if undefined:
+        raise ValueError(f""Undefined variable(s): {', '.join(undefined)}"")
+
+    # Helper to ensure numeric substitution
+    num_pattern = re.compile(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)$')
+
+    def value_to_numeric_string(val) -> str:
+        if isinstance(val, bool):
+            # Exclude bools which are ints subclass in Python
+            raise ValueError(""Boolean is not a valid numeric value."")
+        if isinstance(val, (int, float)):
+            return str(val)
+        if isinstance(val, str):
+            v = val.strip()
+            if num_pattern.fullmatch(v):
+                return v
+        raise ValueError(f""Invalid value for variable substitution: {val!r}"")
+
+    def replacer(match: re.Match) -> str:
+        name = match.group(0)
+        return value_to_numeric_string(variables[name])
+
+    return ident_pattern.sub(replacer, expression)
+
+
+def evaluate_math_expression(formula: str, variables: dict) -> str:
+    """"""
+    Evaluate a mathematical expression with variables using a safe AST walker.
+    - Supports +, -, *, /, unary +/-, and parentheses.
+    - Variables are standard identifiers and must be provided in `variables`.
+    - Variable values must be numeric (int, float) or numeric strings.
+    - Returns the result as a string.
+    - Raises ValueError for invalid expressions or operations (incl. division by zero).
+    """"""
+    if not isinstance(formula, str):
+        raise ValueError(""Expression must be a string."")
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dict."")
+
+    text = formula.strip()
+    if not text:
+        raise ValueError(""Empty expression."")
+
+    # Prepare numeric coercion for variable values (aligned with substitute_variables)
+    num_pattern = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$')
+
+    def coerce_numeric(val) -> float:
+        if isinstance(val, bool):
+            raise ValueError(""Boolean is not a valid numeric value."")
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            v = val.strip()
+            if num_pattern.fullmatch(v):
+                try:
+                    return float(v)
+                except Exception as e:
+                    raise ValueError(""Invalid numeric string."") from e
+        raise ValueError(f""Invalid value for variable: {val!r}"")
+
+    # Safe evaluation via AST
+    try:
+        node = ast.parse(text, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(""Invalid expression."") from e
+
+    bin_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+    unary_ops = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
+
+    def eval_node(n) -> float:
+        if isinstance(n, ast.Expression):
+            return eval_node(n.body)
+        if isinstance(n, ast.BinOp):
+            left = eval_node(n.left)
+            right = eval_node(n.right)
+            op_type = type(n.op)
+            if op_type not in bin_ops:
+                raise ValueError(""Unsupported operator."")
+            if op_type is ast.Div and right == 0.0:
+                raise ValueError(""Division by zero."")
+            try:
+                return float(bin_ops[op_type](left, right))
+            except Exception as e:
+                raise ValueError(""Invalid operation."") from e
+        if isinstance(n, ast.UnaryOp):
+            op_type = type(n.op)
+            if op_type not in unary_ops:
+                raise ValueError(""Unsupported unary operator."")
+            operand = eval_node(n.operand)
+            try:
+                return float(unary_ops[op_type](operand))
+            except Exception as e:
+                raise ValueError(""Invalid unary operation."") from e
+        if isinstance(n, ast.Num):  # Py<3.8
+            if isinstance(n.n, bool):
+                raise ValueError(""Booleans not allowed."")
+            return float(n.n)
+        if isinstance(n, ast.Constant):  # Py>=3.8
+            if isinstance(n.value, bool):
+                raise ValueError(""Booleans not allowed."")
+            if isinstance(n.value, (int, float)):
+                return float(n.value)
+            raise ValueError(""Invalid constant in expression."")
+        if isinstance(n, ast.Name):
+            name = n.id
+            if name not in variables:
+                raise ValueError(f""Undefined variable: {name}"")
+            return coerce_numeric(variables[name])
+        if isinstance(n, ast.Paren):  # Not actually used in Python AST; parentheses handled by structure
+            return eval_node(n.value)
+        # Disallow everything else
+        raise ValueError(""Invalid expression."")
+
+    result = eval_node(node)
+    return str(result)
+",gpt-5,0,[],[],[]
+13db34f9,editing,"['I\'m trying to create a function called \'evaluate_simple_expression\' that can take a string representing a basic mathematical expression and return the calculated result as a string. The expression will only include numbers and basic arithmetic operations like +, -, *, and /. The function should raise a ValueError if the expression is invalid or cannot be processed.""\nPlease only output code and not your natural language commentary.', 'Could we enhance the \'evaluate_simple_expression\' function to handle variables? I want to introduce a second argument, a dictionary mapping variable names to their numeric values. The function should substitute these variables into the expression before evaluating it. It should still return the result as a string and raise a ValueError for any issues.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function named \'evaluate_math_expression\' that can process a mathematical expression string with variables and return the simplified result as a string. The function should take two arguments: \'formula\' (a string with the expression) and \'vars\' (a dictionary mapping variable names to values). It should handle basic arithmetic operations and substitute variables correctly. Here\'s the setup code that should be included:\n```\nimport re\nimport operator\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: - Regular expressions (re) for parsing, - The operator module for handling mathematical operators, - The ast module to securely parse mathematical expressions.""\nPlease only output code and not your natural language commentary.']","from decimal import Decimal, getcontext, InvalidOperation
+
+# Increase precision to handle fractional results more accurately.
+getcontext().prec = 50
+
+
+class _Parser:
+    def __init__(self, text: str):
+        self.s = text
+        self.i = 0
+        self.n = len(text)
+
+    def parse(self) -> Decimal:
+        result = self._parse_expr()
+        self._skip_ws()
+        if self.i != self.n:
+            raise ValueError(""Invalid expression"")
+        return result
+
+    def _skip_ws(self):
+        while self.i < self.n and self.s[self.i].isspace():
+            self.i += 1
+
+    def _parse_expr(self) -> Decimal:
+        left = self._parse_term()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""+-"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_term()
+                if op == ""+"":
+                    left = left + right
+                else:
+                    left = left - right
+            else:
+                break
+        return left
+
+    def _parse_term(self) -> Decimal:
+        left = self._parse_unary()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""*/"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_unary()
+                if op == ""*"":
+                    left = left * right
+                else:
+                    if right == 0:
+                        raise ValueError(""Division by zero"")
+                    left = left / right
+            else:
+                break
+        return left
+
+    def _parse_unary(self) -> Decimal:
+        self._skip_ws()
+        sign = 1
+        # Allow multiple unary operators, e.g., ""--5"" == 5, ""+-5"" == -5
+        while self.i < self.n and self.s[self.i] in ""+-"":
+            if self.s[self.i] == ""-"":
+                sign *= -1
+            self.i += 1
+            self._skip_ws()
+        number = self._parse_number()
+        return number if sign == 1 else -number
+
+    def _parse_number(self) -> Decimal:
+        self._skip_ws()
+        start = self.i
+
+        # Collect digits before decimal point
+        has_digits = False
+        while self.i < self.n and self.s[self.i].isdigit():
+            self.i += 1
+            has_digits = True
+
+        # Optional decimal point and digits after
+        if self.i < self.n and self.s[self.i] == ""."":
+            self.i += 1
+            # Digits after decimal point
+            while self.i < self.n and self.s[self.i].isdigit():
+                self.i += 1
+                has_digits = True
+
+        if not has_digits:
+            # No digits present in what would be a number
+            raise ValueError(""Invalid number"")
+
+        num_str = self.s[start:self.i]
+        try:
+            return Decimal(num_str)
+        except InvalidOperation:
+            raise ValueError(""Invalid number"")
+
+
+def _decimal_to_str(value: Decimal) -> str:
+    # Normalize and format without scientific notation, strip trailing zeros.
+    s = format(value.normalize(), ""f"")
+    if ""."" in s:
+        s = s.rstrip(""0"").rstrip(""."")
+    if s == """" or s == ""-0"":
+        return ""0""
+    return s
+
+
+def evaluate_simple_expression(expression: str) -> str:
+    """"""
+    Evaluate a simple arithmetic expression string containing numbers and operators +, -, *, /.
+    Returns the result as a string.
+    Raises ValueError if the expression is invalid or cannot be processed.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string"")
+
+    try:
+        result = _Parser(expression).parse()
+    except ValueError:
+        raise
+    except Exception:
+        # Any unforeseen errors are treated as invalid input.
+        raise ValueError(""Invalid expression"")
+
+    return _decimal_to_str(result)
+","from decimal import Decimal, getcontext, InvalidOperation
+
+# Increase precision to handle fractional results more accurately.
+getcontext().prec = 50
+
+
+class _Parser:
+    def __init__(self, text: str, variables: dict[str, Decimal] | None = None):
+        self.s = text
+        self.i = 0
+        self.n = len(text)
+        self.vars = variables or {}
+
+    def parse(self) -> Decimal:
+        result = self._parse_expr()
+        self._skip_ws()
+        if self.i != self.n:
+            raise ValueError(""Invalid expression"")
+        return result
+
+    def _skip_ws(self):
+        while self.i < self.n and self.s[self.i].isspace():
+            self.i += 1
+
+    def _parse_expr(self) -> Decimal:
+        left = self._parse_term()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""+-"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_term()
+                if op == ""+"":
+                    left = left + right
+                else:
+                    left = left - right
+            else:
+                break
+        return left
+
+    def _parse_term(self) -> Decimal:
+        left = self._parse_unary()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""*/"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_unary()
+                if op == ""*"":
+                    left = left * right
+                else:
+                    if right == 0:
+                        raise ValueError(""Division by zero"")
+                    left = left / right
+            else:
+                break
+        return left
+
+    def _parse_unary(self) -> Decimal:
+        self._skip_ws()
+        sign = 1
+        # Allow multiple unary operators, e.g., ""--5"" == 5, ""+-5"" == -5
+        while self.i < self.n and self.s[self.i] in ""+-"":
+            if self.s[self.i] == ""-"":
+                sign *= -1
+            self.i += 1
+            self._skip_ws()
+        val = self._parse_primary()
+        return val if sign == 1 else -val
+
+    def _parse_primary(self) -> Decimal:
+        self._skip_ws()
+        if self.i >= self.n:
+            raise ValueError(""Invalid expression"")
+        ch = self.s[self.i]
+        if ch.isalpha() or ch == ""_"":
+            name = self._parse_identifier()
+            if name not in self.vars:
+                raise ValueError(f""Undefined variable: {name}"")
+            return self.vars[name]
+        return self._parse_number()
+
+    def _parse_identifier(self) -> str:
+        self._skip_ws()
+        start = self.i
+        if self.i < self.n and (self.s[self.i].isalpha() or self.s[self.i] == ""_""):
+            self.i += 1
+        else:
+            raise ValueError(""Invalid identifier"")
+        while self.i < self.n and (self.s[self.i].isalnum() or self.s[self.i] == ""_""):
+            self.i += 1
+        return self.s[start:self.i]
+
+    def _parse_number(self) -> Decimal:
+        self._skip_ws()
+        start = self.i
+
+        # Collect digits before decimal point
+        has_digits = False
+        while self.i < self.n and self.s[self.i].isdigit():
+            self.i += 1
+            has_digits = True
+
+        # Optional decimal point and digits after
+        if self.i < self.n and self.s[self.i] == ""."":
+            self.i += 1
+            # Digits after decimal point
+            while self.i < self.n and self.s[self.i].isdigit():
+                self.i += 1
+                has_digits = True
+
+        if not has_digits:
+            # No digits present in what would be a number
+            raise ValueError(""Invalid number"")
+
+        num_str = self.s[start:self.i]
+        try:
+            return Decimal(num_str)
+        except InvalidOperation:
+            raise ValueError(""Invalid number"")
+
+
+def _decimal_to_str(value: Decimal) -> str:
+    # Normalize and format without scientific notation, strip trailing zeros.
+    s = format(value.normalize(), ""f"")
+    if ""."" in s:
+        s = s.rstrip(""0"").rstrip(""."")
+    if s == """" or s == ""-0"":
+        return ""0""
+    return s
+
+
+def _to_decimal(value) -> Decimal:
+    try:
+        if isinstance(value, Decimal):
+            v = value
+        elif isinstance(value, int):
+            v = Decimal(value)
+        elif isinstance(value, float):
+            v = Decimal(str(value))
+        elif isinstance(value, str):
+            v = Decimal(value.strip())
+        else:
+            raise ValueError(""Unsupported variable value type"")
+    except (InvalidOperation, ValueError):
+        raise ValueError(""Invalid variable value"")
+    if not v.is_finite():
+        raise ValueError(""Invalid variable value"")
+    return v
+
+
+def evaluate_simple_expression(expression: str, variables: dict | None = None) -> str:
+    """"""
+    Evaluate a simple arithmetic expression string containing numbers, variables, and operators +, -, *, /.
+    Variables are provided in the 'variables' dict mapping names to numeric values.
+    Returns the result as a string.
+    Raises ValueError if the expression is invalid or cannot be processed.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string"")
+
+    if variables is None:
+        variables = {}
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dictionary"")
+
+    var_map: dict[str, Decimal] = {}
+    for k, v in variables.items():
+        if not isinstance(k, str):
+            raise ValueError(""Variable names must be strings"")
+        var_map[k] = _to_decimal(v)
+
+    try:
+        result = _Parser(expression, var_map).parse()
+    except ValueError:
+        raise
+    except Exception:
+        # Any unforeseen errors are treated as invalid input.
+        raise ValueError(""Invalid expression"")
+
+    return _decimal_to_str(result)
+","import re
+import operator
+import ast
+import math
+from decimal import Decimal, getcontext, InvalidOperation
+
+# Increase precision to handle fractional results more accurately.
+getcontext().prec = 50
+
+
+class _Parser:
+    def __init__(self, text: str, variables: dict[str, Decimal] | None = None):
+        self.s = text
+        self.i = 0
+        self.n = len(text)
+        self.vars = variables or {}
+
+    def parse(self) -> Decimal:
+        result = self._parse_expr()
+        self._skip_ws()
+        if self.i != self.n:
+            raise ValueError(""Invalid expression"")
+        return result
+
+    def _skip_ws(self):
+        while self.i < self.n and self.s[self.i].isspace():
+            self.i += 1
+
+    def _parse_expr(self) -> Decimal:
+        left = self._parse_term()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""+-"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_term()
+                if op == ""+"":
+                    left = left + right
+                else:
+                    left = left - right
+            else:
+                break
+        return left
+
+    def _parse_term(self) -> Decimal:
+        left = self._parse_unary()
+        while True:
+            self._skip_ws()
+            if self.i < self.n and self.s[self.i] in ""*/"":
+                op = self.s[self.i]
+                self.i += 1
+                right = self._parse_unary()
+                if op == ""*"":
+                    left = left * right
+                else:
+                    if right == 0:
+                        raise ValueError(""Division by zero"")
+                    left = left / right
+            else:
+                break
+        return left
+
+    def _parse_unary(self) -> Decimal:
+        self._skip_ws()
+        sign = 1
+        # Allow multiple unary operators, e.g., ""--5"" == 5, ""+-5"" == -5
+        while self.i < self.n and self.s[self.i] in ""+-"":
+            if self.s[self.i] == ""-"":
+                sign *= -1
+            self.i += 1
+            self._skip_ws()
+        val = self._parse_primary()
+        return val if sign == 1 else -val
+
+    def _parse_primary(self) -> Decimal:
+        self._skip_ws()
+        if self.i >= self.n:
+            raise ValueError(""Invalid expression"")
+        ch = self.s[self.i]
+        if ch.isalpha() or ch == ""_"":
+            name = self._parse_identifier()
+            if name not in self.vars:
+                raise ValueError(f""Undefined variable: {name}"")
+            return self.vars[name]
+        return self._parse_number()
+
+    def _parse_identifier(self) -> str:
+        self._skip_ws()
+        start = self.i
+        if self.i < self.n and (self.s[self.i].isalpha() or self.s[self.i] == ""_""):
+            self.i += 1
+        else:
+            raise ValueError(""Invalid identifier"")
+        while self.i < self.n and (self.s[self.i].isalnum() or self.s[self.i] == ""_""):
+            self.i += 1
+        return self.s[start:self.i]
+
+    def _parse_number(self) -> Decimal:
+        self._skip_ws()
+        start = self.i
+
+        # Collect digits before decimal point
+        has_digits = False
+        while self.i < self.n and self.s[self.i].isdigit():
+            self.i += 1
+            has_digits = True
+
+        # Optional decimal point and digits after
+        if self.i < self.n and self.s[self.i] == ""."":
+            self.i += 1
+            # Digits after decimal point
+            while self.i < self.n and self.s[self.i].isdigit():
+                self.i += 1
+                has_digits = True
+
+        if not has_digits:
+            # No digits present in what would be a number
+            raise ValueError(""Invalid number"")
+
+        num_str = self.s[start:self.i]
+        try:
+            return Decimal(num_str)
+        except InvalidOperation:
+            raise ValueError(""Invalid number"")
+
+
+def _decimal_to_str(value: Decimal) -> str:
+    # Normalize and format without scientific notation, strip trailing zeros.
+    s = format(value.normalize(), ""f"")
+    if ""."" in s:
+        s = s.rstrip(""0"").rstrip(""."")
+    if s == """" or s == ""-0"":
+        return ""0""
+    return s
+
+
+def _to_decimal(value) -> Decimal:
+    try:
+        if isinstance(value, Decimal):
+            v = value
+        elif isinstance(value, int):
+            v = Decimal(value)
+        elif isinstance(value, float):
+            v = Decimal(str(value))
+        elif isinstance(value, str):
+            v = Decimal(value.strip())
+        else:
+            raise ValueError(""Unsupported variable value type"")
+    except (InvalidOperation, ValueError):
+        raise ValueError(""Invalid variable value"")
+    if not v.is_finite():
+        raise ValueError(""Invalid variable value"")
+    return v
+
+
+def evaluate_simple_expression(expression: str, variables: dict | None = None) -> str:
+    """"""
+    Evaluate a simple arithmetic expression string containing numbers, variables, and operators +, -, *, /.
+    Variables are provided in the 'variables' dict mapping names to numeric values.
+    Returns the result as a string.
+    Raises ValueError if the expression is invalid or cannot be processed.
+    """"""
+    if not isinstance(expression, str):
+        raise ValueError(""Expression must be a string"")
+
+    if variables is None:
+        variables = {}
+    if not isinstance(variables, dict):
+        raise ValueError(""Variables must be a dictionary"")
+
+    var_map: dict[str, Decimal] = {}
+    for k, v in variables.items():
+        if not isinstance(k, str):
+            raise ValueError(""Variable names must be strings"")
+        var_map[k] = _to_decimal(v)
+
+    try:
+        result = _Parser(expression, var_map).parse()
+    except ValueError:
+        raise
+    except Exception:
+        # Any unforeseen errors are treated as invalid input.
+        raise ValueError(""Invalid expression"")
+
+    return _decimal_to_str(result)
+
+
+_SAFE_NAME_RE = re.compile(r""^[A-Za-z_][A-Za-z0-9_]*$"")
+
+_BIN_OPS: dict[type, callable] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+
+_UNARY_OPS: dict[type, callable] = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+class _SafeMathEvaluator(ast.NodeVisitor):
+    def __init__(self, variables: dict[str, float]):
+        self.variables = variables
+
+    def visit_Expression(self, node: ast.Expression):
+        return self.visit(node.body)
+
+    def visit_BinOp(self, node: ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _BIN_OPS:
+            raise ValueError(""Unsupported operator"")
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        if op_type is ast.Div and right == 0:
+            raise ValueError(""Division by zero"")
+        return _BIN_OPS[op_type](left, right)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _UNARY_OPS:
+            raise ValueError(""Unsupported operator"")
+        operand = self.visit(node.operand)
+        return _UNARY_OPS[op_type](operand)
+
+    def visit_Name(self, node: ast.Name):
+        name = node.id
+        if not _SAFE_NAME_RE.match(name):
+            raise ValueError(""Invalid identifier"")
+        if name not in self.variables:
+            raise ValueError(f""Undefined variable: {name}"")
+        return self.variables[name]
+
+    def visit_Constant(self, node: ast.Constant):
+        val = node.value
+        # Disallow booleans
+        if isinstance(val, bool):
+            raise ValueError(""Invalid constant"")
+        if isinstance(val, (int, float)):
+            return float(val)
+        raise ValueError(""Invalid constant"")
+
+    def generic_visit(self, node):
+        # Disallow any other nodes (calls, attributes, subscripts, etc.)
+        raise ValueError(""Invalid expression"")
+
+
+def _format_result(value) -> str:
+    if isinstance(value, bool):
+        raise ValueError(""Invalid result"")
+    if isinstance(value, int):
+        return str(value)
+    # Treat everything as float from evaluator
+    try:
+        x = float(value)
+    except Exception:
+        raise ValueError(""Invalid expression"")
+    if not math.isfinite(x):
+        raise ValueError(""Invalid expression"")
+    if abs(x) < 1e-15:
+        return ""0""
+    if x.is_integer():
+        return str(int(x))
+    s = format(x, "".15g"")
+    if ""e"" not in s and ""."" in s:
+        s = s.rstrip(""0"").rstrip(""."")
+    return s
+
+
+def evaluate_math_expression(formula: str, vars: dict | None = None) -> str:
+    """"""
+    Evaluate a mathematical expression with variables.
+    - formula: expression string
+    - vars: dict mapping variable names to numeric values
+    Returns the result as a string.
+    Raises ValueError for any invalid input or evaluation error.
+    """"""
+    if not isinstance(formula, str):
+        raise ValueError(""Expression must be a string"")
+
+    if vars is None:
+        vars = {}
+    if not isinstance(vars, dict):
+        raise ValueError(""Variables must be a dictionary"")
+
+    safe_vars: dict[str, float] = {}
+    for k, v in vars.items():
+        if not isinstance(k, str) or not _SAFE_NAME_RE.match(k):
+            raise ValueError(""Invalid variable name"")
+        if isinstance(v, bool):
+            raise ValueError(""Invalid variable value"")
+        try:
+            if isinstance(v, (int, float)):
+                num = float(v)
+            elif isinstance(v, str):
+                num = float(v.strip())
+            else:
+                # Try float conversion for other numeric-like types
+                num = float(v)
+        except Exception:
+            raise ValueError(""Invalid variable value"")
+        if not math.isfinite(num):
+            raise ValueError(""Invalid variable value"")
+        safe_vars[k] = num
+
+    try:
+        tree = ast.parse(formula, mode=""eval"")
+    except Exception:
+        raise ValueError(""Invalid expression"")
+
+    try:
+        evaluator = _SafeMathEvaluator(safe_vars)
+        result = evaluator.visit(tree)
+    except ValueError:
+        raise
+    except ZeroDivisionError:
+        raise ValueError(""Division by zero"")
+    except Exception:
+        raise ValueError(""Invalid expression"")
+
+    return _format_result(result)
+",gpt-5,0,[],[],[]
+13db34f9,refactor,"[""Create a function that processes a mathematical expression in the form of a string, which may include variables, and returns the calculated, simplified result as a string. The function should handle basic arithmetic operations and correctly substitute variables given in a dictionary. The function's name should be evaluate_math_expression. The function should take 2 arguments, i.e., - formula (str): A string representing a mathematical formula potentially containing variables, - vars (dict): A mapping of variable names to their numeric values for evaluation. The function should return str: The result after computing the expression, returned in string format. The function should raise - ValueError: If an error occurs due to an invalid expression or unsuccessful processing. The following setup code will be provided to you:\n```\nimport re\nimport operator\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: - Regular expressions (re) for parsing, - The operator module for handling mathematical operators, - The ast module to securely parse mathematical expressions \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this code to improve its structure and maintainability. Could we extract the parsing and evaluation logic into separate pure functions and organize the code using a pipeline pattern? This will help in making the code more modular and easier to test, while keeping the main evaluate_math_expression function's signature unchanged.\nPlease only output code and not your natural language commentary."", 'Can we add logging support to the function to track the evaluation process? This would involve logging the initial formula, the substituted expression, and the final result. Ensure that the logging is clear and provides useful information for debugging purposes.\nPlease only output code and not your natural language commentary.']","import ast
+import operator
+import re
+from typing import Any, Dict, Union
+
+Number = Union[int, float]
+
+
+def evaluate_math_expression(formula: str, vars: Dict[str, Number]) -> str:
+    """"""
+    Evaluate a mathematical expression string with optional variables and return the result as a string.
+
+    Args:
+        formula (str): A string representing a mathematical formula potentially containing variables.
+        vars (dict): A mapping of variable names to their numeric values for evaluation.
+
+    Returns:
+        str: The result after computing the expression, returned in string format.
+
+    Raises:
+        ValueError: If an error occurs due to an invalid expression or unsuccessful processing.
+    """"""
+    if not isinstance(formula, str):
+        raise ValueError(""formula must be a string"")
+    if not isinstance(vars, dict):
+        raise ValueError(""vars must be a dictionary"")
+
+    # Optional: support '^' as exponent operator by translating to Python '**'
+    # This helps align with common math notation expectations.
+    # We avoid touching '**' that already exist by doing a simple replace (idempotent for '**').
+    normalized_formula = formula.replace(""^"", ""**"")
+
+    try:
+        parsed = ast.parse(normalized_formula, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+    bin_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+    }
+
+    unary_ops = {
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
+
+    def _ensure_number(value: Any, context: str) -> Number:
+        if isinstance(value, bool):
+            # Avoid treating booleans as integers
+            raise ValueError(f""Boolean value not allowed in {context}"")
+        if not isinstance(value, (int, float)):
+            raise ValueError(f""Non-numeric value in {context}: {value!r}"")
+        return value
+
+    def _eval(node: ast.AST) -> Number:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in bin_ops:
+                raise ValueError(f""Operator not allowed: {op_type.__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            left = _ensure_number(left, ""binary operation (left operand)"")
+            right = _ensure_number(right, ""binary operation (right operand)"")
+            try:
+                return bin_ops[op_type](left, right)
+            except ZeroDivisionError:
+                raise ValueError(""Division by zero"") from None
+
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in unary_ops:
+                raise ValueError(f""Unary operator not allowed: {op_type.__name__}"")
+            operand = _eval(node.operand)
+            operand = _ensure_number(operand, ""unary operation"")
+            return unary_ops[op_type](operand)
+
+        # Support numeric literals
+        if isinstance(node, ast.Constant):
+            value = node.value
+            value = _ensure_number(value, ""constant"")
+            return value
+
+        # For Python versions where numbers may appear as ast.Num
+        if isinstance(node, ast.Num):  # type: ignore[attr-defined]
+            value = node.n  # type: ignore[attr-defined]
+            value = _ensure_number(value, ""numeric literal"")
+            return value
+
+        # Variable names
+        if isinstance(node, ast.Name):
+            name = node.id
+            if name not in vars:
+                raise ValueError(f""Undefined variable: {name}"")
+            value = vars[name]
+            value = _ensure_number(value, f""variable '{name}'"")
+            return value
+
+        # Allow parenthesis via Tuple with load context is not correct; parentheses are handled implicitly.
+        # Disallow any other nodes (calls, attributes, subscripts, comprehensions, etc.)
+        raise ValueError(f""Unsupported expression element: {type(node).__name__}"")
+
+    try:
+        result = _eval(parsed)
+    except ValueError:
+        # Propagate our own semantic errors directly
+        raise
+    except Exception as e:
+        # Any other unexpected error is considered invalid processing
+        raise ValueError(f""Failed to evaluate expression: {e}"") from None
+
+    # Convert result to string; simplify floats that are integral
+    if isinstance(result, float):
+        if result.is_integer():
+            return str(int(result))
+        return str(result)
+    return str(result)
+","import ast
+import operator
+import re
+from typing import Any, Dict, Union
+
+Number = Union[int, float]
+
+# Allowed operators mapped to their implementations (pure, no side effects)
+BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+def validate_inputs(formula: Any, vars: Any) -> None:
+    """"""
+    Validate top-level function inputs.
+    Raises ValueError for invalid inputs.
+    """"""
+    if not isinstance(formula, str):
+        raise ValueError(""formula must be a string"")
+    if not isinstance(vars, dict):
+        raise ValueError(""vars must be a dictionary"")
+
+
+def normalize_formula(formula: str) -> str:
+    """"""
+    Normalize the input formula string into a canonical representation suitable for parsing.
+    - Translate '^' to Python exponentiation '**'.
+    """"""
+    # Avoid touching '**' that already exist; simple replace is idempotent for '**'
+    return formula.replace(""^"", ""**"")
+
+
+def parse_expression(source: str) -> ast.Expression:
+    """"""
+    Parse a normalized expression string into an AST in eval mode.
+    Raises ValueError on syntax errors.
+    """"""
+    try:
+        return ast.parse(source, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+
+def _ensure_number(value: Any, context: str) -> Number:
+    """"""
+    Ensure the value is a numeric type (int or float), rejecting booleans and non-numeric types.
+    """"""
+    if isinstance(value, bool):
+        raise ValueError(f""Boolean value not allowed in {context}"")
+    if not isinstance(value, (int, float)):
+        raise ValueError(f""Non-numeric value in {context}: {value!r}"")
+    return value
+
+
+def evaluate_ast(parsed: ast.AST, variables: Dict[str, Number]) -> Number:
+    """"""
+    Evaluate a parsed AST expression using a restricted set of operations and provided variables.
+    Raises ValueError for any unsupported nodes or evaluation errors (e.g., division by zero).
+    """"""
+    def _eval(node: ast.AST) -> Number:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in BIN_OPS:
+                raise ValueError(f""Operator not allowed: {op_type.__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            left = _ensure_number(left, ""binary operation (left operand)"")
+            right = _ensure_number(right, ""binary operation (right operand)"")
+            try:
+                return BIN_OPS[op_type](left, right)
+            except ZeroDivisionError:
+                raise ValueError(""Division by zero"") from None
+
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in UNARY_OPS:
+                raise ValueError(f""Unary operator not allowed: {op_type.__name__}"")
+            operand = _eval(node.operand)
+            operand = _ensure_number(operand, ""unary operation"")
+            return UNARY_OPS[op_type](operand)
+
+        if isinstance(node, ast.Constant):
+            value = node.value
+            value = _ensure_number(value, ""constant"")
+            return value
+
+        # For Python versions where numbers may appear as ast.Num
+        if isinstance(node, ast.Num):  # type: ignore[attr-defined]
+            value = node.n  # type: ignore[attr-defined]
+            value = _ensure_number(value, ""numeric literal"")
+            return value
+
+        if isinstance(node, ast.Name):
+            name = node.id
+            if name not in variables:
+                raise ValueError(f""Undefined variable: {name}"")
+            value = variables[name]
+            value = _ensure_number(value, f""variable '{name}'"")
+            return value
+
+        # Disallow any other nodes (calls, attributes, subscripts, comprehensions, etc.)
+        raise ValueError(f""Unsupported expression element: {type(node).__name__}"")
+
+    return _eval(parsed)
+
+
+def stringify_result(result: Number) -> str:
+    """"""
+    Convert a numeric result to a string, simplifying floats that represent integers.
+    """"""
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)
+
+
+def run_pipeline(formula: str, variables: Dict[str, Number]) -> str:
+    """"""
+    Pipeline that takes raw inputs and produces the final stringified result.
+    Steps: normalize -> parse -> evaluate -> stringify
+    """"""
+    normalized = normalize_formula(formula)
+    parsed = parse_expression(normalized)
+    value = evaluate_ast(parsed, variables)
+    return stringify_result(value)
+
+
+def evaluate_math_expression(formula: str, vars: Dict[str, Number]) -> str:
+    """"""
+    Evaluate a mathematical expression string with optional variables and return the result as a string.
+
+    Args:
+        formula (str): A string representing a mathematical formula potentially containing variables.
+        vars (dict): A mapping of variable names to their numeric values for evaluation.
+
+    Returns:
+        str: The result after computing the expression, returned in string format.
+
+    Raises:
+        ValueError: If an error occurs due to an invalid expression or unsuccessful processing.
+    """"""
+    validate_inputs(formula, vars)
+
+    try:
+        return run_pipeline(formula, vars)
+    except ValueError:
+        # Propagate our own semantic errors directly
+        raise
+    except Exception as e:
+        # Any other unexpected error is considered invalid processing
+        raise ValueError(f""Failed to evaluate expression: {e}"") from None
+","import ast
+import operator
+import re
+import logging
+from typing import Any, Dict, Union
+
+Number = Union[int, float]
+
+logger = logging.getLogger(__name__)
+
+# Allowed operators mapped to their implementations (pure, no side effects)
+BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+# Symbols for pretty-printing substituted expressions
+BIN_OP_SYMBOLS = {
+    ast.Add: ""+"",
+    ast.Sub: ""-"",
+    ast.Mult: ""*"",
+    ast.Div: ""/"",
+    ast.FloorDiv: ""//"",
+    ast.Mod: ""%"",
+    ast.Pow: ""**"",
+}
+
+UNARY_OP_SYMBOLS = {
+    ast.UAdd: ""+"",
+    ast.USub: ""-"",
+}
+
+
+def validate_inputs(formula: Any, vars: Any) -> None:
+    """"""
+    Validate top-level function inputs.
+    Raises ValueError for invalid inputs.
+    """"""
+    if not isinstance(formula, str):
+        raise ValueError(""formula must be a string"")
+    if not isinstance(vars, dict):
+        raise ValueError(""vars must be a dictionary"")
+
+
+def normalize_formula(formula: str) -> str:
+    """"""
+    Normalize the input formula string into a canonical representation suitable for parsing.
+    - Translate '^' to Python exponentiation '**'.
+    """"""
+    # Avoid touching '**' that already exist; simple replace is idempotent for '**'
+    return formula.replace(""^"", ""**"")
+
+
+def parse_expression(source: str) -> ast.Expression:
+    """"""
+    Parse a normalized expression string into an AST in eval mode.
+    Raises ValueError on syntax errors.
+    """"""
+    try:
+        return ast.parse(source, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid expression syntax: {e}"") from None
+
+
+def _ensure_number(value: Any, context: str) -> Number:
+    """"""
+    Ensure the value is a numeric type (int or float), rejecting booleans and non-numeric types.
+    """"""
+    if isinstance(value, bool):
+        raise ValueError(f""Boolean value not allowed in {context}"")
+    if not isinstance(value, (int, float)):
+        raise ValueError(f""Non-numeric value in {context}: {value!r}"")
+    return value
+
+
+def evaluate_ast(parsed: ast.AST, variables: Dict[str, Number]) -> Number:
+    """"""
+    Evaluate a parsed AST expression using a restricted set of operations and provided variables.
+    Raises ValueError for any unsupported nodes or evaluation errors (e.g., division by zero).
+    """"""
+    def _eval(node: ast.AST) -> Number:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in BIN_OPS:
+                raise ValueError(f""Operator not allowed: {op_type.__name__}"")
+            left = _eval(node.left)
+            right = _eval(node.right)
+            left = _ensure_number(left, ""binary operation (left operand)"")
+            right = _ensure_number(right, ""binary operation (right operand)"")
+            try:
+                return BIN_OPS[op_type](left, right)
+            except ZeroDivisionError:
+                raise ValueError(""Division by zero"") from None
+
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in UNARY_OPS:
+                raise ValueError(f""Unary operator not allowed: {op_type.__name__}"")
+            operand = _eval(node.operand)
+            operand = _ensure_number(operand, ""unary operation"")
+            return UNARY_OPS[op_type](operand)
+
+        if isinstance(node, ast.Constant):
+            value = node.value
+            value = _ensure_number(value, ""constant"")
+            return value
+
+        # For Python versions where numbers may appear as ast.Num
+        if isinstance(node, ast.Num):  # type: ignore[attr-defined]
+            value = node.n  # type: ignore[attr-defined]
+            value = _ensure_number(value, ""numeric literal"")
+            return value
+
+        if isinstance(node, ast.Name):
+            name = node.id
+            if name not in variables:
+                raise ValueError(f""Undefined variable: {name}"")
+            value = variables[name]
+            value = _ensure_number(value, f""variable '{name}'"")
+            return value
+
+        # Disallow any other nodes (calls, attributes, subscripts, comprehensions, etc.)
+        raise ValueError(f""Unsupported expression element: {type(node).__name__}"")
+
+    return _eval(parsed)
+
+
+def _number_to_subst_str(value: Number) -> str:
+    """"""
+    Convert a numeric value to a string for substituted-expression logging.
+    Keep float decimals (e.g., 2.0 stays '2.0').
+    """"""
+    if isinstance(value, float):
+        return repr(value)
+    return str(value)
+
+
+def render_substituted_expression(parsed: ast.AST, variables: Dict[str, Number]) -> str:
+    """"""
+    Render a substituted expression string by replacing variable names with their numeric values.
+    This function is pure and does not evaluate the expression—it's only for logging/debugging.
+    """"""
+    def _render(node: ast.AST) -> str:
+        if isinstance(node, ast.Expression):
+            return _render(node.body)
+
+        if isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in BIN_OP_SYMBOLS:
+                raise ValueError(f""Operator not allowed: {op_type.__name__}"")
+            left = _render(node.left)
+            right = _render(node.right)
+            return f""({left} {BIN_OP_SYMBOLS[op_type]} {right})""
+
+        if isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in UNARY_OP_SYMBOLS:
+                raise ValueError(f""Unary operator not allowed: {op_type.__name__}"")
+            operand = _render(node.operand)
+            return f""({UNARY_OP_SYMBOLS[op_type]}{operand})""
+
+        if isinstance(node, ast.Constant):
+            value = _ensure_number(node.value, ""constant"")
+            return _number_to_subst_str(value)
+
+        if isinstance(node, ast.Num):  # type: ignore[attr-defined]
+            value = _ensure_number(node.n, ""numeric literal"")  # type: ignore[attr-defined]
+            return _number_to_subst_str(value)
+
+        if isinstance(node, ast.Name):
+            name = node.id
+            if name not in variables:
+                raise ValueError(f""Undefined variable: {name}"")
+            value = _ensure_number(variables[name], f""variable '{name}'"")
+            return _number_to_subst_str(value)
+
+        raise ValueError(f""Unsupported expression element: {type(node).__name__}"")
+
+    return _render(parsed)
+
+
+def stringify_result(result: Number) -> str:
+    """"""
+    Convert a numeric result to a string, simplifying floats that represent integers.
+    """"""
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)
+
+
+def run_pipeline(formula: str, variables: Dict[str, Number]) -> str:
+    """"""
+    Pipeline that takes raw inputs and produces the final stringified result.
+    Steps: normalize -> parse -> evaluate -> stringify
+    """"""
+    normalized = normalize_formula(formula)
+    parsed = parse_expression(normalized)
+    value = evaluate_ast(parsed, variables)
+    return stringify_result(value)
+
+
+def evaluate_math_expression(formula: str, vars: Dict[str, Number]) -> str:
+    """"""
+    Evaluate a mathematical expression string with optional variables and return the result as a string.
+
+    Args:
+        formula (str): A string representing a mathematical formula potentially containing variables.
+        vars (dict): A mapping of variable names to their numeric values for evaluation.
+
+    Returns:
+        str: The result after computing the expression, returned in string format.
+
+    Raises:
+        ValueError: If an error occurs due to an invalid expression or unsuccessful processing.
+    """"""
+    validate_inputs(formula, vars)
+
+    # Log the initial state
+    logger.debug(""Evaluating formula: %s"", formula)
+
+    try:
+        # Pipeline steps performed explicitly to enable intermediate logging
+        normalized = normalize_formula(formula)
+        parsed = parse_expression(normalized)
+
+        # Render and log the substituted expression for debugging
+        substituted_expr = render_substituted_expression(parsed, vars)
+        logger.debug(""Substituted expression: %s"", substituted_expr)
+
+        # Evaluate and stringify
+        value = evaluate_ast(parsed, vars)
+        result = stringify_result(value)
+
+        logger.debug(""Final result: %s"", result)
+        return result
+    except ValueError:
+        # Propagate our own semantic errors directly
+        raise
+    except Exception as e:
+        # Any other unexpected error is considered invalid processing
+        raise ValueError(f""Failed to evaluate expression: {e}"") from None
+",gpt-5,0,[],[],[]

@@ -1,0 +1,142 @@
+import ast
+
+class _SafeChecker(ast.NodeVisitor):
+    """
+    AST validator to enforce safety rules:
+    - Disallow import statements.
+    - Disallow access to any attribute containing double underscores (dunder).
+    - Disallow use/calls of dangerous builtins like eval/exec/open/__import__/getattr/setattr/etc.
+    - Disallow direct access to __builtins__.
+    """
+    banned_calls = {
+        "eval",
+        "exec",
+        "compile",
+        "open",
+        "__import__",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "getattr",
+        "setattr",
+        "delattr",
+        "input",
+        "help",
+        "quit",
+        "exit",
+        "memoryview",
+    }
+
+    banned_names = {"__builtins__"} | banned_calls
+
+    def visit_Import(self, node):
+        raise ValueError("Disallowed operation: import statements are not allowed")
+
+    def visit_ImportFrom(self, node):
+        raise ValueError("Disallowed operation: import statements are not allowed")
+
+    def visit_Attribute(self, node):
+        # Block access to any dunder attribute (e.g., __class__, __mro__, __globals__, etc.)
+        if "__" in node.attr:
+            raise ValueError("Disallowed operation: access to dunder attributes is not allowed")
+        self.generic_visit(node)
+
+    def visit_Name(self, node):
+        if node.id in self.banned_names:
+            raise ValueError(f"Disallowed operation: use of '{node.id}' is not allowed")
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        # Disallow calls to specific dangerous builtins (even if somehow introduced)
+        fn = node.func
+        if isinstance(fn, ast.Name) and fn.id in self.banned_calls:
+            raise ValueError(f"Disallowed operation: calling '{fn.id}' is not allowed")
+        self.generic_visit(node)
+
+
+def process_code_input(code_input: str):
+    """
+    Execute a small Python snippet safely.
+
+    Parameters:
+      - code_input (str): Python code to execute.
+
+    Behavior:
+      - Returns the value of the final expression if the snippet ends with an expression.
+      - Returns None if there is no expression result (e.g., only statements or only prints).
+      - Raises ValueError if disallowed operations are detected (imports, eval/exec/open, dunder access, etc.).
+
+    Notes:
+      - Code runs in a restricted environment with a limited set of safe builtins.
+      - stdout is not captured; printed output does not affect the return value.
+    """
+    if not isinstance(code_input, str):
+        raise TypeError("code_input must be a string")
+
+    try:
+        tree = ast.parse(code_input, mode="exec")
+    except SyntaxError:
+        # Propagate syntax errors as-is: they are not disallowed ops, just invalid code.
+        raise
+
+    # Validate AST for safety
+    _SafeChecker().visit(tree)
+
+    # Restricted, safe builtins
+    allowed_builtins = {
+        "print": print,
+        "len": len,
+        "range": range,
+        "enumerate": enumerate,
+        "zip": zip,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "sorted": sorted,
+        "reversed": reversed,
+        "round": round,
+        "pow": pow,
+        "list": list,
+        "dict": dict,
+        "set": set,
+        "tuple": tuple,
+        "int": int,
+        "float": float,
+        "str": str,
+        "bool": bool,
+        "map": map,
+        "filter": filter,
+    }
+
+    # Isolate execution environment
+    env = {"__builtins__": allowed_builtins}
+
+    body = tree.body
+    last_is_expr = len(body) > 0 and isinstance(body[-1], ast.Expr)
+
+    try:
+        if last_is_expr:
+            # Execute all but the last expression
+            pre_module = ast.Module(body=body[:-1], type_ignores=[])
+            ast.fix_missing_locations(pre_module)
+            exec(compile(pre_module, "<user_code>", "exec"), env, env)
+
+            # Evaluate the final expression and return its value
+            expr = ast.Expression(body=body[-1].value)
+            ast.fix_missing_locations(expr)
+            result = eval(compile(expr, "<user_code>", "eval"), env, env)
+            return result
+        else:
+            # Execute entire code block; no expression to return
+            exec(compile(tree, "<user_code>", "exec"), env, env)
+            return None
+    except SystemExit:
+        # Prevent termination of the host environment
+        raise ValueError("Disallowed operation: SystemExit") from None
+    except KeyboardInterrupt:
+        # Prevent interruption of the host environment
+        raise ValueError("Disallowed operation: KeyboardInterrupt") from None

@@ -1,0 +1,2 @@
+python /space3/yangfc/benchmarks/MT-SEC/data_to_dynabench.py --output /space3/yangfc/benchmarks/MT-SEC/dyna-format/singleturn_mtsec_dynabench.json --content singleturn
+python /space3/yangfc/benchmarks/MT-SEC/data_to_dynabench.py --output /space3/yangfc/benchmarks/MT-SEC/dyna-format/multiturn_mtsec_dynabench.json --content multiturn

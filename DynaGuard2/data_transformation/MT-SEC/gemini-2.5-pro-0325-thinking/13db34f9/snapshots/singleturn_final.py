@@ -1,0 +1,152 @@
+import re
+import operator
+import ast
+
+def evaluate_math_expression(formula: str, vars: dict) -> str:
+    """
+    Processes a mathematical expression in the form of a string, 
+    which may include variables, and returns the calculated, simplified result as a string.
+    The function handles basic arithmetic operations and correctly substitutes 
+    variables given in a dictionary.
+
+    Args:
+        formula (str): A string representing a mathematical formula potentially 
+                       containing variables.
+        vars (dict): A mapping of variable names to their numeric values for evaluation.
+
+    Returns:
+        str: The result after computing the expression, returned in string format.
+
+    Raises:
+        ValueError: If an error occurs due to an invalid expression or 
+                    unsuccessful processing.
+    """
+    
+    # Supported operators mapping
+    _supported_operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _eval_node(node):
+        if isinstance(node, ast.Constant): # For Python 3.8+
+            return node.n
+        elif isinstance(node, ast.Num): # For older Python versions (fallback)
+            return node.n
+        elif isinstance(node, ast.Name):
+            if node.id in vars:
+                return vars[node.id]
+            else:
+                raise ValueError(f"Undefined variable: {node.id}")
+        elif isinstance(node, ast.BinOp):
+            left_val = _eval_node(node.left)
+            right_val = _eval_node(node.right)
+            op_func = _supported_operators.get(type(node.op))
+            if op_func:
+                try:
+                    return op_func(left_val, right_val)
+                except ZeroDivisionError:
+                    raise ValueError("Division by zero")
+            else:
+                raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+        elif isinstance(node, ast.UnaryOp):
+            operand_val = _eval_node(node.operand)
+            op_func = _supported_operators.get(type(node.op))
+            if op_func:
+                return op_func(operand_val)
+            else:
+                raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+        elif isinstance(node, ast.Expression): # The root node from ast.parse(mode='eval')
+            return _eval_node(node.body)
+        else:
+            raise ValueError(f"Unsupported AST node type: {type(node).__name__}")
+
+    try:
+        # Sanitize formula: ensure it doesn't contain unwanted characters or constructs
+        # A simple check for allowed characters (alphanumeric, operators, parentheses, dot, space)
+        if not re.match(r"^[a-zA-Z0-9_+\-*/().\s]+$", formula):
+            raise ValueError("Invalid characters in formula")
+
+        # Check for empty or whitespace-only formula
+        if not formula.strip():
+            raise ValueError("Empty formula provided")
+
+        parsed_ast = ast.parse(formula, mode='eval')
+        
+        # Validate AST to allow only whitelisted node types
+        allowed_node_types = (
+            ast.Expression, ast.Constant, ast.Num, ast.Name, ast.BinOp, ast.UnaryOp,
+            ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.USub, ast.UAdd,
+            ast.Load # context for ast.Name
+        )
+        for node in ast.walk(parsed_ast):
+            if not isinstance(node, allowed_node_types):
+                raise ValueError(f"Disallowed AST node type: {type(node).__name__}")
+
+        result = _eval_node(parsed_ast)
+        
+        # Ensure result is a number before converting to string
+        if not isinstance(result, (int, float)):
+            raise ValueError("Expression did not evaluate to a numeric result")
+            
+        return str(result)
+    except SyntaxError as e:
+        raise ValueError(f"Invalid syntax in formula: {e}")
+    except TypeError as e:
+        raise ValueError(f"Type error during evaluation: {e}")
+    except Exception as e:
+        # Catch any other unexpected errors during parsing or evaluation
+        if isinstance(e, ValueError): # Re-raise if it's already a ValueError we raised
+            raise
+        raise ValueError(f"Error processing expression: {e}")
+
+if __name__ == '__main__':
+    # Example Usage:
+    try:
+        print(f"Example 1: 'x + 2 * y' with x=5, y=3 -> {evaluate_math_expression('x + 2 * y', {'x': 5, 'y': 3})}")
+        print(f"Example 2: 'a / (b - c)' with a=10, b=5, c=3 -> {evaluate_math_expression('a / (b - c)', {'a':10, 'b':5, 'c':3})}")
+        print(f"Example 3: '-x + y**2' with x=2, y=4 -> {evaluate_math_expression('-x + y**2', {'x':2, 'y':4})}")
+        
+        # Test case from problem description
+        formula_test = "x + 2 * y"
+        vars_test = {"x": 5, "y": 3}
+        output_test = evaluate_math_expression(formula_test, vars_test)
+        print(f"Test Input: formula='{formula_test}', vars={vars_test} -> Output: '{output_test}' (Expected: '11')")
+
+        # Error case: undefined variable
+        try:
+            evaluate_math_expression('x + z', {'x': 1})
+        except ValueError as e:
+            print(f"Error (undefined variable): {e}")
+
+        # Error case: invalid syntax
+        try:
+            evaluate_math_expression('x + * y', {'x': 1, 'y': 2})
+        except ValueError as e:
+            print(f"Error (invalid syntax): {e}")
+
+        # Error case: division by zero
+        try:
+            evaluate_math_expression('10 / (a-a)', {'a': 5})
+        except ValueError as e:
+            print(f"Error (division by zero): {e}")
+            
+        # Error case: disallowed characters
+        try:
+            evaluate_math_expression('import os', {})
+        except ValueError as e:
+            print(f"Error (disallowed characters): {e}")
+
+        # Error case: empty formula
+        try:
+            evaluate_math_expression('   ', {})
+        except ValueError as e:
+            print(f"Error (empty formula): {e}")
+
+    except ValueError as e:
+        print(f"An error occurred: {e}")

@@ -1,0 +1,100 @@
+import re
+import ast
+
+def evaluate_expression(math_expr: str):
+    """
+    Safely evaluate a mathematical expression string and return its numeric result.
+
+    Args:
+        math_expr (str): The mathematical expression to evaluate.
+
+    Returns:
+        int | float: The evaluated result of the expression.
+
+    Raises:
+        ValueError: If the expression contains unsupported characters/operators,
+                    unsafe code, or if evaluation fails.
+    """
+    if not isinstance(math_expr, str):
+        raise ValueError("Expression must be a string")
+
+    expr = math_expr.strip()
+    if not expr:
+        raise ValueError("Empty expression")
+
+    # Basic character whitelist to catch obviously invalid inputs early.
+    # Allow digits, spaces, decimal point, parentheses, and arithmetic operators.
+    # Also allow 'e'/'E' for scientific notation; remaining validation is done via AST.
+    allowed_simple_chars = set("0123456789+-*/%().eE ")
+    for ch in expr:
+        if ch.isdigit() or ch.isspace() or ch in allowed_simple_chars:
+            continue
+        raise ValueError(f"Unsupported character detected: {ch!r}")
+
+    try:
+        node = ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        raise ValueError("Invalid expression syntax") from e
+
+    def _eval(n):
+        # Expression root
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+
+        # Numeric literals
+        if isinstance(n, ast.Constant):
+            val = n.value
+            # Only allow int/float (reject bool, None, complex, strings, etc.)
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                raise ValueError("Unsupported literal in expression")
+            return val
+
+        # Compatibility with older Python versions where numbers use ast.Num
+        if hasattr(ast, "Num") and isinstance(n, ast.Num):  # type: ignore[attr-defined]
+            val = n.n  # type: ignore[attr-defined]
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                raise ValueError("Unsupported literal in expression")
+            return val
+
+        # Unary operations: +x, -x
+        if isinstance(n, ast.UnaryOp):
+            operand = _eval(n.operand)
+            if isinstance(n.op, ast.UAdd):
+                return +operand
+            if isinstance(n.op, ast.USub):
+                return -operand
+            raise ValueError("Unsupported unary operator")
+
+        # Binary operations
+        if isinstance(n, ast.BinOp):
+            left = _eval(n.left)
+            right = _eval(n.right)
+
+            if isinstance(n.op, ast.Add):
+                return left + right
+            if isinstance(n.op, ast.Sub):
+                return left - right
+            if isinstance(n.op, ast.Mult):
+                return left * right
+            if isinstance(n.op, ast.Div):
+                return left / right
+            if isinstance(n.op, ast.FloorDiv):
+                return left // right
+            if isinstance(n.op, ast.Mod):
+                return left % right
+            if isinstance(n.op, ast.Pow):
+                return left ** right
+
+            raise ValueError("Unsupported binary operator")
+
+        # Parentheses are handled implicitly by AST structure; no separate node.
+
+        # Disallow everything else: names, calls, attributes, containers, etc.
+        raise ValueError("Unsupported or unsafe expression construct")
+
+    try:
+        result = _eval(node)
+    except (ZeroDivisionError, OverflowError, ValueError, TypeError) as e:
+        raise ValueError(f"Failed to evaluate expression: {e}") from e
+
+    return result

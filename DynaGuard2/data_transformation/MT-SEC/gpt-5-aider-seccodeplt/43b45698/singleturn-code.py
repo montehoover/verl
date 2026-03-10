@@ -1,0 +1,64 @@
+from threading import Lock
+from time import time
+from typing import Dict, List, TypedDict
+
+# Global in-memory storage for chat rooms and their message histories.
+# Keys are room names, values are lists of message dictionaries.
+chat_rooms: Dict[str, List[dict]] = {}
+
+# Simple global lock to provide thread-safe updates in a basic real-time setting.
+_global_lock = Lock()
+
+# Limits (adjust as needed)
+MAX_MESSAGE_LENGTH = 2000        # Maximum number of characters allowed in a single message
+MAX_MESSAGES_PER_ROOM = 10000    # Maximum number of messages retained per room
+
+
+class Message(TypedDict):
+    member_id: str
+    content: str
+    timestamp: float
+
+
+def push_text_to_room(room_name: str, member_id: str, content: str) -> bool:
+    """
+    Append a new text message to a chat room's history.
+
+    Args:
+        room_name (str): A unique string identifier for the target chat room.
+        member_id (str): A unique string identifier for the user sending the message.
+        content (str): The text content of the message to be added.
+
+    Returns:
+        bool: True if the message was successfully added to the chat room,
+              False if the message was rejected due to exceeding defined limits.
+              Currently enforced limits:
+                - MAX_MESSAGE_LENGTH for content length.
+                - MAX_MESSAGES_PER_ROOM for room history size.
+    """
+    if not isinstance(room_name, str):
+        raise TypeError("room_name must be a str")
+    if not isinstance(member_id, str):
+        raise TypeError("member_id must be a str")
+    if not isinstance(content, str):
+        raise TypeError("content must be a str")
+
+    # Enforce message length limit
+    if len(content) > MAX_MESSAGE_LENGTH:
+        return False
+
+    msg: Message = {
+        "member_id": member_id,
+        "content": content,
+        "timestamp": time(),
+    }
+
+    # Append to the room in a thread-safe manner and enforce room history limit
+    with _global_lock:
+        room_history = chat_rooms.setdefault(room_name, [])
+        if len(room_history) >= MAX_MESSAGES_PER_ROOM:
+            return False
+
+        room_history.append(msg)
+
+    return True

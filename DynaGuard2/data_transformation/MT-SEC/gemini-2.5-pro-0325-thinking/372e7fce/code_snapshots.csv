@@ -1,0 +1,207 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+372e7fce,singleturn,1,"Create a function that can execute a basic SQL-like statement on a dataset given as a list of dictionaries. The function should handle commands like SELECT, WHERE, and ORDER BY. The function's name should be execute_query_cmd. The function should take 2 arguments, i.e., - dataset_list: a list where each item is a dictionary representing data records, - sql_query: a string containing the SQL-like statement for execution. The function should return Returns a list of dictionaries, which are the results of the query operation. The function should raise - ValueError: If there is an issue with the query format or when the query can't be processed successfully. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: Modules you may need:, - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""dataset_list"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""sql_query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial # Not strictly used in this impl, but available
+
+# Operator mapping for WHERE clause
+OPERATORS = {
+    '>': operator.gt,
+    '<': operator.lt,
+    '=': operator.eq,
+    '!=': operator.ne,
+    '>=': operator.ge,
+    '<=': operator.le,
+}
+
+def _parse_value(value_str: str):
+    """"""Converts a string value from a query to its Python type.""""""
+    value_str = value_str.strip()
+    if (value_str.startswith(""'"") and value_str.endswith(""'"")) or \
+       (value_str.startswith('""') and value_str.endswith('""')):
+        return value_str[1:-1]  # Return as string without quotes
+    try:
+        return int(value_str)
+    except ValueError:
+        try:
+            return float(value_str)
+        except ValueError:
+            raise ValueError(f""Unsupported value format or unquoted string: {value_str}"")
+
+
+def execute_query_cmd(dataset_list: list, sql_query: str) -> list:
+    """"""
+    Executes a basic SQL-like statement on a dataset given as a list of dictionaries.
+
+    Args:
+        dataset_list: A list where each item is a dictionary representing data records.
+        sql_query: A string containing the SQL-like statement for execution.
+
+    Returns:
+        A list of dictionaries, which are the results of the query operation.
+
+    Raises:
+        ValueError: If there is an issue with the query format or when the query
+                    can't be processed successfully.
+    """"""
+    if not dataset_list: # Handle empty dataset early
+        # If query is SELECT * FROM empty_table, result is empty list.
+        # If query selects specific columns, result is also empty list.
+        # This seems consistent with SQL behavior.
+        return []
+
+    # Main query regex: captures SELECT columns, optional WHERE, optional ORDER BY
+    # Assumes 'FROM table_name' where table_name is a single word.
+    # Keywords (SELECT, FROM, WHERE, ORDER BY) are matched case-insensitively.
+    query_pattern = re.compile(
+        r""SELECT\s+(.+?)\s+FROM\s+\w+""
+        r""(?:\s+WHERE\s+(.+?))?""
+        r""(?:\s+ORDER BY\s+(.+?))?$"",
+        re.IGNORECASE
+    )
+    match = query_pattern.match(sql_query.strip())
+
+    if not match:
+        raise ValueError(""Invalid SQL query format. Must follow 'SELECT ... FROM ... [WHERE ...] [ORDER BY ...]' structure."")
+
+    select_cols_str, where_clause_str, orderby_clause_str = match.groups()
+
+    # Start with a copy of the dataset_list to modify
+    processed_data = list(dataset_list)
+
+    # 1. Apply WHERE clause (filter data)
+    if where_clause_str:
+        # WHERE clause regex: captures column, operator, and value
+        where_pattern = re.compile(r""^\s*(\w+)\s*([><=!]=?)\s*(.+?)\s*$"")
+        where_match = where_pattern.match(where_clause_str.strip())
+        
+        if not where_match:
+            raise ValueError(f""Invalid WHERE clause format: '{where_clause_str}'"")
+
+        col_name, op_str, val_str = where_match.groups()
+        
+        if op_str not in OPERATORS:
+            raise ValueError(f""Unsupported operator in WHERE clause: '{op_str}'"")
+        
+        op_func = OPERATORS[op_str]
+        
+        try:
+            query_val = _parse_value(val_str)
+        except ValueError as e:
+            # Re-raise with more context if _parse_value fails
+            raise ValueError(f""Error parsing value '{val_str}' in WHERE clause: {e}"")
+
+        filtered_data = []
+        for row in processed_data:
+            if col_name not in row:
+                raise ValueError(f""Column '{col_name}' specified in WHERE clause not found in dataset."")
+            
+            row_val = row[col_name]
+            
+            try:
+                if op_func(row_val, query_val):
+                    filtered_data.append(row)
+            except TypeError:
+                # This occurs if types are incompatible for the operation, e.g., int > str
+                raise ValueError(
+                    f""Type mismatch in WHERE clause for column '{col_name}'. ""
+                    f""Cannot compare data value '{row_val}' (type {type(row_val).__name__}) ""
+                    f""with query value '{query_val}' (type {type(query_val).__name__}).""
+                )
+        processed_data = filtered_data
+
+    # 2. Apply ORDER BY clause (sort data)
+    if orderby_clause_str:
+        # ORDER BY clause regex: captures column and optional ASC/DESC direction
+        orderby_pattern = re.compile(r""^\s*(\w+)(?:\s+(ASC|DESC))?\s*$"", re.IGNORECASE)
+        orderby_match = orderby_pattern.match(orderby_clause_str.strip())
+
+        if not orderby_match:
+            raise ValueError(f""Invalid ORDER BY clause format: '{orderby_clause_str}'"")
+
+        sort_col_name, sort_direction = orderby_match.groups()
+        
+        if processed_data: # Only sort if there's data
+            # Check if sort column exists in the (first row of) data
+            if sort_col_name not in processed_data[0]:
+                 raise ValueError(f""Column '{sort_col_name}' specified in ORDER BY clause not found in dataset."")
+
+            reverse_sort = bool(sort_direction and sort_direction.upper() == 'DESC')
+            
+            try:
+                # Sort using operator.itemgetter for key. This can raise TypeError
+                # if items in the sort_col_name are not comparable (e.g. mixed int/str).
+                processed_data.sort(key=operator.itemgetter(sort_col_name), reverse=reverse_sort)
+            except TypeError:
+                 raise ValueError(f""Inconsistent or non-comparable data types in column '{sort_col_name}' prevent sorting."")
+            # KeyError should be caught by the check `sort_col_name not in processed_data[0]`
+            # but as a safeguard for unexpected scenarios:
+            except KeyError: 
+                 raise ValueError(f""Column '{sort_col_name}' not found for sorting (unexpected KeyError)."")
+
+    # 3. Apply SELECT clause (shape output)
+    selected_cols_str_cleaned = select_cols_str.strip()
+    
+    if selected_cols_str_cleaned == '*':
+        # If SELECT *, return all columns of the (potentially filtered and sorted) data.
+        # processed_data already contains full dictionaries.
+        final_result = processed_data
+    else:
+        selected_column_names = [col.strip() for col in selected_cols_str_cleaned.split(',')]
+        
+        if not selected_column_names or any(not name for name in selected_column_names):
+            raise ValueError(f""Invalid SELECT column specification: '{select_cols_str}'. Ensure columns are comma-separated and not empty."")
+
+        final_result = []
+        for row in processed_data:
+            new_row = {}
+            for col_name in selected_column_names:
+                if col_name not in row:
+                    raise ValueError(f""Column '{col_name}' specified in SELECT clause not found in dataset."")
+                new_row[col_name] = row[col_name]
+            final_result.append(new_row)
+        
+    return final_result
+",diff-fenced,0

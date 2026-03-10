@@ -1,0 +1,107 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+73e8e3b4,singleturn,1,"Implement a function named 'evaluate_and_compute' that takes a mathematical expression as input, evaluates it, and returns the result. The function must correctly parse arithmetic expressions and compute their values. The function's name should be evaluate_and_compute. The function should take 1 arguments, i.e., - calc_expr: str, a string containing a mathematical expression to evaluate. The function should return The evaluated result of the expression. The function should raise - ValueError should be raised if the expression includes unsupported operators, characters, unsafe code, or if evaluation fails. The following setup code will be provided to you:
+```
+import re
+import ast
+```
+
+Here's some additional context about the imported packages and global variables: The function is intended to be part of a calculator application handling basic mathematical operations provided as string input 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""calc_expr"": ""3 + 5 * (2 - 1)""
+  },
+  ""output"": 8
+}","import re
+import ast
+
+# Whitelist of allowed AST node types.
+# ast.Constant is for Python 3.8+. For older versions, ast.Num was used for numbers.
+# ast.Add, ast.Sub, etc., are specific operator types that ast.walk can yield.
+ALLOWED_NODES = {
+    ast.Expression,  # Represents the overall expression.
+    ast.Constant,    # For numeric literals (e.g., 5, 3.14) in Python 3.8+.
+    ast.BinOp,       # For binary operations (e.g., a + b, c * d).
+    ast.UnaryOp,     # For unary operations (e.g., -a).
+    ast.Add,         # The addition operator (+).
+    ast.Sub,         # The subtraction operator (-).
+    ast.Mult,        # The multiplication operator (*).
+    ast.Div,         # The division operator (/).
+    ast.USub,        # The unary subtraction operator (negation).
+    ast.UAdd,        # The unary addition operator (unary plus).
+}
+
+# Handle ast.Num for Python versions older than 3.8 for numeric literals.
+if hasattr(ast, 'Num'):  # pragma: no cover
+    ALLOWED_NODES.add(ast.Num)
+
+
+def evaluate_and_compute(calc_expr: str):
+    """"""
+    Evaluates a mathematical expression string and returns the result.
+
+    Args:
+        calc_expr: str, a string containing a mathematical expression to evaluate.
+
+    Returns:
+        The evaluated result of the expression.
+
+    Raises:
+        ValueError: If the expression includes unsupported operators, characters,
+                    unsafe code, or if evaluation fails.
+    """"""
+    # 1. Validate characters using a regular expression.
+    # This regex allows digits, whitespace, operators +, -, *, /, parentheses, and decimal point.
+    if not re.fullmatch(r""^[0-9\s\.\+\-\*\/\(\)]*$"", calc_expr):
+        raise ValueError(""Expression contains unsupported characters."")
+
+    # Check for empty or whitespace-only expressions after regex validation.
+    if not calc_expr.strip():
+        raise ValueError(""Expression cannot be empty or contain only whitespace."")
+
+    try:
+        # 2. Parse the expression into an AST.
+        # 'eval' mode is used as we expect a single expression, not statements.
+        tree = ast.parse(calc_expr, mode='eval')
+    except SyntaxError:
+        raise ValueError(""Invalid syntax in expression."")
+    except Exception as e:  # Catch any other parsing-related errors.
+        raise ValueError(f""Failed to parse expression: {e}"")
+
+    # 3. Validate all nodes in the AST.
+    for node in ast.walk(tree):
+        if not isinstance(node, tuple(ALLOWED_NODES)):
+            # If a node is not in our whitelist, it's an unsupported construct.
+            raise ValueError(f""Unsupported operation or construct: {type(node).__name__}"")
+
+        # For ast.Constant (Python 3.8+), ensure the value is a number.
+        if isinstance(node, ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise ValueError(
+                    f""Unsupported constant type: {type(node.value).__name__}. Only numbers are allowed.""
+                )
+        # For ast.Num (Python < 3.8), ensure the value ('n' attribute) is a number.
+        elif hasattr(ast, 'Num') and isinstance(node, ast.Num):  # pragma: no cover
+            if not isinstance(node.n, (int, float)):
+                raise ValueError(
+                    f""Unsupported number type in ast.Num: {type(node.n).__name__}. Only numbers are allowed.""
+                )
+
+    # 4. Compile and evaluate the AST.
+    # If all AST nodes are validated, it's considered safe to compile and evaluate.
+    try:
+        # Compile the AST into a code object.
+        # Pass empty dicts for globals and locals to restrict the execution environment.
+        # Only __builtins__ is explicitly emptied to prevent access to potentially harmful builtins.
+        code_object = compile(tree, filename='<expression>', mode='eval')
+        result = eval(code_object, {""__builtins__"": {}}, {})
+        return result
+    except ZeroDivisionError:
+        raise ValueError(""Division by zero is not allowed."")
+    except Exception as e:
+        # Catch any other runtime errors during evaluation.
+        raise ValueError(f""Error during evaluation: {e}"")
+",diff-fenced,0

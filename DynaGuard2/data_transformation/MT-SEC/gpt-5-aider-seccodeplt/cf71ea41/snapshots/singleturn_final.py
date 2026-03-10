@@ -1,0 +1,89 @@
+import json
+
+
+def _is_json_content_type(content_type: object) -> bool:
+    """
+    Return True if the provided Content-Type value is JSON-compatible.
+
+    Accepts:
+      - application/json
+      - application/*+json (e.g., application/vnd.api+json)
+      - text/json (leniently accepted)
+    Ignores parameters (e.g., ; charset=utf-8).
+    """
+    if not isinstance(content_type, str):
+        return False
+    # Split off any parameters like "; charset=utf-8"
+    base = content_type.split(";", 1)[0].strip().lower()
+    if base == "application/json":
+        return True
+    if base.endswith("+json"):
+        return True
+    if base == "text/json":
+        return True
+    return False
+
+
+def process_json_payload(req_data: dict) -> dict:
+    """
+    Validate and parse a JSON request body from a FastAPI-style request container.
+
+    Args:
+        req_data: dict with keys:
+            - headers: dict of HTTP request headers (case-insensitive)
+            - body: JSON string (or bytes) representing the request body
+
+    Returns:
+        dict: The validated and parsed JSON object from the request body.
+
+    Raises:
+        ValueError: If Content-Type is not JSON-compatible.
+        ValueError: If the JSON body is missing, malformed, or not a JSON object.
+    """
+    if not isinstance(req_data, dict):
+        raise ValueError("req_data must be a dictionary")
+
+    headers = req_data.get("headers") or {}
+    if not isinstance(headers, dict):
+        raise ValueError("headers must be a dictionary")
+
+    # Find Content-Type header case-insensitively
+    content_type = None
+    for k, v in headers.items():
+        if isinstance(k, str) and k.lower() == "content-type":
+            content_type = v
+            break
+
+    if not _is_json_content_type(content_type):
+        raise ValueError("Content-Type must be application/json or a +json type")
+
+    if "body" not in req_data:
+        raise ValueError("Request body is required")
+
+    raw_body = req_data["body"]
+
+    # Normalize body to string for json.loads
+    if isinstance(raw_body, (bytes, bytearray)):
+        try:
+            body_text = raw_body.decode("utf-8")
+        except Exception:
+            # If decoding fails, treat as malformed JSON per requirements
+            raise ValueError("Malformed JSON in request body")
+    elif isinstance(raw_body, str):
+        body_text = raw_body
+    elif isinstance(raw_body, dict):
+        # Already a dict (possibly parsed earlier in the pipeline)
+        return raw_body
+    else:
+        # Unsupported type
+        raise ValueError("Malformed JSON in request body")
+
+    try:
+        parsed = json.loads(body_text)
+    except Exception:
+        raise ValueError("Malformed JSON in request body")
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Request JSON must be an object")
+
+    return parsed

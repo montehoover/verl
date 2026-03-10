@@ -1,0 +1,283 @@
+import ast
+
+
+class _SafeScriptValidator(ast.NodeVisitor):
+    """
+    Validates that a user-provided script only contains a safe subset of Python.
+    Disallowed constructs include (non-exhaustive): imports, calls, attributes,
+    subscripts, loops, functions/classes, lambdas, comprehensions, try/with, etc.
+    Only simple assignments and expression statements composed of literals,
+    names, arithmetic/boolean/comparison operators, basic containers, and
+    ternary expressions are allowed.
+    """
+
+    # Names that are explicitly forbidden if referenced
+    _banned_names = {
+        "__builtins__",
+        "__import__",
+        "eval",
+        "exec",
+        "open",
+        "input",
+        "compile",
+        "globals",
+        "locals",
+        "vars",
+        "dir",
+        "type",
+        "object",
+        "super",
+        "help",
+        "quit",
+        "exit",
+        "getattr",
+        "setattr",
+        "delattr",
+        "hasattr",
+        "classmethod",
+        "staticmethod",
+        "property",
+        "memoryview",
+        "bytes",
+        "bytearray",
+    }
+
+    # Allowed operator types
+    _allowed_binops = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
+    _allowed_unaryops = (ast.UAdd, ast.USub, ast.Not)
+    _allowed_boolops = (ast.And, ast.Or)
+    _allowed_cmpops = (
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.Is,
+        ast.IsNot,
+        ast.In,
+        ast.NotIn,
+    )
+
+    # Whitelisted AST node types
+    _allowed_nodes = {
+        ast.Module,
+        ast.Expr,
+        ast.Assign,
+        ast.AugAssign,
+        ast.Name,
+        ast.Constant,
+        ast.List,
+        ast.Tuple,
+        ast.Set,
+        ast.Dict,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.BoolOp,
+        ast.Compare,
+        ast.IfExp,
+        ast.JoinedStr,
+        ast.FormattedValue,
+        ast.Load,
+        ast.Store,
+    }
+
+    def generic_visit(self, node):
+        if type(node) not in self._allowed_nodes:
+            raise ValueError(f"Disallowed operation or syntax: {type(node).__name__}")
+        super().generic_visit(node)
+
+    # Module and statement-level nodes
+    def visit_Module(self, node: ast.Module):
+        # Only allow a flat sequence of statements
+        for stmt in node.body:
+            if not isinstance(stmt, (ast.Assign, ast.AugAssign, ast.Expr)):
+                raise ValueError(f"Disallowed statement: {type(stmt).__name__}")
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign):
+        # Only allow assignment to simple names (no tuple unpacking, attributes, or subscripts)
+        for t in node.targets:
+            if not isinstance(t, ast.Name):
+                raise ValueError("Only assignment to simple variables is allowed")
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign):
+        if not isinstance(node.target, ast.Name):
+            raise ValueError("Only augmented assignment to simple variables is allowed")
+        self.generic_visit(node)
+
+    def visit_Expr(self, node: ast.Expr):
+        self.generic_visit(node)
+
+    # Names and constants
+    def visit_Name(self, node: ast.Name):
+        ident = node.id
+        if ident in self._banned_names or (ident.startswith("__") and ident.endswith("__")):
+            raise ValueError(f"Use of disallowed name: {ident}")
+        # Continue traversal (ctx nodes are allowed)
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant):
+        # All Python literals (including numbers, strings, bytes, bool, None) are fine
+        # No additional checks needed beyond being a constant
+        return
+
+    # Containers
+    def visit_List(self, node: ast.List):
+        self.generic_visit(node)
+
+    def visit_Tuple(self, node: ast.Tuple):
+        self.generic_visit(node)
+
+    def visit_Set(self, node: ast.Set):
+        self.generic_visit(node)
+
+    def visit_Dict(self, node: ast.Dict):
+        self.generic_visit(node)
+
+    # Operations
+    def visit_BinOp(self, node: ast.BinOp):
+        if not isinstance(node.op, self._allowed_binops):
+            raise ValueError(f"Disallowed binary operator: {type(node.op).__name__}")
+        self.generic_visit(node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        if not isinstance(node.op, self._allowed_unaryops):
+            raise ValueError(f"Disallowed unary operator: {type(node.op).__name__}")
+        self.generic_visit(node)
+
+    def visit_BoolOp(self, node: ast.BoolOp):
+        if not isinstance(node.op, self._allowed_boolops):
+            raise ValueError(f"Disallowed boolean operator: {type(node.op).__name__}")
+        self.generic_visit(node)
+
+    def visit_Compare(self, node: ast.Compare):
+        for op in node.ops:
+            if not isinstance(op, self._allowed_cmpops):
+                raise ValueError(f"Disallowed comparison operator: {type(op).__name__}")
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node: ast.IfExp):
+        self.generic_visit(node)
+
+    # f-strings
+    def visit_JoinedStr(self, node: ast.JoinedStr):
+        self.generic_visit(node)
+
+    def visit_FormattedValue(self, node: ast.FormattedValue):
+        # The value and optional format_spec will be validated recursively
+        self.generic_visit(node)
+
+    # Explicitly forbid dangerous constructs by defining visitors that raise
+    def visit_Attribute(self, node: ast.Attribute):
+        raise ValueError("Attribute access is not allowed")
+
+    def visit_Call(self, node: ast.Call):
+        raise ValueError("Function calls are not allowed")
+
+    def visit_Subscript(self, node: ast.Subscript):
+        raise ValueError("Subscript access (e.g., indexing/slicing) is not allowed")
+
+    def visit_Lambda(self, node: ast.Lambda):
+        raise ValueError("Lambda definitions are not allowed")
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        raise ValueError("Function definitions are not allowed")
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        raise ValueError("Async function definitions are not allowed")
+
+    def visit_ClassDef(self, node: ast.ClassDef):
+        raise ValueError("Class definitions are not allowed")
+
+    def visit_Import(self, node: ast.Import):
+        raise ValueError("Import statements are not allowed")
+
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        raise ValueError("Import statements are not allowed")
+
+    def visit_For(self, node: ast.For):
+        raise ValueError("For loops are not allowed")
+
+    def visit_AsyncFor(self, node: ast.AsyncFor):
+        raise ValueError("Async for loops are not allowed")
+
+    def visit_While(self, node: ast.While):
+        raise ValueError("While loops are not allowed")
+
+    def visit_With(self, node: ast.With):
+        raise ValueError("With statements are not allowed")
+
+    def visit_AsyncWith(self, node: ast.AsyncWith):
+        raise ValueError("Async with statements are not allowed")
+
+    def visit_Try(self, node: ast.Try):
+        raise ValueError("Try/except/finally are not allowed")
+
+    def visit_Raise(self, node: ast.Raise):
+        raise ValueError("Raise statements are not allowed")
+
+    def visit_Delete(self, node: ast.Delete):
+        raise ValueError("Delete statements are not allowed")
+
+    def visit_Global(self, node: ast.Global):
+        raise ValueError("Global statements are not allowed")
+
+    def visit_Nonlocal(self, node: ast.Nonlocal):
+        raise ValueError("Nonlocal statements are not allowed")
+
+    # Context nodes (visited but allowed)
+    def visit_Load(self, node: ast.Load):
+        return
+
+    def visit_Store(self, node: ast.Store):
+        return
+
+
+def run_user_script(user_script: str):
+    """
+    Execute a user-provided Python script in a restricted environment.
+
+    Args:
+        user_script: str - The Python script provided by the user.
+
+    Returns:
+        The result of the script if the last statement is an expression; otherwise None.
+
+    Raises:
+        ValueError: If the script contains disallowed operations or has syntax errors.
+        Other runtime exceptions may propagate from user code (e.g., ZeroDivisionError).
+    """
+    if not isinstance(user_script, str):
+        raise ValueError("user_script must be a string")
+
+    try:
+        tree = ast.parse(user_script, mode="exec")
+    except SyntaxError as e:
+        raise ValueError(f"Syntax error: {e}") from None
+
+    # Validate against the safe subset
+    _SafeScriptValidator().visit(tree)
+
+    # Prepare a sandboxed execution environment with no builtins
+    env = {"__builtins__": {}}
+
+    # If the last statement is an expression, evaluate and return its value
+    body = list(tree.body)
+    if body and isinstance(body[-1], ast.Expr):
+        pre_body = body[:-1]
+        last_expr = body[-1].value
+
+        if pre_body:
+            pre_mod = ast.Module(body=pre_body, type_ignores=[])
+            code_pre = compile(pre_mod, filename="<user_script>", mode="exec")
+            exec(code_pre, env, env)
+
+        expr_code = compile(ast.Expression(last_expr), filename="<user_script>", mode="eval")
+        return eval(expr_code, env, env)
+
+    # Otherwise, just execute the script and return None
+    code = compile(tree, filename="<user_script>", mode="exec")
+    exec(code, env, env)
+    return None

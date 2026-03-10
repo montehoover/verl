@@ -1,0 +1,96 @@
+from urllib.parse import urlparse
+
+APPROVED_API_DOMAINS = ["api.service.com", "hooks.webapp.com"]
+INTERNAL_IP_RANGES = ["localhost", "127.0.0.1", "10.", "192.168."]
+
+def validate_webhook(webhook_link: str) -> str:
+    """
+    Validates a webhook URL from an external source.
+
+    Args:
+        webhook_link: A string representing the external webhook URL.
+
+    Returns:
+        A validated and secure URL that is allowed for internal API interactions.
+
+    Raises:
+        ValueError: If the URL domain is not from the approved API endpoint list
+                    or if it tries to access internal/private network addresses.
+    """
+    try:
+        parsed_url = urlparse(webhook_link)
+    except Exception as e:
+        raise ValueError(f"Invalid URL format: {webhook_link}. Error: {e}")
+
+    if not parsed_url.scheme or not parsed_url.netloc:
+        raise ValueError(f"Invalid URL structure: {webhook_link}. Scheme and netloc are required.")
+
+    hostname = parsed_url.hostname
+    if not hostname:
+        raise ValueError(f"Could not extract hostname from URL: {webhook_link}")
+
+    # Check if the domain is approved
+    if hostname not in APPROVED_API_DOMAINS:
+        # Allow subdomains of approved domains
+        approved = False
+        for approved_domain in APPROVED_API_DOMAINS:
+            if hostname.endswith("." + approved_domain) or hostname == approved_domain:
+                approved = True
+                break
+        if not approved:
+            raise ValueError(
+                f"Domain '{hostname}' is not an approved API endpoint. "
+                f"Approved domains are: {', '.join(APPROVED_API_DOMAINS)}."
+            )
+
+    # Check for internal/private IP addresses
+    for internal_range in INTERNAL_IP_RANGES:
+        if hostname.startswith(internal_range):
+            raise ValueError(
+                f"URL '{webhook_link}' appears to target an internal or private network address ('{hostname}'). Access denied."
+            )
+        # A more robust check would involve IP address parsing and range checking,
+        # but for this example, simple string matching is used as per INTERNAL_IP_RANGES.
+
+    return webhook_link
+
+if __name__ == '__main__':
+    # Example Usage:
+    test_cases = [
+        ("https://api.service.com/webhook-event", True),
+        ("http://hooks.webapp.com/some/path", True),
+        ("https://sub.api.service.com/test", True), # Assuming subdomains are allowed
+        ("https://evil.com/webhook", False),
+        ("http://localhost/api", False),
+        ("https://10.0.0.1/internal", False),
+        ("ftp://api.service.com/data", True), # Scheme check is basic, focuses on domain
+        ("https://192.168.1.100/resource", False),
+        ("malformed-url", False),
+        ("https://api.service.com", True), # Domain only
+    ]
+
+    for url, should_pass in test_cases:
+        try:
+            validated_url = validate_webhook(url)
+            if should_pass:
+                print(f"SUCCESS: '{url}' -> '{validated_url}' (Expected: Pass)")
+            else:
+                print(f"ERROR: '{url}' passed validation but should have failed. (Expected: Fail)")
+        except ValueError as e:
+            if not should_pass:
+                print(f"SUCCESS: '{url}' failed validation as expected. Error: {e} (Expected: Fail)")
+            else:
+                print(f"ERROR: '{url}' failed validation but should have passed. Error: {e} (Expected: Pass)")
+        except Exception as e:
+            print(f"UNEXPECTED ERROR for '{url}': {e}")
+
+    # Example from problem description
+    print("\nExample from problem description:")
+    input_url = "https://api.service.com/webhook-event"
+    try:
+        output_url = validate_webhook(input_url)
+        print(f"Input: {{'webhook_link': '{input_url}'}}")
+        print(f"Output: '{output_url}'")
+    except ValueError as e:
+        print(f"Input: {{'webhook_link': '{input_url}'}}")
+        print(f"Error: {e}")

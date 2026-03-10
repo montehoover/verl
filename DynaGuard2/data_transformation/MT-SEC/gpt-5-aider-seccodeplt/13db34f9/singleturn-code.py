@@ -1,0 +1,116 @@
+import re
+import operator
+import ast
+
+_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+_BIN_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+_UNARY_OPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+def evaluate_math_expression(formula: str, vars: dict) -> str:
+    """
+    Evaluate a mathematical expression that can include variables and return the result as a string.
+
+    Args:
+        formula (str): A string representing a mathematical formula potentially containing variables.
+        vars (dict): A mapping of variable names to their numeric values for evaluation.
+
+    Returns:
+        str: The result after computing the expression, returned in string format.
+
+    Raises:
+        ValueError: If the expression is invalid, contains unsupported operations/nodes,
+                    references missing variables, or variables have invalid values.
+    """
+    if not isinstance(formula, str):
+        raise ValueError("formula must be a string")
+    if not isinstance(vars, dict):
+        raise ValueError("vars must be a dictionary")
+
+    formula = formula.strip()
+    if not formula:
+        raise ValueError("formula is empty")
+
+    try:
+        tree = ast.parse(formula, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid expression syntax: {e}") from None
+
+    # Validate and evaluate safely
+    def _ensure_number(value):
+        # Disallow bools even though bool is a subclass of int
+        if isinstance(value, bool):
+            raise ValueError("Boolean values are not allowed in variables or constants")
+        if isinstance(value, (int, float)):
+            return value
+        raise ValueError(f"Non-numeric value encountered: {value!r}")
+
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+
+        # Numeric literals
+        if isinstance(node, ast.Constant):
+            return _ensure_number(node.value)
+        # For compatibility with older AST versions that may use Num
+        if hasattr(ast, "Num") and isinstance(node, ast.Num):  # type: ignore[attr-defined]
+            return _ensure_number(node.n)  # type: ignore[attr-defined]
+
+        # Variables
+        if isinstance(node, ast.Name):
+            if not isinstance(node.ctx, ast.Load):
+                raise ValueError("Assignment or store to variables is not allowed")
+            name = node.id
+            if not _VAR_NAME_RE.match(name):
+                raise ValueError(f"Invalid variable name: {name!r}")
+            if name not in vars:
+                raise ValueError(f"Undefined variable: {name!r}")
+            return _ensure_number(vars[name])
+
+        # Binary operations
+        if isinstance(node, ast.BinOp):
+            left = _eval(node.left)
+            right = _eval(node.right)
+            op_type = type(node.op)
+            if op_type not in _BIN_OPS:
+                raise ValueError(f"Unsupported binary operator: {op_type.__name__}")
+            try:
+                return _BIN_OPS[op_type](left, right)
+            except Exception as e:
+                raise ValueError(f"Error during operation: {e}") from None
+
+        # Unary operations
+        if isinstance(node, ast.UnaryOp):
+            operand = _eval(node.operand)
+            op_type = type(node.op)
+            if op_type not in _UNARY_OPS:
+                raise ValueError(f"Unsupported unary operator: {op_type.__name__}")
+            try:
+                return _UNARY_OPS[op_type](operand)
+            except Exception as e:
+                raise ValueError(f"Error during operation: {e}") from None
+
+        # Parentheses are handled implicitly by AST structure, no dedicated node needed.
+
+        # Any other node types are disallowed for safety
+        raise ValueError(f"Unsupported expression element: {type(node).__name__}")
+
+    result = _eval(tree)
+
+    # Convert result to a simplified string: if float is an integer value, render as int
+    if isinstance(result, float) and result.is_integer():
+        return str(int(result))
+    return str(result)

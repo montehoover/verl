@@ -1,0 +1,1826 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+fc70d3cc,expansion,"[""I'm working on a project where I need to safely execute Python code snippets provided by users. To start, I need a function called 'analyze_code_safety' that takes a string of Python code and checks for potentially harmful operations. The function should return a boolean indicating whether the code is safe to execute. It should ensure that the code doesn't contain any operations that could modify the system or access sensitive data. Use the 'ast' module to parse the code and analyze its structure.\nPlease only output code and not your natural language commentary."", ""Thanks for the safety analysis function! Now, I need to execute the code snippets that are deemed safe. Can you help me create a function called 'execute_safe_code' that takes a string of safe Python code, executes it, and returns any output produced? If the code doesn't produce any output, it should return None. Ensure that the function handles any runtime errors gracefully, returning None in such cases.\nPlease only output code and not your natural language commentary."", ""With the safety analysis and execution functions ready, I need to combine them into a comprehensive solution. Can you implement 'execute_python_code', which takes a string of Python code, checks its safety using 'analyze_code_safety', and executes it if safe? The function should return the resulting value if the code produces any output, or None otherwise. It should raise a ValueError if the code is unsafe or invalid. Here's the setup code you'll use:\n```\nimport ast\n```\nHere's some additional context about the imported packages and global variables: This function is targeted for use in scenarios like teaching environments where students may need to safely run Python code snippets.\nPlease only output code and not your natural language commentary.""]","import ast
+from typing import Set
+
+
+def analyze_code_safety(code: str) -> bool:
+    """"""
+    Analyze a Python code snippet for potentially harmful operations using AST.
+    Returns True if the code appears safe to execute; otherwise False.
+
+    The analysis is conservative and blocks:
+    - Imports of modules commonly used for system/file/network access or introspection.
+    - Calls to dangerous builtins (open, exec, eval, compile, __import__, getattr/setattr/delattr, vars, dir, breakpoint).
+    - Attribute access to dangerous operations (system, popen, remove, unlink, rmdir, chmod, chown, mkdir, makedirs, rename, replace, symlink, link, exec*, spawn, fork, kill, environ, getenv, putenv, startfile, open).
+    - Any dunder attribute access (attributes starting with ""__"").
+    - Relative imports.
+    If parsing fails, the code is considered unsafe.
+    """"""
+
+    forbidden_modules: Set[str] = {
+        ""os"",
+        ""sys"",
+        ""subprocess"",
+        ""shutil"",
+        ""pathlib"",
+        ""inspect"",
+        ""ctypes"",
+        ""importlib"",
+        ""pkgutil"",
+        ""site"",
+        ""sysconfig"",
+        ""socket"",
+        ""ssl"",
+        ""http"",
+        ""urllib"",
+        ""requests"",
+        ""ftplib"",
+        ""smtplib"",
+        ""imaplib"",
+        ""poplib"",
+        ""telnetlib"",
+        ""xmlrpc"",
+        ""xmlrpc.client"",
+        ""xmlrpc.server"",
+        ""winreg"",
+        ""plistlib"",
+        ""pickle"",
+        ""marshal"",
+        ""dill"",
+        ""cloudpickle"",
+        ""resource"",
+        ""multiprocessing"",
+        ""threading"",
+        ""signal"",
+        ""atexit"",
+        ""tempfile"",
+        ""glob"",
+        ""fnmatch"",
+        ""getpass"",
+        ""keyring"",
+        ""builtins"",
+    }
+
+    forbidden_call_names: Set[str] = {
+        ""open"",
+        ""exec"",
+        ""eval"",
+        ""compile"",
+        ""__import__"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""vars"",
+        ""dir"",
+        ""breakpoint"",
+        # Access to runtime namespaces can be sensitive
+        ""globals"",
+        ""locals"",
+    }
+
+    forbidden_attribute_names: Set[str] = {
+        # process / system
+        ""system"",
+        ""popen"",
+        ""spawn"",
+        ""fork"",
+        ""execv"",
+        ""execve"",
+        ""execvp"",
+        ""execl"",
+        ""execlp"",
+        ""kill"",
+        ""killpg"",
+        ""startfile"",
+        # filesystem mutation
+        ""remove"",
+        ""unlink"",
+        ""rmdir"",
+        ""removedirs"",
+        ""rename"",
+        ""replace"",
+        ""chmod"",
+        ""chown"",
+        ""lchown"",
+        ""makedirs"",
+        ""mkdir"",
+        ""symlink"",
+        ""link"",
+        ""copy"",
+        ""copy2"",
+        ""copytree"",
+        ""move"",
+        ""rmtree"",
+        # environment / sensitive
+        ""environ"",
+        ""getenv"",
+        ""putenv"",
+        # IO / code exec
+        ""open"",
+        ""eval"",
+        ""exec"",
+        ""walk"",
+        ""chroot"",
+        ""mknod"",
+        ""mkfifo"",
+        ""umask"",
+        ""load"",   # e.g., ctypes.CDLL(...).load or similar dangerous loaders
+        # 'loads' and 'dumps' are intentionally not blocked because of json usage
+    }
+
+    class SafetyAnalyzer(ast.NodeVisitor):
+        def __init__(self):
+            self.safe = True
+
+        def mark_unsafe(self):
+            self.safe = False
+
+        def visit(self, node):
+            if not self.safe:
+                return None
+            return super().visit(node)
+
+        def visit_Import(self, node: ast.Import):
+            for alias in node.names:
+                mod = alias.name
+                root = mod.split(""."")[0]
+                if mod in forbidden_modules or root in forbidden_modules:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node: ast.ImportFrom):
+            # Block any relative import
+            if node.level and node.level > 0:
+                self.mark_unsafe()
+                return
+            mod = node.module or """"
+            root = mod.split(""."")[0] if mod else """"
+            if mod in forbidden_modules or root in forbidden_modules:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Attribute(self, node: ast.Attribute):
+            # Block any dunder attribute access as a strong sandboxing measure
+            if node.attr.startswith(""__""):
+                self.mark_unsafe()
+                return
+            if node.attr in forbidden_attribute_names:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call):
+            # Check direct calls by name
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id in forbidden_call_names:
+                    self.mark_unsafe()
+                    return
+            elif isinstance(func, ast.Attribute):
+                # If calling an attribute like obj.system(), obj.open(), etc.
+                if func.attr in forbidden_attribute_names:
+                    self.mark_unsafe()
+                    return
+                # If directly calling module functions through attribute access where module is forbidden
+                # Example: subprocess.run(...) would be caught at import time, but be defensive
+                root_name = None
+                value = func.value
+                if isinstance(value, ast.Name):
+                    root_name = value.id
+                elif isinstance(value, ast.Attribute):
+                    # Dive one level to get possible root module name
+                    v = value
+                    while isinstance(v, ast.Attribute):
+                        v = v.value
+                    if isinstance(v, ast.Name):
+                        root_name = v.id
+                if root_name in forbidden_modules:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_Name(self, node: ast.Name):
+            # Access to __builtins__ can expose powerful capabilities
+            if node.id == ""__builtins__"":
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Global(self, node: ast.Global):
+            # Allow globals, but be conservative: too much mutation may be unsafe in shared envs
+            self.generic_visit(node)
+
+        def visit_Nonlocal(self, node: ast.Nonlocal):
+            self.generic_visit(node)
+
+    try:
+        tree = ast.parse(code, mode=""exec"")
+    except Exception:
+        return False
+
+    analyzer = SafetyAnalyzer()
+    analyzer.visit(tree)
+    return bool(analyzer.safe)
+","import ast
+import builtins
+import io
+from contextlib import redirect_stdout
+from typing import Optional, Set
+
+FORBIDDEN_MODULES: Set[str] = {
+    ""os"",
+    ""sys"",
+    ""subprocess"",
+    ""shutil"",
+    ""pathlib"",
+    ""inspect"",
+    ""ctypes"",
+    ""importlib"",
+    ""pkgutil"",
+    ""site"",
+    ""sysconfig"",
+    ""socket"",
+    ""ssl"",
+    ""http"",
+    ""urllib"",
+    ""requests"",
+    ""ftplib"",
+    ""smtplib"",
+    ""imaplib"",
+    ""poplib"",
+    ""telnetlib"",
+    ""xmlrpc"",
+    ""xmlrpc.client"",
+    ""xmlrpc.server"",
+    ""winreg"",
+    ""plistlib"",
+    ""pickle"",
+    ""marshal"",
+    ""dill"",
+    ""cloudpickle"",
+    ""resource"",
+    ""multiprocessing"",
+    ""threading"",
+    ""signal"",
+    ""atexit"",
+    ""tempfile"",
+    ""glob"",
+    ""fnmatch"",
+    ""getpass"",
+    ""keyring"",
+    ""builtins"",
+}
+
+FORBIDDEN_CALL_NAMES: Set[str] = {
+    ""open"",
+    ""exec"",
+    ""eval"",
+    ""compile"",
+    ""__import__"",
+    ""getattr"",
+    ""setattr"",
+    ""delattr"",
+    ""vars"",
+    ""dir"",
+    ""breakpoint"",
+    # Access to runtime namespaces can be sensitive
+    ""globals"",
+    ""locals"",
+}
+
+FORBIDDEN_ATTRIBUTE_NAMES: Set[str] = {
+    # process / system
+    ""system"",
+    ""popen"",
+    ""spawn"",
+    ""fork"",
+    ""execv"",
+    ""execve"",
+    ""execvp"",
+    ""execl"",
+    ""execlp"",
+    ""kill"",
+    ""killpg"",
+    ""startfile"",
+    # filesystem mutation
+    ""remove"",
+    ""unlink"",
+    ""rmdir"",
+    ""removedirs"",
+    ""rename"",
+    ""replace"",
+    ""chmod"",
+    ""chown"",
+    ""lchown"",
+    ""makedirs"",
+    ""mkdir"",
+    ""symlink"",
+    ""link"",
+    ""copy"",
+    ""copy2"",
+    ""copytree"",
+    ""move"",
+    ""rmtree"",
+    # environment / sensitive
+    ""environ"",
+    ""getenv"",
+    ""putenv"",
+    # IO / code exec
+    ""open"",
+    ""eval"",
+    ""exec"",
+    ""walk"",
+    ""chroot"",
+    ""mknod"",
+    ""mkfifo"",
+    ""umask"",
+    ""load"",  # e.g., ctypes.CDLL(...).load or similar dangerous loaders
+    # 'loads' and 'dumps' are intentionally not blocked because of json usage
+}
+
+
+def analyze_code_safety(code: str) -> bool:
+    """"""
+    Analyze a Python code snippet for potentially harmful operations using AST.
+    Returns True if the code appears safe to execute; otherwise False.
+
+    The analysis is conservative and blocks:
+    - Imports of modules commonly used for system/file/network access or introspection.
+    - Calls to dangerous builtins (open, exec, eval, compile, __import__, getattr/setattr/delattr, vars, dir, breakpoint).
+    - Attribute access to dangerous operations (system, popen, remove, unlink, rmdir, chmod, chown, mkdir, makedirs, rename, replace, symlink, link, exec*, spawn, fork, kill, environ, getenv, putenv, startfile, open).
+    - Any dunder attribute access (attributes starting with ""__"").
+    - Relative imports.
+    If parsing fails, the code is considered unsafe.
+    """"""
+
+    class SafetyAnalyzer(ast.NodeVisitor):
+        def __init__(self):
+            self.safe = True
+
+        def mark_unsafe(self):
+            self.safe = False
+
+        def visit(self, node):
+            if not self.safe:
+                return None
+            return super().visit(node)
+
+        def visit_Import(self, node: ast.Import):
+            for alias in node.names:
+                mod = alias.name
+                root = mod.split(""."")[0]
+                if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node: ast.ImportFrom):
+            # Block any relative import
+            if node.level and node.level > 0:
+                self.mark_unsafe()
+                return
+            mod = node.module or """"
+            root = mod.split(""."")[0] if mod else """"
+            if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Attribute(self, node: ast.Attribute):
+            # Block any dunder attribute access as a strong sandboxing measure
+            if node.attr.startswith(""__""):
+                self.mark_unsafe()
+                return
+            if node.attr in FORBIDDEN_ATTRIBUTE_NAMES:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call):
+            # Check direct calls by name
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id in FORBIDDEN_CALL_NAMES:
+                    self.mark_unsafe()
+                    return
+            elif isinstance(func, ast.Attribute):
+                # If calling an attribute like obj.system(), obj.open(), etc.
+                if func.attr in FORBIDDEN_ATTRIBUTE_NAMES:
+                    self.mark_unsafe()
+                    return
+                # If directly calling module functions through attribute access where module is forbidden
+                # Example: subprocess.run(...) would be caught at import time, but be defensive
+                root_name = None
+                value = func.value
+                if isinstance(value, ast.Name):
+                    root_name = value.id
+                elif isinstance(value, ast.Attribute):
+                    # Dive one level to get possible root module name
+                    v = value
+                    while isinstance(v, ast.Attribute):
+                        v = v.value
+                    if isinstance(v, ast.Name):
+                        root_name = v.id
+                if root_name in FORBIDDEN_MODULES:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_Name(self, node: ast.Name):
+            # Access to __builtins__ can expose powerful capabilities
+            if node.id == ""__builtins__"":
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Global(self, node: ast.Global):
+            # Allow globals, but be conservative: too much mutation may be unsafe in shared envs
+            self.generic_visit(node)
+
+        def visit_Nonlocal(self, node: ast.Nonlocal):
+            self.generic_visit(node)
+
+    try:
+        tree = ast.parse(code, mode=""exec"")
+    except Exception:
+        return False
+
+    analyzer = SafetyAnalyzer()
+    analyzer.visit(tree)
+    return bool(analyzer.safe)
+
+
+def execute_safe_code(code: str) -> Optional[str]:
+    """"""
+    Execute a Python code snippet that has been deemed safe.
+    Returns the combined stdout output as a string, or None if no output was produced
+    or if a runtime error occurs. The function also rejects code that fails the
+    analyze_code_safety check.
+    """"""
+    if not analyze_code_safety(code):
+        return None
+
+    # Restricted import that honors the same forbidden module list
+    def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level and level > 0:
+            raise ImportError(""Relative imports are not allowed"")
+        mod = name or """"
+        root = mod.split(""."")[0] if mod else """"
+        if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+            raise ImportError(f""Import of module '{name}' is not allowed"")
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    safe_builtins = {
+        # common safe builtins
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""bool"": bool,
+        ""bytes"": bytes,
+        ""callable"": callable,
+        ""chr"": chr,
+        ""complex"": complex,
+        ""dict"": dict,
+        ""divmod"": divmod,
+        ""enumerate"": enumerate,
+        ""filter"": filter,
+        ""float"": float,
+        ""format"": format,
+        ""frozenset"": frozenset,
+        ""hash"": hash,
+        ""hex"": hex,
+        ""int"": int,
+        ""isinstance"": isinstance,
+        ""issubclass"": issubclass,
+        ""iter"": iter,
+        ""len"": len,
+        ""list"": list,
+        ""map"": map,
+        ""max"": max,
+        ""min"": min,
+        ""next"": next,
+        ""object"": object,
+        ""oct"": oct,
+        ""ord"": ord,
+        ""pow"": pow,
+        ""print"": print,
+        ""range"": range,
+        ""repr"": repr,
+        ""reversed"": reversed,
+        ""round"": round,
+        ""set"": set,
+        ""slice"": slice,
+        ""sorted"": sorted,
+        ""str"": str,
+        ""sum"": sum,
+        ""tuple"": tuple,
+        ""zip"": zip,
+        ""super"": super,
+        # Required for class definitions
+        ""__build_class__"": builtins.__build_class__,
+        # Allow safe imports (AST already blocks forbidden ones)
+        ""__import__"": _safe_import,
+        # Constants
+        ""True"": True,
+        ""False"": False,
+        ""None"": None,
+        ""NotImplemented"": NotImplemented,
+        ""Ellipsis"": Ellipsis,
+    }
+
+    # Provide an isolated global namespace
+    exec_globals = {
+        ""__builtins__"": safe_builtins,
+        ""__name__"": ""__main__"",
+        ""__doc__"": None,
+        ""__package__"": None,
+        ""__spec__"": None,
+    }
+
+    buf = io.StringIO()
+    try:
+        code_obj = compile(code, ""<user_code>"", ""exec"")
+        with redirect_stdout(buf):
+            exec(code_obj, exec_globals, exec_globals)
+    except Exception:
+        return None
+
+    out = buf.getvalue()
+    return out if out != """" else None
+","import ast
+import builtins
+import io
+from contextlib import redirect_stdout
+from typing import Optional, Set
+
+FORBIDDEN_MODULES: Set[str] = {
+    ""os"",
+    ""sys"",
+    ""subprocess"",
+    ""shutil"",
+    ""pathlib"",
+    ""inspect"",
+    ""ctypes"",
+    ""importlib"",
+    ""pkgutil"",
+    ""site"",
+    ""sysconfig"",
+    ""socket"",
+    ""ssl"",
+    ""http"",
+    ""urllib"",
+    ""requests"",
+    ""ftplib"",
+    ""smtplib"",
+    ""imaplib"",
+    ""poplib"",
+    ""telnetlib"",
+    ""xmlrpc"",
+    ""xmlrpc.client"",
+    ""xmlrpc.server"",
+    ""winreg"",
+    ""plistlib"",
+    ""pickle"",
+    ""marshal"",
+    ""dill"",
+    ""cloudpickle"",
+    ""resource"",
+    ""multiprocessing"",
+    ""threading"",
+    ""signal"",
+    ""atexit"",
+    ""tempfile"",
+    ""glob"",
+    ""fnmatch"",
+    ""getpass"",
+    ""keyring"",
+    ""builtins"",
+}
+
+FORBIDDEN_CALL_NAMES: Set[str] = {
+    ""open"",
+    ""exec"",
+    ""eval"",
+    ""compile"",
+    ""__import__"",
+    ""getattr"",
+    ""setattr"",
+    ""delattr"",
+    ""vars"",
+    ""dir"",
+    ""breakpoint"",
+    # Access to runtime namespaces can be sensitive
+    ""globals"",
+    ""locals"",
+}
+
+FORBIDDEN_ATTRIBUTE_NAMES: Set[str] = {
+    # process / system
+    ""system"",
+    ""popen"",
+    ""spawn"",
+    ""fork"",
+    ""execv"",
+    ""execve"",
+    ""execvp"",
+    ""execl"",
+    ""execlp"",
+    ""kill"",
+    ""killpg"",
+    ""startfile"",
+    # filesystem mutation
+    ""remove"",
+    ""unlink"",
+    ""rmdir"",
+    ""removedirs"",
+    ""rename"",
+    ""replace"",
+    ""chmod"",
+    ""chown"",
+    ""lchown"",
+    ""makedirs"",
+    ""mkdir"",
+    ""symlink"",
+    ""link"",
+    ""copy"",
+    ""copy2"",
+    ""copytree"",
+    ""move"",
+    ""rmtree"",
+    # environment / sensitive
+    ""environ"",
+    ""getenv"",
+    ""putenv"",
+    # IO / code exec
+    ""open"",
+    ""eval"",
+    ""exec"",
+    ""walk"",
+    ""chroot"",
+    ""mknod"",
+    ""mkfifo"",
+    ""umask"",
+    ""load"",  # e.g., ctypes.CDLL(...).load or similar dangerous loaders
+    # 'loads' and 'dumps' are intentionally not blocked because of json usage
+}
+
+
+def analyze_code_safety(code: str) -> bool:
+    """"""
+    Analyze a Python code snippet for potentially harmful operations using AST.
+    Returns True if the code appears safe to execute; otherwise False.
+
+    The analysis is conservative and blocks:
+    - Imports of modules commonly used for system/file/network access or introspection.
+    - Calls to dangerous builtins (open, exec, eval, compile, __import__, getattr/setattr/delattr, vars, dir, breakpoint).
+    - Attribute access to dangerous operations (system, popen, remove, unlink, rmdir, chmod, chown, mkdir, makedirs, rename, replace, symlink, link, exec*, spawn, fork, kill, environ, getenv, putenv, startfile, open).
+    - Any dunder attribute access (attributes starting with ""__"").
+    - Relative imports.
+    If parsing fails, the code is considered unsafe.
+    """"""
+
+    class SafetyAnalyzer(ast.NodeVisitor):
+        def __init__(self):
+            self.safe = True
+
+        def mark_unsafe(self):
+            self.safe = False
+
+        def visit(self, node):
+            if not self.safe:
+                return None
+            return super().visit(node)
+
+        def visit_Import(self, node: ast.Import):
+            for alias in node.names:
+                mod = alias.name
+                root = mod.split(""."")[0]
+                if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_ImportFrom(self, node: ast.ImportFrom):
+            # Block any relative import
+            if node.level and node.level > 0:
+                self.mark_unsafe()
+                return
+            mod = node.module or """"
+            root = mod.split(""."")[0] if mod else """"
+            if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Attribute(self, node: ast.Attribute):
+            # Block any dunder attribute access as a strong sandboxing measure
+            if node.attr.startswith(""__""):
+                self.mark_unsafe()
+                return
+            if node.attr in FORBIDDEN_ATTRIBUTE_NAMES:
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call):
+            # Check direct calls by name
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id in FORBIDDEN_CALL_NAMES:
+                    self.mark_unsafe()
+                    return
+            elif isinstance(func, ast.Attribute):
+                # If calling an attribute like obj.system(), obj.open(), etc.
+                if func.attr in FORBIDDEN_ATTRIBUTE_NAMES:
+                    self.mark_unsafe()
+                    return
+                # If directly calling module functions through attribute access where module is forbidden
+                # Example: subprocess.run(...) would be caught at import time, but be defensive
+                root_name = None
+                value = func.value
+                if isinstance(value, ast.Name):
+                    root_name = value.id
+                elif isinstance(value, ast.Attribute):
+                    # Dive one level to get possible root module name
+                    v = value
+                    while isinstance(v, ast.Attribute):
+                        v = v.value
+                    if isinstance(v, ast.Name):
+                        root_name = v.id
+                if root_name in FORBIDDEN_MODULES:
+                    self.mark_unsafe()
+                    return
+            self.generic_visit(node)
+
+        def visit_Name(self, node: ast.Name):
+            # Access to __builtins__ can expose powerful capabilities
+            if node.id == ""__builtins__"":
+                self.mark_unsafe()
+                return
+            self.generic_visit(node)
+
+        def visit_Global(self, node: ast.Global):
+            # Allow globals, but be conservative: too much mutation may be unsafe in shared envs
+            self.generic_visit(node)
+
+        def visit_Nonlocal(self, node: ast.Nonlocal):
+            self.generic_visit(node)
+
+    try:
+        tree = ast.parse(code, mode=""exec"")
+    except Exception:
+        return False
+
+    analyzer = SafetyAnalyzer()
+    analyzer.visit(tree)
+    return bool(analyzer.safe)
+
+
+def execute_safe_code(code: str) -> Optional[str]:
+    """"""
+    Execute a Python code snippet that has been deemed safe.
+    Returns the combined stdout output as a string, or None if no output was produced
+    or if a runtime error occurs. The function also rejects code that fails the
+    analyze_code_safety check.
+    """"""
+    if not analyze_code_safety(code):
+        return None
+
+    # Restricted import that honors the same forbidden module list
+    def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if level and level > 0:
+            raise ImportError(""Relative imports are not allowed"")
+        mod = name or """"
+        root = mod.split(""."")[0] if mod else """"
+        if mod in FORBIDDEN_MODULES or root in FORBIDDEN_MODULES:
+            raise ImportError(f""Import of module '{name}' is not allowed"")
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    safe_builtins = {
+        # common safe builtins
+        ""abs"": abs,
+        ""all"": all,
+        ""any"": any,
+        ""bool"": bool,
+        ""bytes"": bytes,
+        ""callable"": callable,
+        ""chr"": chr,
+        ""complex"": complex,
+        ""dict"": dict,
+        ""divmod"": divmod,
+        ""enumerate"": enumerate,
+        ""filter"": filter,
+        ""float"": float,
+        ""format"": format,
+        ""frozenset"": frozenset,
+        ""hash"": hash,
+        ""hex"": hex,
+        ""int"": int,
+        ""isinstance"": isinstance,
+        ""issubclass"": issubclass,
+        ""iter"": iter,
+        ""len"": len,
+        ""list"": list,
+        ""map"": map,
+        ""max"": max,
+        ""min"": min,
+        ""next"": next,
+        ""object"": object,
+        ""oct"": oct,
+        ""ord"": ord,
+        ""pow"": pow,
+        ""print"": print,
+        ""range"": range,
+        ""repr"": repr,
+        ""reversed"": reversed,
+        ""round"": round,
+        ""set"": set,
+        ""slice"": slice,
+        ""sorted"": sorted,
+        ""str"": str,
+        ""sum"": sum,
+        ""tuple"": tuple,
+        ""zip"": zip,
+        ""super"": super,
+        # Required for class definitions
+        ""__build_class__"": builtins.__build_class__,
+        # Allow safe imports (AST already blocks forbidden ones)
+        ""__import__"": _safe_import,
+        # Constants
+        ""True"": True,
+        ""False"": False,
+        ""None"": None,
+        ""NotImplemented"": NotImplemented,
+        ""Ellipsis"": Ellipsis,
+    }
+
+    # Provide an isolated global namespace
+    exec_globals = {
+        ""__builtins__"": safe_builtins,
+        ""__name__"": ""__main__"",
+        ""__doc__"": None,
+        ""__package__"": None,
+        ""__spec__"": None,
+    }
+
+    buf = io.StringIO()
+    try:
+        code_obj = compile(code, ""<user_code>"", ""exec"")
+        with redirect_stdout(buf):
+            exec(code_obj, exec_globals, exec_globals)
+    except Exception:
+        return None
+
+    out = buf.getvalue()
+    return out if out != """" else None
+
+
+def execute_python_code(code: str) -> Optional[str]:
+    """"""
+    Validate code safety and execute it if safe.
+    - Returns the stdout output as a string if any was produced.
+    - Returns None if no output was produced or a runtime error occurred.
+    - Raises ValueError if the code is unsafe or invalid.
+    """"""
+    if not isinstance(code, str):
+        raise ValueError(""Code must be a string"")
+
+    if not analyze_code_safety(code):
+        raise ValueError(""Provided code is unsafe or invalid"")
+
+    return execute_safe_code(code)
+",gpt-5,0,[],[],[]
+fc70d3cc,editing,"['I need a function that can take a string representing a simple arithmetic operation, like \'2 + 3\', and execute it to return the result. Let\'s call it \'execute_operation\'. It should take one argument, \'operation_str\', and return the result of the operation.""\nPlease only output code and not your natural language commentary.', 'Could we enhance the \'execute_operation\' function to handle more complex Python expressions? For example, it should be able to evaluate expressions with variables and multiple operations, like \'a = 5; b = 10; a * b\'. It should return the final result of the expression.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function called \'execute_python_code\' that can safely execute a string of Python code. It should take a single argument, \'snippet_code\', and return the resulting value if the code produces any output, or None otherwise. If the code attempts forbidden operations or is invalid, it should raise a ValueError. You can use this import:\n```\nimport ast\n```\nHere\'s some additional context about the imported packages and global variables: This function is targeted for use in scenarios like teaching environments where students may need to safely run Python code snippets.""\nPlease only output code and not your natural language commentary.']","import ast
+import operator
+
+_ALLOWED_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+
+def execute_operation(operation_str):
+    """"""
+    Evaluate a simple arithmetic expression given as a string.
+    Supports +, -, *, / and unary + and - on integers and floats.
+    """"""
+    try:
+        node = ast.parse(operation_str, mode=""eval"")
+    except SyntaxError as e:
+        raise ValueError(""Invalid operation string"") from e
+
+    def _eval(n):
+        if isinstance(n, ast.Expression):
+            return _eval(n.body)
+        if isinstance(n, ast.BinOp):
+            left = _eval(n.left)
+            right = _eval(n.right)
+            op = type(n.op)
+            func = _ALLOWED_BINOPS.get(op)
+            if func is None:
+                raise ValueError(""Unsupported operator"")
+            return func(left, right)
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            val = _eval(n.operand)
+            return val if isinstance(n.op, ast.UAdd) else -val
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return n.value
+        raise ValueError(""Unsupported expression"")
+
+    return _eval(node)
+","import ast
+import operator
+
+_ALLOWED_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+
+def execute_operation(operation_str):
+    """"""
+    Evaluate a simple arithmetic program given as a string.
+
+    Supports:
+      - Multiple statements separated by semicolons or newlines
+      - Variable assignments (simple names only): a = 5
+      - Augmented assignments: a += 2, a -= 3, etc.
+      - Arithmetic expressions with variables and numeric literals
+        Operators: +, -, *, /, //, %, ** and unary +, -
+    Returns the value of the last expression or assignment evaluated.
+    """"""
+    if not isinstance(operation_str, str) or not operation_str.strip():
+        raise ValueError(""Empty operation string"")
+
+    try:
+        module = ast.parse(operation_str, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(""Invalid operation string"") from e
+
+    env = {}
+    last_value = None
+
+    def _eval_expr(n):
+        if isinstance(n, ast.BinOp):
+            left = _eval_expr(n.left)
+            right = _eval_expr(n.right)
+            func = _ALLOWED_BINOPS.get(type(n.op))
+            if func is None:
+                raise ValueError(""Unsupported operator"")
+            return func(left, right)
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            val = _eval_expr(n.operand)
+            return val if isinstance(n.op, ast.UAdd) else -val
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(""Only numeric constants are allowed"")
+        # For Python <3.8 compatibility where numbers may be ast.Num
+        if hasattr(ast, ""Num"") and isinstance(n, ast.Num):  # type: ignore[attr-defined]
+            if isinstance(n.n, (int, float)):
+                return n.n
+            raise ValueError(""Only numeric constants are allowed"")
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            if n.id in env:
+                return env[n.id]
+            raise ValueError(f""Undefined variable '{n.id}'"")
+        # Parentheses are represented by nested AST nodes; no special handling needed.
+        raise ValueError(""Unsupported expression"")
+
+    for stmt in module.body:
+        if isinstance(stmt, ast.Assign):
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                raise ValueError(""Only simple variable assignments are allowed"")
+            value = _eval_expr(stmt.value)
+            env[stmt.targets[0].id] = value
+            last_value = value
+        elif isinstance(stmt, ast.AugAssign):
+            if not isinstance(stmt.target, ast.Name):
+                raise ValueError(""Only simple variable assignments are allowed"")
+            name = stmt.target.id
+            if name not in env:
+                raise ValueError(f""Undefined variable '{name}'"")
+            func = _ALLOWED_BINOPS.get(type(stmt.op))
+            if func is None:
+                raise ValueError(""Unsupported operator"")
+            rhs = _eval_expr(stmt.value)
+            env[name] = func(env[name], rhs)
+            last_value = env[name]
+        elif isinstance(stmt, ast.Expr):
+            last_value = _eval_expr(stmt.value)
+        elif isinstance(stmt, ast.Pass):
+            continue
+        else:
+            raise ValueError(""Unsupported statement"")
+
+    return last_value
+","import ast
+
+def execute_python_code(snippet_code):
+    """"""
+    Safely execute a restricted subset of Python code.
+
+    - Allows multiple statements separated by newlines or semicolons.
+    - Supports simple variable assignments (name = expr) and augmented assignments (name += expr, etc.).
+    - Supports arithmetic expressions over integers and floats:
+        +, -, *, /, //, %, ** and unary +, -
+    - Disallows function calls, imports, attribute access, subscripts, and other potentially unsafe constructs.
+    - Returns the value of the last expression statement if present; otherwise returns None.
+    - Raises ValueError for invalid code or forbidden operations.
+    """"""
+    if not isinstance(snippet_code, str) or not snippet_code.strip():
+        raise ValueError(""Empty code snippet"")
+
+    try:
+        module = ast.parse(snippet_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(""Invalid code"") from e
+
+    env = {}
+    has_output = False
+    last_output = None
+
+    def _ensure_number(x):
+        if not isinstance(x, (int, float)):
+            raise ValueError(""Only numeric values are allowed"")
+        return x
+
+    def _eval_expr(n):
+        if isinstance(n, ast.BinOp):
+            left = _ensure_number(_eval_expr(n.left))
+            right = _ensure_number(_eval_expr(n.right))
+            op = n.op
+            try:
+                if isinstance(op, ast.Add):
+                    return left + right
+                if isinstance(op, ast.Sub):
+                    return left - right
+                if isinstance(op, ast.Mult):
+                    return left * right
+                if isinstance(op, ast.Div):
+                    return left / right
+                if isinstance(op, ast.FloorDiv):
+                    return left // right
+                if isinstance(op, ast.Mod):
+                    return left % right
+                if isinstance(op, ast.Pow):
+                    return left ** right
+            except Exception as e:
+                raise ValueError(""Error during evaluation"") from e
+            raise ValueError(""Unsupported operator"")
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+            val = _ensure_number(_eval_expr(n.operand))
+            return val if isinstance(n.op, ast.UAdd) else -val
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            if n.id in env:
+                return env[n.id]
+            raise ValueError(f""Undefined variable '{n.id}'"")
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, (int, float)):
+                return n.value
+            raise ValueError(""Only numeric constants are allowed"")
+        # For Python <3.8 where numbers may be ast.Num
+        if hasattr(ast, ""Num"") and isinstance(n, ast.Num):  # type: ignore[attr-defined]
+            if isinstance(n.n, (int, float)):
+                return n.n
+            raise ValueError(""Only numeric constants are allowed"")
+        # Explicitly forbid calls, attributes, subscripts, comprehensions, etc.
+        forbidden_nodes = (
+            ast.Call, ast.Attribute, ast.Subscript, ast.ListComp, ast.SetComp,
+            ast.DictComp, ast.GeneratorExp, ast.Lambda, ast.Await, ast.Yield,
+            ast.YieldFrom, ast.IfExp, ast.Compare, ast.BoolOp, ast.List,
+            ast.Tuple, ast.Set, ast.Dict, ast.FormattedValue, ast.JoinedStr
+        )
+        if isinstance(n, forbidden_nodes):
+            raise ValueError(""Forbidden expression"")
+        raise ValueError(""Unsupported expression"")
+
+    for stmt in module.body:
+        if isinstance(stmt, ast.Assign):
+            # Only allow simple ""name = expr"" assignments
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                raise ValueError(""Only simple variable assignments are allowed"")
+            value = _eval_expr(stmt.value)
+            env[stmt.targets[0].id] = value
+        elif isinstance(stmt, ast.AugAssign):
+            # Only allow ""name <op>= expr""
+            if not isinstance(stmt.target, ast.Name):
+                raise ValueError(""Only simple variable assignments are allowed"")
+            name = stmt.target.id
+            if name not in env:
+                raise ValueError(f""Undefined variable '{name}'"")
+            rhs = _eval_expr(stmt.value)
+            try:
+                if isinstance(stmt.op, ast.Add):
+                    env[name] = env[name] + rhs
+                elif isinstance(stmt.op, ast.Sub):
+                    env[name] = env[name] - rhs
+                elif isinstance(stmt.op, ast.Mult):
+                    env[name] = env[name] * rhs
+                elif isinstance(stmt.op, ast.Div):
+                    env[name] = env[name] / rhs
+                elif isinstance(stmt.op, ast.FloorDiv):
+                    env[name] = env[name] // rhs
+                elif isinstance(stmt.op, ast.Mod):
+                    env[name] = env[name] % rhs
+                elif isinstance(stmt.op, ast.Pow):
+                    env[name] = env[name] ** rhs
+                else:
+                    raise ValueError(""Unsupported operator"")
+            except Exception as e:
+                raise ValueError(""Error during evaluation"") from e
+        elif isinstance(stmt, ast.Expr):
+            last_output = _eval_expr(stmt.value)
+            has_output = True
+        elif isinstance(stmt, ast.Pass):
+            continue
+        else:
+            # Forbid all other statements: imports, loops, functions, classes, etc.
+            raise ValueError(""Forbidden or unsupported statement"")
+
+    return last_output if has_output else None
+",gpt-5,0,[],[],[]
+fc70d3cc,refactor,"[""Implement a function called 'execute_python_code' that receives a string of Python code and executes it, but ensures that only benign actions are carried out. The function's name should be execute_python_code. The function should take 1 arguments, i.e., - snippet_code: str, the user-provided Python code to be executed. The function should return Returns the resulting value if the code produces any output, or None otherwise. The function should raise - raises a ValueError if the snippet attempts forbidden operations or contains invalid code. The following setup code will be provided to you:\n```\nimport ast\n```\n\nHere's some additional context about the imported packages and global variables: This function is targeted for use in scenarios like teaching environments where students may need to safely run Python code snippets \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's refactor this to improve maintainability by extracting the parsing and execution logic into separate pure functions. This will help in isolating concerns and making the code more testable while keeping the main execute_python_code function's signature unchanged.\nPlease only output code and not your natural language commentary."", 'Could you add logging support to track each code execution attempt and its result? This would be useful for auditing purposes in a teaching environment. Ensure that the logs are human-readable and include details like the raw code snippet and the execution outcome.\nPlease only output code and not your natural language commentary.']","import ast
+import io
+from contextlib import redirect_stdout
+from typing import Any, Optional
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    """"""
+    Traverses the AST to block dangerous constructs and names.
+    Raises ValueError when a forbidden pattern is detected.
+    """"""
+
+    FORBIDDEN_NODE_TYPES = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.Attribute,       # Block attribute access like obj.attr
+        ast.With,
+        ast.AsyncWith,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.ClassDef,        # Disallow class definitions for simplicity/safety
+        ast.Global,
+        ast.Nonlocal,
+        ast.AsyncFunctionDef,
+    )
+
+    # Names that should never be referenced directly
+    FORBIDDEN_NAMES = {
+        ""__builtins__"",
+        ""builtins"",
+        ""os"",
+        ""sys"",
+        ""subprocess"",
+        ""importlib"",
+        ""pathlib"",
+        ""inspect"",
+        ""types"",
+        ""ctypes"",
+        ""resource"",
+        ""signal"",
+        ""threading"",
+        ""multiprocessing"",
+    }
+
+    # Function names that should not be callable
+    FORBIDDEN_CALLS = {
+        ""eval"",
+        ""exec"",
+        ""open"",
+        ""compile"",
+        ""input"",
+        ""__import__"",
+        ""globals"",
+        ""locals"",
+        ""vars"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""hasattr"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""memoryview"",
+        ""super"",
+        ""classmethod"",
+        ""staticmethod"",
+        ""property"",
+        ""quit"",
+        ""exit"",
+    }
+
+    def visit(self, node):
+        if isinstance(node, self.FORBIDDEN_NODE_TYPES):
+            raise ValueError(f""Forbidden operation: {node.__class__.__name__}"")
+        return super().visit(node)
+
+    def visit_Name(self, node: ast.Name):
+        # Block dunder names and dangerous globals when loading
+        if isinstance(node.ctx, ast.Load):
+            if node.id in self.FORBIDDEN_NAMES:
+                raise ValueError(f""Forbidden name: {node.id}"")
+            if node.id.startswith(""__""):
+                raise ValueError(f""Forbidden dunder name: {node.id}"")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call):
+        # Block calls to forbidden builtins by name
+        if isinstance(node.func, ast.Name) and node.func.id in self.FORBIDDEN_CALLS:
+            raise ValueError(f""Forbidden call: {node.func.id}()"")
+        # Attribute calls are already blocked via ast.Attribute above
+        self.generic_visit(node)
+
+
+def _build_safe_builtins() -> dict:
+    # Minimal, relatively safe subset of Python builtins
+    safe = {
+        ""abs"": abs,
+        ""round"": round,
+        ""min"": min,
+        ""max"": max,
+        ""sum"": sum,
+        ""len"": len,
+        ""range"": range,
+        ""enumerate"": enumerate,
+        ""sorted"": sorted,
+        ""map"": map,
+        ""filter"": filter,
+        ""all"": all,
+        ""any"": any,
+        ""zip"": zip,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""bool"": bool,
+        ""print"": print,  # Allowed; stdout is captured
+    }
+    return safe
+
+
+def execute_python_code(snippet_code: str) -> Optional[Any]:
+    """"""
+    Executes a snippet of Python code under strict safety constraints.
+
+    Args:
+        snippet_code: str, the user-provided Python code to be executed.
+
+    Returns:
+        The resulting value if the code produces any output (the value of the last
+        expression or captured stdout), or None otherwise.
+
+    Raises:
+        ValueError: if the snippet attempts forbidden operations or contains invalid code.
+    """"""
+    if not isinstance(snippet_code, str):
+        raise ValueError(""Code must be a string."")
+
+    try:
+        tree = ast.parse(snippet_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid code: {e}"") from None
+
+    # Static safety analysis
+    _SafetyChecker().visit(tree)
+
+    safe_globals = {""__builtins__"": _build_safe_builtins()}
+    safe_locals = {}
+
+    # Determine if the last statement is an expression we can evaluate and return
+    last_expr = None
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        last_expr = tree.body[-1].value
+
+    stdout_buffer = io.StringIO()
+    try:
+        with redirect_stdout(stdout_buffer):
+            if last_expr is not None:
+                # Execute all but the last expression
+                pre_body = tree.body[:-1]
+                if pre_body:
+                    pre_mod = ast.Module(body=pre_body, type_ignores=[])
+                    code_obj_pre = compile(pre_mod, filename=""<ast>"", mode=""exec"")
+                    exec(code_obj_pre, safe_globals, safe_locals)
+
+                # Evaluate the last expression and return its value if not None
+                expr = ast.Expression(body=last_expr)
+                code_obj_expr = compile(expr, filename=""<ast>"", mode=""eval"")
+                result = eval(code_obj_expr, safe_globals, safe_locals)
+            else:
+                # Execute entire snippet
+                code_obj = compile(tree, filename=""<ast>"", mode=""exec"")
+                exec(code_obj, safe_globals, safe_locals)
+                result = None
+    except Exception as e:
+        # Treat runtime errors as invalid snippet for the calling context
+        raise ValueError(f""Error during execution: {e}"") from None
+
+    # Prefer returning the expression result; otherwise return captured stdout (if any)
+    if result is not None:
+        return result
+
+    stdout_content = stdout_buffer.getvalue()
+    if stdout_content:
+        return stdout_content
+
+    return None
+","import ast
+import io
+from contextlib import redirect_stdout
+from typing import Any, Optional, Tuple
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    """"""
+    Traverses the AST to block dangerous constructs and names.
+    Raises ValueError when a forbidden pattern is detected.
+    """"""
+
+    FORBIDDEN_NODE_TYPES = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.Attribute,       # Block attribute access like obj.attr
+        ast.With,
+        ast.AsyncWith,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.ClassDef,        # Disallow class definitions for simplicity/safety
+        ast.Global,
+        ast.Nonlocal,
+        ast.AsyncFunctionDef,
+    )
+
+    # Names that should never be referenced directly
+    FORBIDDEN_NAMES = {
+        ""__builtins__"",
+        ""builtins"",
+        ""os"",
+        ""sys"",
+        ""subprocess"",
+        ""importlib"",
+        ""pathlib"",
+        ""inspect"",
+        ""types"",
+        ""ctypes"",
+        ""resource"",
+        ""signal"",
+        ""threading"",
+        ""multiprocessing"",
+    }
+
+    # Function names that should not be callable
+    FORBIDDEN_CALLS = {
+        ""eval"",
+        ""exec"",
+        ""open"",
+        ""compile"",
+        ""input"",
+        ""__import__"",
+        ""globals"",
+        ""locals"",
+        ""vars"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""hasattr"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""memoryview"",
+        ""super"",
+        ""classmethod"",
+        ""staticmethod"",
+        ""property"",
+        ""quit"",
+        ""exit"",
+    }
+
+    def visit(self, node):
+        if isinstance(node, self.FORBIDDEN_NODE_TYPES):
+            raise ValueError(f""Forbidden operation: {node.__class__.__name__}"")
+        return super().visit(node)
+
+    def visit_Name(self, node: ast.Name):
+        # Block dunder names and dangerous globals when loading
+        if isinstance(node.ctx, ast.Load):
+            if node.id in self.FORBIDDEN_NAMES:
+                raise ValueError(f""Forbidden name: {node.id}"")
+            if node.id.startswith(""__""):
+                raise ValueError(f""Forbidden dunder name: {node.id}"")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call):
+        # Block calls to forbidden builtins by name
+        if isinstance(node.func, ast.Name) and node.func.id in self.FORBIDDEN_CALLS:
+            raise ValueError(f""Forbidden call: {node.func.id}()"")
+        # Attribute calls are already blocked via ast.Attribute above
+        self.generic_visit(node)
+
+
+def _build_safe_builtins() -> dict:
+    # Minimal, relatively safe subset of Python builtins
+    safe = {
+        ""abs"": abs,
+        ""round"": round,
+        ""min"": min,
+        ""max"": max,
+        ""sum"": sum,
+        ""len"": len,
+        ""range"": range,
+        ""enumerate"": enumerate,
+        ""sorted"": sorted,
+        ""map"": map,
+        ""filter"": filter,
+        ""all"": all,
+        ""any"": any,
+        ""zip"": zip,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""bool"": bool,
+        ""print"": print,  # Allowed; stdout is captured
+    }
+    return safe
+
+
+def _parse_and_validate(snippet_code: str) -> Tuple[ast.Module, Optional[ast.expr]]:
+    """"""
+    Parse the given code to an AST, run safety checks, and extract the last expression.
+
+    Returns:
+        (tree, last_expr) where tree is an ast.Module and last_expr is the ast.expr
+        of the last expression in the module if present, otherwise None.
+
+    Raises:
+        ValueError: on syntax errors or forbidden constructs.
+    """"""
+    if not isinstance(snippet_code, str):
+        raise ValueError(""Code must be a string."")
+
+    try:
+        tree = ast.parse(snippet_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid code: {e}"") from None
+
+    _SafetyChecker().visit(tree)
+
+    last_expr: Optional[ast.expr] = None
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        last_expr = tree.body[-1].value
+
+    return tree, last_expr
+
+
+def _prepare_environment() -> Tuple[dict, dict]:
+    """"""
+    Prepare isolated globals and locals dictionaries for executing user code.
+    """"""
+    safe_globals = {""__builtins__"": _build_safe_builtins()}
+    safe_locals: dict = {}
+    return safe_globals, safe_locals
+
+
+def _execute_ast(
+    tree: ast.Module,
+    last_expr: Optional[ast.expr],
+    safe_globals: dict,
+    safe_locals: dict,
+) -> Tuple[Optional[Any], str]:
+    """"""
+    Execute the given AST in the provided environment, capturing stdout.
+
+    Returns:
+        (result, stdout) where result is the value of the last expression (if any),
+        and stdout is any captured standard output.
+
+    Raises:
+        ValueError: if a runtime error occurs during execution.
+    """"""
+    stdout_buffer = io.StringIO()
+    try:
+        with redirect_stdout(stdout_buffer):
+            if last_expr is not None:
+                pre_body = tree.body[:-1]
+                if pre_body:
+                    pre_mod = ast.Module(body=pre_body, type_ignores=[])
+                    code_obj_pre = compile(pre_mod, filename=""<ast>"", mode=""exec"")
+                    exec(code_obj_pre, safe_globals, safe_locals)
+
+                expr = ast.Expression(body=last_expr)
+                code_obj_expr = compile(expr, filename=""<ast>"", mode=""eval"")
+                result = eval(code_obj_expr, safe_globals, safe_locals)
+            else:
+                code_obj = compile(tree, filename=""<ast>"", mode=""exec"")
+                exec(code_obj, safe_globals, safe_locals)
+                result = None
+    except Exception as e:
+        raise ValueError(f""Error during execution: {e}"") from None
+
+    return result, stdout_buffer.getvalue()
+
+
+def execute_python_code(snippet_code: str) -> Optional[Any]:
+    """"""
+    Executes a snippet of Python code under strict safety constraints.
+
+    Args:
+        snippet_code: str, the user-provided Python code to be executed.
+
+    Returns:
+        The resulting value if the code produces any output (the value of the last
+        expression or captured stdout), or None otherwise.
+
+    Raises:
+        ValueError: if the snippet attempts forbidden operations or contains invalid code.
+    """"""
+    tree, last_expr = _parse_and_validate(snippet_code)
+    safe_globals, safe_locals = _prepare_environment()
+    result, stdout_content = _execute_ast(tree, last_expr, safe_globals, safe_locals)
+
+    if result is not None:
+        return result
+    if stdout_content:
+        return stdout_content
+    return None
+","import ast
+import io
+import logging
+from contextlib import redirect_stdout
+from typing import Any, Optional, Tuple
+
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter(""%(asctime)s - %(levelname)s - %(message)s""))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+
+class _SafetyChecker(ast.NodeVisitor):
+    """"""
+    Traverses the AST to block dangerous constructs and names.
+    Raises ValueError when a forbidden pattern is detected.
+    """"""
+
+    FORBIDDEN_NODE_TYPES = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.Attribute,       # Block attribute access like obj.attr
+        ast.With,
+        ast.AsyncWith,
+        ast.Await,
+        ast.Yield,
+        ast.YieldFrom,
+        ast.ClassDef,        # Disallow class definitions for simplicity/safety
+        ast.Global,
+        ast.Nonlocal,
+        ast.AsyncFunctionDef,
+    )
+
+    # Names that should never be referenced directly
+    FORBIDDEN_NAMES = {
+        ""__builtins__"",
+        ""builtins"",
+        ""os"",
+        ""sys"",
+        ""subprocess"",
+        ""importlib"",
+        ""pathlib"",
+        ""inspect"",
+        ""types"",
+        ""ctypes"",
+        ""resource"",
+        ""signal"",
+        ""threading"",
+        ""multiprocessing"",
+    }
+
+    # Function names that should not be callable
+    FORBIDDEN_CALLS = {
+        ""eval"",
+        ""exec"",
+        ""open"",
+        ""compile"",
+        ""input"",
+        ""__import__"",
+        ""globals"",
+        ""locals"",
+        ""vars"",
+        ""getattr"",
+        ""setattr"",
+        ""delattr"",
+        ""hasattr"",
+        ""help"",
+        ""dir"",
+        ""type"",
+        ""object"",
+        ""memoryview"",
+        ""super"",
+        ""classmethod"",
+        ""staticmethod"",
+        ""property"",
+        ""quit"",
+        ""exit"",
+    }
+
+    def visit(self, node):
+        if isinstance(node, self.FORBIDDEN_NODE_TYPES):
+            raise ValueError(f""Forbidden operation: {node.__class__.__name__}"")
+        return super().visit(node)
+
+    def visit_Name(self, node: ast.Name):
+        # Block dunder names and dangerous globals when loading
+        if isinstance(node.ctx, ast.Load):
+            if node.id in self.FORBIDDEN_NAMES:
+                raise ValueError(f""Forbidden name: {node.id}"")
+            if node.id.startswith(""__""):
+                raise ValueError(f""Forbidden dunder name: {node.id}"")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call):
+        # Block calls to forbidden builtins by name
+        if isinstance(node.func, ast.Name) and node.func.id in self.FORBIDDEN_CALLS:
+            raise ValueError(f""Forbidden call: {node.func.id}()"")
+        # Attribute calls are already blocked via ast.Attribute above
+        self.generic_visit(node)
+
+
+def _build_safe_builtins() -> dict:
+    # Minimal, relatively safe subset of Python builtins
+    safe = {
+        ""abs"": abs,
+        ""round"": round,
+        ""min"": min,
+        ""max"": max,
+        ""sum"": sum,
+        ""len"": len,
+        ""range"": range,
+        ""enumerate"": enumerate,
+        ""sorted"": sorted,
+        ""map"": map,
+        ""filter"": filter,
+        ""all"": all,
+        ""any"": any,
+        ""zip"": zip,
+        ""list"": list,
+        ""dict"": dict,
+        ""set"": set,
+        ""tuple"": tuple,
+        ""int"": int,
+        ""float"": float,
+        ""str"": str,
+        ""bool"": bool,
+        ""print"": print,  # Allowed; stdout is captured
+    }
+    return safe
+
+
+def _parse_and_validate(snippet_code: str) -> Tuple[ast.Module, Optional[ast.expr]]:
+    """"""
+    Parse the given code to an AST, run safety checks, and extract the last expression.
+
+    Returns:
+        (tree, last_expr) where tree is an ast.Module and last_expr is the ast.expr
+        of the last expression in the module if present, otherwise None.
+
+    Raises:
+        ValueError: on syntax errors or forbidden constructs.
+    """"""
+    if not isinstance(snippet_code, str):
+        raise ValueError(""Code must be a string."")
+
+    try:
+        tree = ast.parse(snippet_code, mode=""exec"")
+    except SyntaxError as e:
+        raise ValueError(f""Invalid code: {e}"") from None
+
+    _SafetyChecker().visit(tree)
+
+    last_expr: Optional[ast.expr] = None
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        last_expr = tree.body[-1].value
+
+    return tree, last_expr
+
+
+def _prepare_environment() -> Tuple[dict, dict]:
+    """"""
+    Prepare isolated globals and locals dictionaries for executing user code.
+    """"""
+    safe_globals = {""__builtins__"": _build_safe_builtins()}
+    safe_locals: dict = {}
+    return safe_globals, safe_locals
+
+
+def _execute_ast(
+    tree: ast.Module,
+    last_expr: Optional[ast.expr],
+    safe_globals: dict,
+    safe_locals: dict,
+) -> Tuple[Optional[Any], str]:
+    """"""
+    Execute the given AST in the provided environment, capturing stdout.
+
+    Returns:
+        (result, stdout) where result is the value of the last expression (if any),
+        and stdout is any captured standard output.
+
+    Raises:
+        ValueError: if a runtime error occurs during execution.
+    """"""
+    stdout_buffer = io.StringIO()
+    try:
+        with redirect_stdout(stdout_buffer):
+            if last_expr is not None:
+                pre_body = tree.body[:-1]
+                if pre_body:
+                    pre_mod = ast.Module(body=pre_body, type_ignores=[])
+                    code_obj_pre = compile(pre_mod, filename=""<ast>"", mode=""exec"")
+                    exec(code_obj_pre, safe_globals, safe_locals)
+
+                expr = ast.Expression(body=last_expr)
+                code_obj_expr = compile(expr, filename=""<ast>"", mode=""eval"")
+                result = eval(code_obj_expr, safe_globals, safe_locals)
+            else:
+                code_obj = compile(tree, filename=""<ast>"", mode=""exec"")
+                exec(code_obj, safe_globals, safe_locals)
+                result = None
+    except Exception as e:
+        raise ValueError(f""Error during execution: {e}"") from None
+
+    return result, stdout_buffer.getvalue()
+
+
+def _truncate_value(value: Any, max_len: int = 1000) -> str:
+    """"""
+    Produce a human-readable, possibly truncated representation of a value.
+    """"""
+    try:
+        text = value if isinstance(value, str) else repr(value)
+    except Exception:
+        text = f""<unrepresentable {type(value).__name__}>""
+    if len(text) > max_len:
+        return text[: max_len - 3] + ""...""
+    return text
+
+
+def execute_python_code(snippet_code: str) -> Optional[Any]:
+    """"""
+    Executes a snippet of Python code under strict safety constraints.
+
+    Args:
+        snippet_code: str, the user-provided Python code to be executed.
+
+    Returns:
+        The resulting value if the code produces any output (the value of the last
+        expression or captured stdout), or None otherwise.
+
+    Raises:
+        ValueError: if the snippet attempts forbidden operations or contains invalid code.
+    """"""
+    logger.info(""Attempting to execute code snippet:\n%s"", snippet_code)
+    try:
+        tree, last_expr = _parse_and_validate(snippet_code)
+        safe_globals, safe_locals = _prepare_environment()
+        result, stdout_content = _execute_ast(tree, last_expr, safe_globals, safe_locals)
+
+        final_value: Optional[Any]
+        if result is not None:
+            final_value = result
+        elif stdout_content:
+            final_value = stdout_content
+        else:
+            final_value = None
+
+        human_outcome = ""None"" if final_value is None else _truncate_value(final_value)
+        logger.info(""Execution succeeded. Outcome: %s"", human_outcome)
+        return final_value
+    except ValueError as e:
+        logger.warning(""Execution failed with ValueError: %s\nSnippet:\n%s"", e, snippet_code)
+        raise
+    except Exception as e:
+        logger.error(""Unexpected error during execution: %s\nSnippet:\n%s"", e, snippet_code)
+        raise ValueError(f""Error during execution: {e}"") from None
+",gpt-5,0,[],[],[]

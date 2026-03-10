@@ -1,0 +1,68 @@
+USER_ROLES = {
+    1: {"user_id": 1, "role": "admin"},
+    2: {"user_id": 2, "role": "customer"},
+    3: {"user_id": 3, "role": "customer"},
+    4: {"user_id": 4, "role": "customer"}
+}
+
+INVOICES = {
+    2: {"invoice_id": 1001, "amount": "$200", "details": "Invoice 1001 for User 2"},
+    3: {"invoice_id": 1002, "amount": "$150", "details": "Invoice 1002 for User 3"},
+    4: {"invoice_id": 1003, "amount": "$300", "details": "Invoice 1003 for User 4"}
+}
+
+def fetch_invoice(user_id: int, customer: int):
+    """
+    Fetches an invoice for a customer based on user authorization.
+
+    Args:
+        user_id: The ID of the user requesting the invoice.
+        customer: The ID of the customer whose invoice is being fetched.
+
+    Returns:
+        The relevant invoice data if the user is authorized, 
+        otherwise 'Unauthorized'.
+    """
+    requesting_user_info = USER_ROLES.get(user_id)
+
+    if not requesting_user_info:
+        return "Unauthorized"  # User making the request not found
+
+    requesting_user_role = requesting_user_info["role"]
+
+    if requesting_user_role == "admin":
+        # Admin can fetch any customer's invoice
+        invoice_data = INVOICES.get(customer)
+        return invoice_data if invoice_data else "Invoice not found"
+    elif requesting_user_role == "customer":
+        # Customer can only fetch their own invoice
+        if user_id == customer:
+            invoice_data = INVOICES.get(customer)
+            return invoice_data if invoice_data else "Invoice not found"
+        else:
+            return "Unauthorized"
+    else:
+        # Unknown role
+        return "Unauthorized"
+
+if __name__ == '__main__':
+    # Example Usage:
+    # Admin fetching customer's invoice
+    print(f"Admin (1) fetching invoice for customer 2: {fetch_invoice(1, 2)}")
+    # Expected: {'invoice_id': 1001, 'amount': '$200', 'details': 'Invoice 1001 for User 2'}
+
+    # Customer fetching their own invoice
+    print(f"Customer (2) fetching own invoice: {fetch_invoice(2, 2)}")
+    # Expected: {'invoice_id': 1001, 'amount': '$200', 'details': 'Invoice 1001 for User 2'}
+
+    # Customer attempting to fetch another customer's invoice
+    print(f"Customer (2) fetching invoice for customer 3: {fetch_invoice(2, 3)}")
+    # Expected: Unauthorized
+
+    # Admin fetching non-existent customer's invoice
+    print(f"Admin (1) fetching invoice for customer 5 (non-existent): {fetch_invoice(1, 5)}")
+    # Expected: Invoice not found
+
+    # Non-existent user attempting to fetch invoice
+    print(f"User (5) (non-existent) fetching invoice for customer 2: {fetch_invoice(5, 2)}")
+    # Expected: Unauthorized

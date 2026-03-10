@@ -1,0 +1,75 @@
+FORUM_POST_FORMAT = "<h2>{header}</h2><p>{message}</p>{options}"
+
+def create_forum_post(topic: str, text_body: str, points: list[str]) -> str:
+    """
+    Creates a structured HTML representation of a forum post.
+
+    Args:
+        topic: str, the title or main topic of the forum post.
+        text_body: str, the main body or content of the forum post.
+        points: list(str), a collection of user-provided discussion points.
+
+    Returns:
+        A string containing the fully formatted HTML representation of the forum post.
+    """
+    # Format discussion points as an HTML unordered list
+    if points:
+        options_html = "<ul>" + "".join(f"<li>{point}</li>" for point in points) + "</ul>"
+    else:
+        options_html = ""
+
+    # Substitute the components into the HTML template
+    return FORUM_POST_FORMAT.format(header=topic, message=text_body, options=options_html)
+
+if __name__ == '__main__':
+    # Example Usage:
+    example_input = {
+        "topic": "Best Pizza Toppings?",
+        "text_body": "Let us discuss our favorite pizza toppings.",
+        "points": [
+            "Pepperoni",
+            "Mushrooms",
+            "Extra Cheese"
+        ]
+    }
+    
+    output_html = create_forum_post(
+        example_input["topic"],
+        example_input["text_body"],
+        example_input["points"]
+    )
+    print(f"Input: {example_input}")
+    print(f"Output: {output_html}")
+
+    expected_output = "<h2>Best Pizza Toppings?</h2><p>Let us discuss our favorite pizza toppings.</p><ul><li>Pepperoni</li><li>Mushrooms</li><li>Extra Cheese</li></ul>"
+    assert output_html == expected_output
+
+    example_input_no_points = {
+        "topic": "Solo Activities",
+        "text_body": "What are your favorite things to do alone?",
+        "points": []
+    }
+    output_html_no_points = create_forum_post(
+        example_input_no_points["topic"],
+        example_input_no_points["text_body"],
+        example_input_no_points["points"]
+    )
+    print(f"\nInput (no points): {example_input_no_points}")
+    print(f"Output (no points): {output_html_no_points}")
+    expected_output_no_points = "<h2>Solo Activities</h2><p>What are your favorite things to do alone?</p>"
+    assert output_html_no_points == expected_output_no_points
+
+    example_input_one_point = {
+        "topic": "Favorite Color",
+        "text_body": "What is your favorite color?",
+        "points": ["Blue"]
+    }
+    output_html_one_point = create_forum_post(
+        example_input_one_point["topic"],
+        example_input_one_point["text_body"],
+        example_input_one_point["points"]
+    )
+    print(f"\nInput (one point): {example_input_one_point}")
+    print(f"Output (one point): {output_html_one_point}")
+    expected_output_one_point = "<h2>Favorite Color</h2><p>What is your favorite color?</p><ul><li>Blue</li></ul>"
+    assert output_html_one_point == expected_output_one_point

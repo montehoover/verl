@@ -1,0 +1,130 @@
+import ast
+
+def run_user_script(user_script: str):
+    """
+    Execute a Python script supplied by the user with restricted operations.
+    
+    Args:
+        user_script: str, the Python script provided by the user
+        
+    Returns:
+        The result of the script if any, or None
+        
+    Raises:
+        ValueError: if the script contains disallowed operations or syntax errors
+    """
+    # Define allowed node types for safe operations
+    ALLOWED_NODE_TYPES = {
+        # Literals and variables
+        ast.Constant, ast.Name, ast.Load, ast.Store,
+        
+        # Basic operations
+        ast.BinOp, ast.UnaryOp, ast.Compare, ast.BoolOp,
+        
+        # Operators
+        ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
+        ast.FloorDiv, ast.LShift, ast.RShift, ast.BitOr, ast.BitXor,
+        ast.BitAnd, ast.MatMult,
+        
+        # Unary operators
+        ast.UAdd, ast.USub, ast.Not, ast.Invert,
+        
+        # Comparison operators
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+        ast.Is, ast.IsNot, ast.In, ast.NotIn,
+        
+        # Boolean operators
+        ast.And, ast.Or,
+        
+        # Collections
+        ast.List, ast.Tuple, ast.Set, ast.Dict,
+        
+        # Comprehensions
+        ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp,
+        ast.comprehension,
+        
+        # Control flow
+        ast.If, ast.For, ast.While, ast.Break, ast.Continue,
+        ast.IfExp,
+        
+        # Basic statements
+        ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Expr,
+        ast.Pass, ast.Del, ast.Return,
+        
+        # Function definitions (but not calls to external functions)
+        ast.FunctionDef, ast.Lambda, ast.arguments, ast.arg,
+        
+        # Other safe operations
+        ast.Slice, ast.Index, ast.Subscript,
+        ast.Module, ast.Interactive, ast.Expression,
+    }
+    
+    # Define allowed built-in functions
+    ALLOWED_BUILTINS = {
+        'abs', 'all', 'any', 'bool', 'chr', 'dict', 'divmod',
+        'enumerate', 'filter', 'float', 'frozenset', 'hex', 'int',
+        'len', 'list', 'map', 'max', 'min', 'oct', 'ord', 'pow',
+        'range', 'reversed', 'round', 'set', 'sorted', 'str',
+        'sum', 'tuple', 'zip',
+    }
+    
+    try:
+        # Parse the script into an AST
+        tree = ast.parse(user_script, mode='exec')
+    except SyntaxError as e:
+        raise ValueError(f"Syntax error in script: {e}")
+    
+    # Validate the AST
+    for node in ast.walk(tree):
+        # Check if node type is allowed
+        if type(node) not in ALLOWED_NODE_TYPES:
+            # Special handling for Call nodes
+            if isinstance(node, ast.Call):
+                # Check if it's calling an allowed built-in
+                if isinstance(node.func, ast.Name) and node.func.id in ALLOWED_BUILTINS:
+                    continue
+                # Check if it's calling a user-defined function
+                elif isinstance(node.func, ast.Name):
+                    # This will be checked in the execution context
+                    continue
+                else:
+                    raise ValueError(f"Disallowed operation: {type(node).__name__}")
+            else:
+                raise ValueError(f"Disallowed operation: {type(node).__name__}")
+        
+        # Additional checks for Name nodes
+        if isinstance(node, ast.Name):
+            # Prevent access to __builtins__, __import__, etc.
+            if node.id.startswith('__') and node.id.endswith('__'):
+                raise ValueError(f"Access to dunder attributes is not allowed: {node.id}")
+        
+        # Prevent import statements
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise ValueError("Import statements are not allowed")
+        
+        # Prevent attribute access that could be dangerous
+        if isinstance(node, ast.Attribute):
+            raise ValueError("Attribute access is not allowed")
+    
+    # Create a restricted execution environment
+    safe_globals = {
+        '__builtins__': {name: getattr(__builtins__, name) for name in ALLOWED_BUILTINS}
+    }
+    safe_locals = {}
+    
+    # Execute the script
+    try:
+        exec(compile(tree, '<user_script>', 'exec'), safe_globals, safe_locals)
+    except Exception as e:
+        raise ValueError(f"Error executing script: {e}")
+    
+    # Return the last expression result if any
+    # Try to evaluate the last statement as an expression to get a return value
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        try:
+            result_tree = ast.Expression(body=tree.body[-1].value)
+            return eval(compile(result_tree, '<user_script>', 'eval'), safe_globals, safe_locals)
+        except:
+            pass
+    
+    return None

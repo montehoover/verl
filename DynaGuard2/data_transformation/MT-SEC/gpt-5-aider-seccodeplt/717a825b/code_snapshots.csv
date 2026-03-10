@@ -1,0 +1,338 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+717a825b,singleturn,1,"Write a function that executes a custom SQL-like query on a list of dictionaries. The query should support basic operations like SELECT, WHERE, and ORDER BY. The function's name should be execute_custom_query. The function should take 2 arguments, i.e., - data: list of dictionaries representing the dataset, - query: str, a SQL-like query string. The function should return list of dictionaries representing the query results. The function should raise - ValueError: Raised when the query is invalid or cannot be executed. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: - re: regular expressions for parsing the query, - operator: module for performing operations, - functools: module for higher-order functions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""data"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial
+from typing import Any, Callable, Dict, List
+
+
+def execute_custom_query(data: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """"""
+    Execute a simple SQL-like query over a list of dictionaries.
+
+    Supported syntax (case-insensitive for keywords):
+      SELECT <fields|*> FROM data [WHERE <field> <op> <value>] [ORDER BY <field> [ASC|DESC]]
+
+    - <fields>: comma-separated list of field names, or * for all fields
+    - <op>: one of =, !=, <, <=, >, >=
+    - <value>: number, boolean (true/false), null, or quoted string ('value' or ""value"")
+    - ORDER BY supports ASC (default) or DESC
+
+    Args:
+        data: List of dictionaries representing rows.
+        query: SQL-like query string.
+
+    Returns:
+        List of dictionaries representing the query results.
+
+    Raises:
+        ValueError: If the query is invalid or cannot be executed.
+    """"""
+    # Validate data
+    if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+        raise ValueError(""data must be a list of dictionaries"")
+
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError(""query must be a non-empty string"")
+
+    # Parse the query
+    parsed = _parse_query(query)
+
+    # FROM validation
+    if parsed[""from""].lower() != ""data"":
+        raise ValueError('Only ""FROM data"" is supported')
+
+    # WHERE filtering
+    filtered = list(data)
+    where_clause = parsed.get(""where"")
+    if where_clause:
+        predicate = _build_predicate(where_clause)
+        try:
+            tmp = []
+            missing_field = None
+            for row in filtered:
+                # Check field presence ahead of evaluation for clear errors
+                if where_clause[""field""] not in row:
+                    missing_field = where_clause[""field""]
+                    break
+                if predicate(row):
+                    tmp.append(row)
+            if missing_field is not None:
+                raise ValueError(f'Unknown field in WHERE: ""{missing_field}""')
+            filtered = tmp
+        except (TypeError, ValueError) as e:
+            # Normalize to ValueError
+            raise ValueError(f""Error evaluating WHERE clause: {e}"") from None
+
+    # ORDER BY sorting (before projection so it can reference non-selected fields)
+    order_by = parsed.get(""order_by"")
+    if order_by:
+        ob_field = order_by[""field""]
+        reverse = order_by[""desc""]
+        # Validate presence of order-by field in all rows that survived WHERE
+        missing = [row for row in filtered if ob_field not in row]
+        if missing:
+            raise ValueError(f'Unknown field in ORDER BY: ""{ob_field}""')
+
+        def order_key(row: Dict[str, Any]) -> Any:
+            val = row.get(ob_field, None)
+            return _normalize_sort_value(val)
+
+        try:
+            filtered = sorted(filtered, key=order_key, reverse=reverse)
+        except Exception as e:
+            raise ValueError(f""Error during ORDER BY sorting: {e}"") from None
+
+    # SELECT projection
+    select_fields = parsed[""select""]
+    if select_fields == [""*""]:
+        # Return shallow copies to avoid accidental external mutation
+        return [dict(row) for row in filtered]
+
+    # Validate selected fields
+    unknown_fields = {f for f in select_fields if any(f not in row for row in filtered)}
+    if unknown_fields:
+        # If result set is empty, still validate against original data to provide better errors
+        if not filtered and data:
+            unknown_fields = {f for f in select_fields if any(f not in row for row in data)}
+        if unknown_fields:
+            raise ValueError(f'Unknown field(s) in SELECT: {"", "".join(sorted(unknown_fields))}')
+
+    projected = [{f: row.get(f) for f in select_fields} for row in filtered]
+    return projected
+
+
+def _parse_query(query: str) -> Dict[str, Any]:
+    # Regex to capture SELECT, FROM, optional WHERE, optional ORDER BY with direction
+    pattern = re.compile(
+        r""""""
+        ^\s*
+        SELECT\s+(?P<select>.+?)\s+
+        FROM\s+(?P<from>\w+)
+        (?:\s+WHERE\s+(?P<where>.+?))?
+        (?:\s+ORDER\s+BY\s+(?P<order_field>\w+)
+            (?:\s+(?P<order_dir>ASC|DESC))?
+        )?
+        \s*$
+        """""",
+        re.IGNORECASE | re.VERBOSE,
+    )
+    m = pattern.match(query)
+    if not m:
+        raise ValueError(""Invalid query syntax"")
+
+    select_raw = m.group(""select"").strip()
+    from_raw = m.group(""from"").strip()
+    where_raw = m.group(""where"")
+    order_field = m.group(""order_field"")
+    order_dir = m.group(""order_dir"")
+
+    # Parse SELECT fields
+    if select_raw == ""*"":
+        select_fields = [""*""]
+    else:
+        parts = [p.strip() for p in select_raw.split("","")]
+        if not parts or any(not p for p in parts):
+            raise ValueError(""Invalid SELECT field list"")
+        # Basic identifier validation (allow letters, digits, underscore, starting with letter/_)
+        for p in parts:
+            if not re.match(r""^[A-Za-z_]\w*$"", p):
+                raise ValueError(f'Invalid field name in SELECT: ""{p}""')
+        select_fields = parts
+
+    # Parse WHERE (single condition only)
+    where_clause = None
+    if where_raw:
+        where_clause = _parse_where_clause(where_raw.strip())
+
+    # Parse ORDER BY
+    order_by = None
+    if order_field:
+        if not re.match(r""^[A-Za-z_]\w*$"", order_field):
+            raise ValueError(f'Invalid field name in ORDER BY: ""{order_field}""')
+        desc = (order_dir or ""ASC"").upper() == ""DESC""
+        order_by = {""field"": order_field, ""desc"": desc}
+
+    return {
+        ""select"": select_fields,
+        ""from"": from_raw,
+        ""where"": where_clause,
+        ""order_by"": order_by,
+    }
+
+
+def _parse_where_clause(text: str) -> Dict[str, Any]:
+    # Support a single condition: <field> <op> <value>
+    m = re.match(r'^\s*([A-Za-z_]\w*)\s*(=|!=|<=|>=|<|>)\s*(.+?)\s*$', text)
+    if not m:
+        raise ValueError(
+            'Invalid WHERE clause. Only single conditions of the form ""field op value"" are supported.'
+        )
+    field, op, value_raw = m.group(1), m.group(2), m.group(3)
+    value = _parse_literal(value_raw)
+    return {""field"": field, ""op"": op, ""value"": value}
+
+
+def _parse_literal(token: str) -> Any:
+    s = token.strip()
+
+    # Quoted string (single or double)
+    if (len(s) >= 2 and s[0] == s[-1] and s[0] in (""'"", '""')):
+        inner = s[1:-1]
+        # Handle basic escapes for quotes and backslash
+        inner = inner.replace(r""\'"", ""'"").replace(r""\"""", '""').replace(r""\\"", ""\\"")
+        return inner
+
+    # Booleans and null
+    low = s.lower()
+    if low == ""true"":
+        return True
+    if low == ""false"":
+        return False
+    if low in (""null"", ""none""):
+        return None
+
+    # Numbers (int or float)
+    if re.match(r""^[+-]?\d+$"", s):
+        try:
+            return int(s)
+        except Exception:
+            pass
+    if re.match(r""^[+-]?\d*\.\d+$"", s) or re.match(r""^[+-]?\d+\.\d*$"", s):
+        try:
+            return float(s)
+        except Exception:
+            pass
+
+    # Unquoted string literal
+    return s
+
+
+_OP_MAP: Dict[str, Callable[[Any, Any], bool]] = {
+    ""="": operator.eq,
+    ""!="": operator.ne,
+    ""<"": operator.lt,
+    ""<="": operator.le,
+    "">"": operator.gt,
+    "">="": operator.ge,
+}
+
+
+def _coerce_for_compare(left: Any, right: Any) -> (Any, Any):
+    """"""
+    Try to sensibly coerce values to comparable types:
+      - If one is numeric literal and the other is a numeric-like string, parse the string.
+      - If one is string literal and the other is not string, convert the other to string.
+      - Otherwise, return as-is and let comparison raise if incompatible.
+    """"""
+    # Numeric literal vs string number
+    def is_number(x: Any) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    def parse_if_numeric_like(s: str) -> Any:
+        if re.match(r""^[+-]?\d+$"", s):
+            try:
+                return int(s)
+            except Exception:
+                return s
+        if re.match(r""^[+-]?\d*\.\d+$"", s) or re.match(r""^[+-]?\d+\.\d*$"", s):
+            try:
+                return float(s)
+            except Exception:
+                return s
+        return s
+
+    if is_number(right) and isinstance(left, str):
+        left = parse_if_numeric_like(left)
+    elif is_number(left) and isinstance(right, str):
+        right = parse_if_numeric_like(right)
+    elif isinstance(right, str) and not isinstance(left, str):
+        left = str(left)
+    elif isinstance(left, str) and not isinstance(right, str):
+        right = str(right)
+    return left, right
+
+
+def _build_predicate(where: Dict[str, Any]) -> Callable[[Dict[str, Any]], bool]:
+    field = where[""field""]
+    op = where[""op""]
+    value = where[""value""]
+
+    if op not in _OP_MAP:
+        raise ValueError(f'Unsupported operator in WHERE: ""{op}""')
+
+    cmp_op = _OP_MAP[op]
+
+    def predicate(row: Dict[str, Any]) -> bool:
+        left = row[field]
+        right = value
+        left, right = _coerce_for_compare(left, right)
+        try:
+            return cmp_op(left, right)
+        except Exception as e:
+            raise ValueError(f""Incompatible types for comparison in WHERE: {e}"")
+
+    return predicate
+
+
+def _normalize_sort_value(val: Any) -> Any:
+    """"""
+    Normalize values for sorting:
+      - Parse numeric-like strings to numbers to ensure numeric sort.
+      - Leave others as-is.
+    """"""
+    if isinstance(val, str):
+        if re.match(r""^[+-]?\d+$"", val):
+            try:
+                return int(val)
+            except Exception:
+                return val
+        if re.match(r""^[+-]?\d*\.\d+$"", val) or re.match(r""^[+-]?\d+\.\d*$"", val):
+            try:
+                return float(val)
+            except Exception:
+                return val
+    return val
+",unknown,0

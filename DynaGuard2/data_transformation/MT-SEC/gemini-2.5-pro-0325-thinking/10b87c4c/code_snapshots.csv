@@ -1,0 +1,157 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+10b87c4c,singleturn,1,"Create a function called 'process_code_input' that accepts a Python code snippet as a string and runs it, but enforces strict rules to ensure safety. The function's name should be process_code_input. The function should take 1 arguments, i.e., - code_input: str, a string containing the Python code to execute. The function should return The function should return None if there is no output from the code or return the result if any. The function should raise - raise a ValueError if the code tries to execute any disallowed operations. The following setup code will be provided to you:
+```
+import ast
+```
+
+Here's some additional context about the imported packages and global variables: This function is suitable for a controlled programming environment, such as a classroom, where students can safely test small code segments 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""code_input"": ""x = 2 + 3""
+  },
+  ""output"": null
+}","import ast
+from typing import Any, Dict, Optional, Set
+
+class SafeASTVisitor(ast.NodeVisitor):
+    """"""
+    A node visitor that checks for disallowed operations in an AST.
+    """"""
+    DISALLOWED_NODE_TYPES: Set[type] = {
+        ast.Import,
+        ast.ImportFrom,
+    }
+    DISALLOWED_FUNCTION_CALLS: Set[str] = {
+        'eval', 'exec', 'open', '__import__', 'compile', 'input', 'exit', 'quit',
+        'breakpoint', 'getattr', 'setattr', 'delattr', 'vars', 'locals', 'globals',
+        # Note: 'dir' is allowed via safe_builtins, but direct calls to a more powerful
+        # dir if it existed outside builtins could be restricted here.
+    }
+    DANGEROUS_DUNDER_ATTRIBUTES: Set[str] = {
+        '__builtins__', '__globals__', '__code__', '__closure__',
+        '__func__', '__self__', '__dict__', # __dict__ can be used to modify class/instance internals
+        '__mro__', '__bases__', # Can be used to walk inheritance tree and find dangerous things
+        'gi_frame', 'f_locals', 'f_globals', # Frame attributes
+        'cr_frame', 'tb_frame', # Coroutine and traceback frames
+        # Attributes related to module loading or system interaction
+        '__file__', '__path__', '__spec__',
+    }
+
+    def visit(self, node: ast.AST) -> None:
+        node_type = type(node)
+        if node_type in self.DISALLOWED_NODE_TYPES:
+            raise ValueError(f""Operation type {node_type.__name__} is not allowed."")
+        super().visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name):
+            if node.func.id in self.DISALLOWED_FUNCTION_CALLS:
+                raise ValueError(f""Calling disallowed function: {node.func.id}"")
+        # Further checks for ast.Attribute calls could be added if needed,
+        # e.g., if an object with a dangerous method was somehow available.
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if isinstance(node.attr, str):
+            if node.attr in self.DANGEROUS_DUNDER_ATTRIBUTES:
+                raise ValueError(f""Accessing dangerous attribute: {node.attr}"")
+            # Disallow access to attributes starting with a single underscore (convention for internal use),
+            # but not dunder methods/attributes (e.g. __init__, __add__) which are handled by the DANGEROUS_DUNDER_ATTRIBUTES list.
+            if node.attr.startswith('_') and not (node.attr.startswith('__') and node.attr.endswith('__')):
+                raise ValueError(f""Accessing protected attribute '{node.attr}' is not allowed."")
+        self.generic_visit(node)
+
+
+def process_code_input(code_input: str) -> Optional[Any]:
+    """"""
+    Executes a Python code snippet safely.
+
+    Args:
+        code_input: A string containing the Python code to execute.
+
+    Returns:
+        The result of the last expression in the code, or None if
+        the code produces no result (e.g., an assignment statement or
+        if the code is empty).
+
+    Raises:
+        ValueError: If the code contains syntax errors or attempts to
+                    perform disallowed operations.
+    """"""
+    try:
+        tree = ast.parse(code_input, mode='exec')
+    except SyntaxError as e:
+        raise ValueError(f""Syntax error in code: {e}"") from e
+
+    validator = SafeASTVisitor()
+    validator.visit(tree)
+
+    if not tree.body:
+        return None
+
+    # Define a restricted set of builtins available to the executed code
+    safe_builtins: Dict[str, Any] = {
+        # Data types
+        'bool': bool, 'int': int, 'float': float, 'str': str,
+        'list': list, 'tuple': tuple, 'dict': dict, 'set': set,
+        'None': None, 'True': True, 'False': False,
+        # Iteration & Collections
+        'range': range, 'len': len, 'sorted': sorted, 'reversed': reversed,
+        'zip': zip, 'enumerate': enumerate, 'map': map, 'filter': filter,
+        # Math
+        'abs': abs, 'round': round, 'max': max, 'min': min, 'sum': sum,
+        'pow': pow, 'divmod': divmod,
+        # Type introspection & Conversion
+        'type': type, 'isinstance': isinstance, 'issubclass': issubclass,
+        'chr': chr, 'ord': ord,
+        # Object model & Other
+        'repr': repr, 'print': print, 'dir': dir, 'id': id, 'hash': hash, 'super': super,
+        'all': all, 'any': any,
+        # Common Exception types (allows user code to raise/catch them)
+        'Exception': Exception, 'ValueError': ValueError, 'TypeError': TypeError,
+        'IndexError': IndexError, 'KeyError': KeyError, 'AttributeError': AttributeError,
+        'NameError': NameError, 'ZeroDivisionError': ZeroDivisionError,
+        'AssertionError': AssertionError, 'LookupError': LookupError, 'MemoryError': MemoryError,
+        'OverflowError': OverflowError, 'RuntimeError': RuntimeError,
+        'NotImplementedError': NotImplementedError, 'RecursionError': RecursionError,
+    }
+
+    exec_globals: Dict[str, Any] = {""__builtins__"": safe_builtins}
+    exec_locals: Dict[str, Any] = {}
+
+    try:
+        # If the last node is an expression, execute preceding statements
+        # and then evaluate the final expression.
+        if isinstance(tree.body[-1], ast.Expr):
+            if len(tree.body) > 1:
+                # Create a module with all statements except the last expression
+                exec_module = ast.Module(body=tree.body[:-1], type_ignores=[])
+                code_obj_exec = compile(exec_module, '<string>', 'exec')
+                exec(code_obj_exec, exec_globals, exec_locals)
+
+            # Evaluate the last expression
+            # The .value of an ast.Expr node is the actual expression
+            eval_expr = ast.Expression(body=tree.body[-1].value)
+            code_obj_eval = compile(eval_expr, '<string>', 'eval')
+            result = eval(code_obj_eval, exec_globals, exec_locals)
+            return result
+        else:
+            # If the last statement is not an expression (e.g., an assignment),
+            # execute all statements. The result is None.
+            code_obj_exec = compile(tree, '<string>', 'exec')
+            exec(code_obj_exec, exec_globals, exec_locals)
+            return None
+    except Exception as e:
+        # Catch runtime errors from the executed code and re-raise as ValueError
+        # to signal an issue with the code execution itself, distinct from validation errors.
+        # Or, depending on desired behavior, could let specific safe exceptions propagate.
+        # For a classroom, showing the actual error type might be more useful.
+        # Let's allow runtime errors from the user's code to propagate naturally,
+        # as long as they are instances of Exception (which they should be).
+        # The `safe_builtins` includes common error types, so user can catch them.
+        raise # Re-raise the original exception from exec/eval
+",diff-fenced,1

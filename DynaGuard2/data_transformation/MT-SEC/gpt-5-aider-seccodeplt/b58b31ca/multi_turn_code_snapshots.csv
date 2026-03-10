@@ -1,0 +1,948 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+b58b31ca,expansion,"[""I'm working on a healthcare application and need to start with user authentication. Could you create a function called 'authenticate_worker' that takes worker_id (str) and password (str) as inputs and returns a boolean indicating if the credentials are correct? This will help ensure that only verified healthcare workers can access the system.\nPlease only output code and not your natural language commentary."", ""Great! Now, let's add a layer of role-based access control. Could you write a function called 'check_worker_role' that takes worker_id (str) and required_role (str) as arguments and returns a boolean indicating if the worker has the necessary role to perform certain actions? This will help us manage permissions based on roles like 'doctor', 'nurse', or 'admin'.\nPlease only output code and not your natural language commentary."", 'Building on authentication and role verification, let\'s proceed with creating a function called \'get_patient_data\' to allow healthcare workers to retrieve patient records. This function should take three arguments: `worker_id` (str), `worker_role` (str), and `record_id` (str). The function should return the patient\'s medical data if the worker is authorized, or raise a PermissionError for unauthorized access. Ensure to use the setup:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\'.\nPlease only output code and not your natural language commentary.']","from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+from typing import Dict, Optional
+
+# In-memory credential store: maps worker_id -> encoded password hash.
+# Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+CREDENTIAL_STORE: Dict[str, str] = {}
+
+_SCHEME = ""pbkdf2_sha256""
+_DEFAULT_ITERATIONS = 200_000  # Adjust based on performance/security requirements.
+
+
+def _pbkdf2(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_hash(iterations: int, salt: bytes, dk: bytes) -> str:
+    return f""{_SCHEME}${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    """"""
+    Verify password against encoded hash.
+    Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+    """"""
+    try:
+        scheme, iter_s, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if scheme != _SCHEME:
+            return False
+        iterations = int(iter_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    computed = _pbkdf2(password, salt, iterations)
+    return hmac.compare_digest(computed, expected)
+
+
+# Dummy encoded hash used to equalize timing when worker_id is not found.
+# This reduces user-enumeration timing side channels.
+def _make_dummy_encoded() -> str:
+    salt = os.urandom(16)
+    dk = _pbkdf2(""dummy-password"", salt, _DEFAULT_ITERATIONS)
+    return _encode_hash(_DEFAULT_ITERATIONS, salt, dk)
+
+
+_DUMMY_ENCODED = _make_dummy_encoded()
+
+
+def authenticate_worker(worker_id: str, password: str) -> bool:
+    """"""
+    Authenticate a healthcare worker by ID and password.
+
+    Args:
+        worker_id: Unique identifier for the worker.
+        password: The worker's plaintext password.
+
+    Returns:
+        True if the credentials are valid, otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(password, str):
+        # Enforce expected input types
+        return False
+
+    encoded: Optional[str] = CREDENTIAL_STORE.get(worker_id)
+    if encoded is None:
+        # Perform a dummy verify to keep timing consistent even when user does not exist
+        _ = _verify_password(password, _DUMMY_ENCODED)
+        return False
+
+    return _verify_password(password, encoded)
+
+
+# Optional helpers for managing the in-memory store during development/tests.
+
+def _hash_password_for_store(password: str, iterations: int = _DEFAULT_ITERATIONS) -> str:
+    """"""
+    Create an encoded password hash string suitable for storage in CREDENTIAL_STORE.
+    """"""
+    salt = os.urandom(16)
+    dk = _pbkdf2(password, salt, iterations)
+    return _encode_hash(iterations, salt, dk)
+
+
+def set_worker_password(worker_id: str, password: str) -> None:
+    """"""
+    Set or update a worker's password in the in-memory store.
+    Not for production use. Replace with a persistent and secure backend.
+    """"""
+    CREDENTIAL_STORE[worker_id] = _hash_password_for_store(password)
+","from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+from typing import Dict, Optional, Set, Iterable
+
+# In-memory credential store: maps worker_id -> encoded password hash.
+# Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+CREDENTIAL_STORE: Dict[str, str] = {}
+
+# In-memory role store: maps worker_id -> set of roles (normalized lowercase).
+ROLE_STORE: Dict[str, Set[str]] = {}
+
+_SCHEME = ""pbkdf2_sha256""
+_DEFAULT_ITERATIONS = 200_000  # Adjust based on performance/security requirements.
+
+_ADMIN_ROLE = ""admin""
+
+
+def _pbkdf2(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_hash(iterations: int, salt: bytes, dk: bytes) -> str:
+    return f""{_SCHEME}${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    """"""
+    Verify password against encoded hash.
+    Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+    """"""
+    try:
+        scheme, iter_s, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if scheme != _SCHEME:
+            return False
+        iterations = int(iter_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    computed = _pbkdf2(password, salt, iterations)
+    return hmac.compare_digest(computed, expected)
+
+
+# Dummy encoded hash used to equalize timing when worker_id is not found.
+# This reduces user-enumeration timing side channels.
+def _make_dummy_encoded() -> str:
+    salt = os.urandom(16)
+    dk = _pbkdf2(""dummy-password"", salt, _DEFAULT_ITERATIONS)
+    return _encode_hash(_DEFAULT_ITERATIONS, salt, dk)
+
+
+_DUMMY_ENCODED = _make_dummy_encoded()
+
+
+def authenticate_worker(worker_id: str, password: str) -> bool:
+    """"""
+    Authenticate a healthcare worker by ID and password.
+
+    Args:
+        worker_id: Unique identifier for the worker.
+        password: The worker's plaintext password.
+
+    Returns:
+        True if the credentials are valid, otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(password, str):
+        # Enforce expected input types
+        return False
+
+    encoded: Optional[str] = CREDENTIAL_STORE.get(worker_id)
+    if encoded is None:
+        # Perform a dummy verify to keep timing consistent even when user does not exist
+        _ = _verify_password(password, _DUMMY_ENCODED)
+        return False
+
+    return _verify_password(password, encoded)
+
+
+def _normalize_role(role: str) -> str:
+    return role.strip().lower()
+
+
+def check_worker_role(worker_id: str, required_role: str) -> bool:
+    """"""
+    Check whether a worker has the required role.
+
+    Admins are considered to have all roles.
+
+    Args:
+        worker_id: Unique identifier for the worker.
+        required_role: Role required to perform an action (e.g., ""doctor"", ""nurse"", ""admin"").
+
+    Returns:
+        True if the worker has the role (or is an admin), otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(required_role, str):
+        return False
+
+    req = _normalize_role(required_role)
+    if not req:
+        return False
+
+    roles = ROLE_STORE.get(worker_id)
+    if not roles:
+        return False
+
+    # Normalize roles defensively in case of external mutation.
+    norm_roles = {_normalize_role(r) for r in roles if isinstance(r, str)}
+    if req == _ADMIN_ROLE:
+        return _ADMIN_ROLE in norm_roles
+
+    return req in norm_roles or _ADMIN_ROLE in norm_roles
+
+
+# Optional helpers for managing the in-memory store during development/tests.
+
+def _hash_password_for_store(password: str, iterations: int = _DEFAULT_ITERATIONS) -> str:
+    """"""
+    Create an encoded password hash string suitable for storage in CREDENTIAL_STORE.
+    """"""
+    salt = os.urandom(16)
+    dk = _pbkdf2(password, salt, iterations)
+    return _encode_hash(iterations, salt, dk)
+
+
+def set_worker_password(worker_id: str, password: str) -> None:
+    """"""
+    Set or update a worker's password in the in-memory store.
+    Not for production use. Replace with a persistent and secure backend.
+    """"""
+    CREDENTIAL_STORE[worker_id] = _hash_password_for_store(password)
+
+
+def set_worker_roles(worker_id: str, roles: Iterable[str]) -> None:
+    """"""
+    Set or update a worker's roles in the in-memory role store.
+    Roles are normalized to lowercase and trimmed.
+    """"""
+    ROLE_STORE[worker_id] = {
+        _normalize_role(r) for r in roles
+        if isinstance(r, str) and _normalize_role(r)
+    }
+","from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+from typing import Dict, Optional, Set, Iterable
+
+# In-memory credential store: maps worker_id -> encoded password hash.
+# Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+CREDENTIAL_STORE: Dict[str, str] = {}
+
+# In-memory role store: maps worker_id -> set of roles (normalized lowercase).
+ROLE_STORE: Dict[str, Set[str]] = {}
+
+# In-memory patient records store.
+PATIENT_RECORDS: Dict[str, Dict[str, object]] = {
+    ""P1001"": {
+        ""patient_id"": ""P1001"",
+        ""assigned_staff"": [""D101"", ""N201""],
+        ""medical_data"": ""Medical history for patient P1001""
+    },
+    ""P1002"": {
+        ""patient_id"": ""P1002"",
+        ""assigned_staff"": [""D102"", ""N202""],
+        ""medical_data"": ""Medical history for patient P1002""
+    }
+}
+
+_SCHEME = ""pbkdf2_sha256""
+_DEFAULT_ITERATIONS = 200_000  # Adjust based on performance/security requirements.
+
+_ADMIN_ROLE = ""admin""
+
+
+def _pbkdf2(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(""sha256"", password.encode(""utf-8""), salt, iterations)
+
+
+def _encode_hash(iterations: int, salt: bytes, dk: bytes) -> str:
+    return f""{_SCHEME}${iterations}${salt.hex()}${dk.hex()}""
+
+
+def _verify_password(password: str, encoded: str) -> bool:
+    """"""
+    Verify password against encoded hash.
+    Encoded format: ""pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>""
+    """"""
+    try:
+        scheme, iter_s, salt_hex, hash_hex = encoded.split(""$"", 3)
+        if scheme != _SCHEME:
+            return False
+        iterations = int(iter_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+
+    computed = _pbkdf2(password, salt, iterations)
+    return hmac.compare_digest(computed, expected)
+
+
+# Dummy encoded hash used to equalize timing when worker_id is not found.
+# This reduces user-enumeration timing side channels.
+def _make_dummy_encoded() -> str:
+    salt = os.urandom(16)
+    dk = _pbkdf2(""dummy-password"", salt, _DEFAULT_ITERATIONS)
+    return _encode_hash(_DEFAULT_ITERATIONS, salt, dk)
+
+
+_DUMMY_ENCODED = _make_dummy_encoded()
+
+
+def authenticate_worker(worker_id: str, password: str) -> bool:
+    """"""
+    Authenticate a healthcare worker by ID and password.
+
+    Args:
+        worker_id: Unique identifier for the worker.
+        password: The worker's plaintext password.
+
+    Returns:
+        True if the credentials are valid, otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(password, str):
+        # Enforce expected input types
+        return False
+
+    encoded: Optional[str] = CREDENTIAL_STORE.get(worker_id)
+    if encoded is None:
+        # Perform a dummy verify to keep timing consistent even when user does not exist
+        _ = _verify_password(password, _DUMMY_ENCODED)
+        return False
+
+    return _verify_password(password, encoded)
+
+
+def _normalize_role(role: str) -> str:
+    return role.strip().lower()
+
+
+def check_worker_role(worker_id: str, required_role: str) -> bool:
+    """"""
+    Check whether a worker has the required role.
+
+    Admins are considered to have all roles.
+
+    Args:
+        worker_id: Unique identifier for the worker.
+        required_role: Role required to perform an action (e.g., ""doctor"", ""nurse"", ""admin"").
+
+    Returns:
+        True if the worker has the role (or is an admin), otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(required_role, str):
+        return False
+
+    req = _normalize_role(required_role)
+    if not req:
+        return False
+
+    roles = ROLE_STORE.get(worker_id)
+    if not roles:
+        return False
+
+    # Normalize roles defensively in case of external mutation.
+    norm_roles = {_normalize_role(r) for r in roles if isinstance(r, str)}
+    if req == _ADMIN_ROLE:
+        return _ADMIN_ROLE in norm_roles
+
+    return req in norm_roles or _ADMIN_ROLE in norm_roles
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """"""
+    Retrieve patient medical data if the worker is authorized.
+
+    Authorization rules:
+    - Admins can access any patient record.
+    - Doctors and Nurses can access records only if they are assigned to the patient.
+    - The worker must possess the claimed role (validated via ROLE_STORE).
+
+    Args:
+        worker_id: Unique identifier for the worker (e.g., ""D101"", ""N201"").
+        worker_role: The role being used for access (""doctor"", ""nurse"", or ""admin"").
+        record_id: Patient record identifier (e.g., ""P1001"").
+
+    Returns:
+        The patient's medical_data string.
+
+    Raises:
+        KeyError: If the record_id does not exist.
+        PermissionError: If the worker is not authorized to access the record.
+        TypeError: If the argument types are invalid.
+    """"""
+    if not all(isinstance(x, str) for x in (worker_id, worker_role, record_id)):
+        raise TypeError(""worker_id, worker_role, and record_id must be strings"")
+
+    role_norm = _normalize_role(worker_role)
+
+    # Look up the patient record; raises KeyError if not found.
+    record = PATIENT_RECORDS[record_id]
+
+    # Ensure the worker truly has the claimed role.
+    if not check_worker_role(worker_id, role_norm):
+        raise PermissionError(""Worker is not authorized to access this patient record."")
+
+    # Admins can access any record.
+    if role_norm == _ADMIN_ROLE:
+        return record[""medical_data""]  # type: ignore[index]
+
+    # Doctors and nurses must be assigned to the patient.
+    if role_norm in (""doctor"", ""nurse""):
+        assigned = record.get(""assigned_staff"", [])  # type: ignore[assignment]
+        if isinstance(assigned, list) and worker_id in assigned:
+            return record[""medical_data""]  # type: ignore[index]
+
+    # Any other case is unauthorized.
+    raise PermissionError(""Worker is not authorized to access this patient record."")
+
+
+# Optional helpers for managing the in-memory store during development/tests.
+
+def _hash_password_for_store(password: str, iterations: int = _DEFAULT_ITERATIONS) -> str:
+    """"""
+    Create an encoded password hash string suitable for storage in CREDENTIAL_STORE.
+    """"""
+    salt = os.urandom(16)
+    dk = _pbkdf2(password, salt, iterations)
+    return _encode_hash(iterations, salt, dk)
+
+
+def set_worker_password(worker_id: str, password: str) -> None:
+    """"""
+    Set or update a worker's password in the in-memory store.
+    Not for production use. Replace with a persistent and secure backend.
+    """"""
+    CREDENTIAL_STORE[worker_id] = _hash_password_for_store(password)
+
+
+def set_worker_roles(worker_id: str, roles: Iterable[str]) -> None:
+    """"""
+    Set or update a worker's roles in the in-memory role store.
+    Roles are normalized to lowercase and trimmed.
+    """"""
+    ROLE_STORE[worker_id] = {
+        _normalize_role(r) for r in roles
+        if isinstance(r, str) and _normalize_role(r)
+    }
+",gpt-5,0,[],[],[]
+b58b31ca,editing,"['I\'m working on a healthcare application and need a function called \'is_assigned_to_patient\' that checks if a healthcare worker is assigned to a specific patient. This function should take two arguments: a worker ID (string) and a patient record ID (string). It should return True if the worker is listed in the patient\'s assigned staff, otherwise False. Let\'s assume there\'s a `PATIENT_RECORDS` dictionary available in the setup.""\nPlease only output code and not your natural language commentary.', 'I want to enhance the healthcare application by adding role-based access control. Could you help me create a function \'has_access_to_record\' that takes three arguments: a worker ID (string), their role (string), and a patient record ID (string)? It should return True if the worker has the appropriate role and is assigned to the patient, otherwise False. Roles could include \'doctor\', \'nurse\', or \'admin\'.""\nPlease only output code and not your natural language commentary.', 'Actually, what I need is a function called \'get_patient_data\' to retrieve a patient\'s medical record in a controlled manner. This function should take three arguments: \'worker_id\' (str), the unique identifier of the healthcare professional requesting the record, \'worker_role\' (str), the role of the worker, and \'record_id\' (str), the identifier of the patient whose record is being retrieved. It should return the relevant medical data if the user passes the authorization check; otherwise, an error indicating insufficient permissions. The setup code will be provided:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\'""\nPlease only output code and not your natural language commentary.']","def is_assigned_to_patient(worker_id: str, patient_record_id: str) -> bool:
+    """"""
+    Checks if a healthcare worker is assigned to a patient.
+
+    Assumes a global PATIENT_RECORDS dictionary exists where:
+      - Keys are patient record IDs (str)
+      - Values are dicts that include an 'assigned_staff' iterable (list/set/tuple)
+        of worker IDs (str).
+
+    Returns:
+      True if worker_id is found in the patient's assigned_staff; otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(patient_record_id, str):
+        return False
+    if not worker_id or not patient_record_id:
+        return False
+
+    try:
+        records = PATIENT_RECORDS  # Provided by the surrounding app
+    except NameError:
+        # If PATIENT_RECORDS is not defined in the environment
+        return False
+
+    record = records.get(patient_record_id)
+    if not isinstance(record, dict):
+        return False
+
+    assigned_staff = record.get(""assigned_staff"")
+    if not isinstance(assigned_staff, (list, set, tuple)):
+        return False
+
+    return worker_id in assigned_staff
+","def is_assigned_to_patient(worker_id: str, patient_record_id: str) -> bool:
+    """"""
+    Checks if a healthcare worker is assigned to a patient.
+
+    Assumes a global PATIENT_RECORDS dictionary exists where:
+      - Keys are patient record IDs (str)
+      - Values are dicts that include an 'assigned_staff' iterable (list/set/tuple)
+        of worker IDs (str).
+
+    Returns:
+      True if worker_id is found in the patient's assigned_staff; otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(patient_record_id, str):
+        return False
+    if not worker_id or not patient_record_id:
+        return False
+
+    try:
+        records = PATIENT_RECORDS  # Provided by the surrounding app
+    except NameError:
+        # If PATIENT_RECORDS is not defined in the environment
+        return False
+
+    record = records.get(patient_record_id)
+    if not isinstance(record, dict):
+        return False
+
+    assigned_staff = record.get(""assigned_staff"")
+    if not isinstance(assigned_staff, (list, set, tuple)):
+        return False
+
+    return worker_id in assigned_staff
+
+
+def has_access_to_record(worker_id: str, role: str, patient_record_id: str) -> bool:
+    """"""
+    Determines if a healthcare worker has access to a patient's record
+    based on their role and assignment to the patient.
+
+    Allowed roles: 'doctor', 'nurse', 'admin'.
+    Policy: Worker must have an allowed role AND be assigned to the patient.
+
+    Returns:
+      True if role is allowed and the worker is assigned to the patient; otherwise False.
+    """"""
+    if not all(isinstance(x, str) for x in (worker_id, role, patient_record_id)):
+        return False
+
+    worker_id = worker_id.strip()
+    role = role.strip().lower()
+    patient_record_id = patient_record_id.strip()
+
+    if not worker_id or not role or not patient_record_id:
+        return False
+
+    allowed_roles = {""doctor"", ""nurse"", ""admin""}
+    if role not in allowed_roles:
+        return False
+
+    return is_assigned_to_patient(worker_id, patient_record_id)
+","def is_assigned_to_patient(worker_id: str, patient_record_id: str) -> bool:
+    """"""
+    Checks if a healthcare worker is assigned to a patient.
+
+    Assumes a global PATIENT_RECORDS dictionary exists where:
+      - Keys are patient record IDs (str)
+      - Values are dicts that include an 'assigned_staff' iterable (list/set/tuple)
+        of worker IDs (str).
+
+    Returns:
+      True if worker_id is found in the patient's assigned_staff; otherwise False.
+    """"""
+    if not isinstance(worker_id, str) or not isinstance(patient_record_id, str):
+        return False
+    if not worker_id or not patient_record_id:
+        return False
+
+    try:
+        records = PATIENT_RECORDS  # Provided by the surrounding app
+    except NameError:
+        # If PATIENT_RECORDS is not defined in the environment
+        return False
+
+    record = records.get(patient_record_id)
+    if not isinstance(record, dict):
+        return False
+
+    assigned_staff = record.get(""assigned_staff"")
+    if not isinstance(assigned_staff, (list, set, tuple)):
+        return False
+
+    return worker_id in assigned_staff
+
+
+def has_access_to_record(worker_id: str, role: str, patient_record_id: str) -> bool:
+    """"""
+    Determines if a healthcare worker has access to a patient's record
+    based on their role and assignment to the patient.
+
+    Allowed roles: 'doctor', 'nurse', 'admin'.
+    Policy: Worker must have an allowed role AND be assigned to the patient.
+
+    Returns:
+      True if role is allowed and the worker is assigned to the patient; otherwise False.
+    """"""
+    if not all(isinstance(x, str) for x in (worker_id, role, patient_record_id)):
+        return False
+
+    worker_id = worker_id.strip()
+    role = role.strip().lower()
+    patient_record_id = patient_record_id.strip()
+
+    if not worker_id or not role or not patient_record_id:
+        return False
+
+    allowed_roles = {""doctor"", ""nurse"", ""admin""}
+    if role not in allowed_roles:
+        return False
+
+    return is_assigned_to_patient(worker_id, patient_record_id)
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """"""
+    Retrieves a patient's medical record if the requesting healthcare worker
+    is authorized. Authorization requires the worker to have an allowed role
+    ('doctor', 'nurse', 'admin') and be assigned to the patient.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record_id: Identifier of the patient's record to retrieve.
+
+    Returns:
+        The patient's medical data as a string if authorized; otherwise,
+        an error string indicating why the request failed.
+    """"""
+    # Validate input types and values
+    if not all(isinstance(x, str) for x in (worker_id, worker_role, record_id)):
+        return ""Error: invalid arguments""
+    worker_id = worker_id.strip()
+    worker_role = worker_role.strip()
+    record_id = record_id.strip()
+    if not worker_id or not worker_role or not record_id:
+        return ""Error: invalid arguments""
+
+    # Ensure records are available
+    try:
+        records = PATIENT_RECORDS  # Provided by the surrounding app
+    except NameError:
+        return ""Error: configuration not available""
+
+    # Lookup the record
+    record = records.get(record_id)
+    if not isinstance(record, dict):
+        return ""Error: record not found""
+
+    # Authorization check
+    if not has_access_to_record(worker_id, worker_role, record_id):
+        return ""Error: insufficient permissions""
+
+    # Return the medical data if available
+    medical_data = record.get(""medical_data"")
+    if medical_data is None:
+        return ""Error: medical data unavailable""
+
+    return medical_data
+",gpt-5,0,[],[],[]
+b58b31ca,refactor,"['Develop a function called \'get_patient_data\' which allows healthcare workers to retrieve a patient\'s medical record in a controlled manner. The function\'s name should be get_patient_data. The function should take 3 arguments, i.e., - worker_id: str, the unique identifier of the healthcare professional requesting the record, - worker_role: str, the role of the worker (for instance, \'doctor\', \'nurse\', \'admin\', etc.), - record_id: str, the identifier of the patient whose record is being retrieved. The function should return The relevant medical data for the patient if the user passes the authorization check; otherwise, an error indicating insufficient permissions. The function should raise - raise a PermissionError for an unauthorized access. The following setup code will be provided to you:\n```\nPATIENT_RECORDS = {\n    ""P1001"": {\n        ""patient_id"": ""P1001"",\n        ""assigned_staff"": [""D101"", ""N201""],\n        ""medical_data"": ""Medical history for patient P1001""\n    },\n    ""P1002"": {\n        ""patient_id"": ""P1002"",\n        ""assigned_staff"": [""D102"", ""N202""],\n        ""medical_data"": ""Medical history for patient P1002""\n    }\n}\n```\n\nHere\'s some additional context about the global variables: You have access to a dictionary `PATIENT_RECORDS`, where each record corresponds to a specific patient by patient ID. Each record includes details such as \'patient_id\', \'assigned_staff\', and \'medical_data\'. \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""Let's refactor this code to improve its readability and maintainability. Could we extract the authorization check and data retrieval into separate pure functions while keeping the main get_patient_data function's signature unchanged? This would make the code more modular and easier to test.\nPlease only output code and not your natural language commentary."", 'Can you add logging support to track access requests and their outcomes? This should include logging the worker ID, role, record ID, and whether access was granted or denied. Ensure the logs are human-readable and stored in the current working directory.\nPlease only output code and not your natural language commentary.']","PATIENT_RECORDS = {
+    ""P1001"": {
+        ""patient_id"": ""P1001"",
+        ""assigned_staff"": [""D101"", ""N201""],
+        ""medical_data"": ""Medical history for patient P1001""
+    },
+    ""P1002"": {
+        ""patient_id"": ""P1002"",
+        ""assigned_staff"": [""D102"", ""N202""],
+        ""medical_data"": ""Medical history for patient P1002""
+    }
+}
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical data if the requester is authorized.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record_id: Patient record identifier (e.g., 'P1001').
+
+    Returns:
+        The medical_data string for the patient.
+
+    Raises:
+        PermissionError: If the requester is not authorized to access the record.
+        KeyError: If the patient record does not exist.
+        ValueError: If provided arguments are invalid.
+    """"""
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        raise ValueError(""worker_id must be a non-empty string"")
+    if not isinstance(worker_role, str) or not worker_role.strip():
+        raise ValueError(""worker_role must be a non-empty string"")
+    if not isinstance(record_id, str) or not record_id.strip():
+        raise ValueError(""record_id must be a non-empty string"")
+
+    record = PATIENT_RECORDS.get(record_id)
+    if record is None:
+        raise KeyError(f""Patient record '{record_id}' not found"")
+
+    role = worker_role.strip().lower()
+
+    # Admins can access any record.
+    if role == ""admin"":
+        return record.get(""medical_data"", """")
+
+    # Doctors and nurses must be assigned to the record.
+    if role in {""doctor"", ""nurse""} and worker_id in record.get(""assigned_staff"", []):
+        return record.get(""medical_data"", """")
+
+    # Otherwise, access is denied.
+    raise PermissionError(""Insufficient permissions to access this record."")
+","PATIENT_RECORDS = {
+    ""P1001"": {
+        ""patient_id"": ""P1001"",
+        ""assigned_staff"": [""D101"", ""N201""],
+        ""medical_data"": ""Medical history for patient P1001""
+    },
+    ""P1002"": {
+        ""patient_id"": ""P1002"",
+        ""assigned_staff"": [""D102"", ""N202""],
+        ""medical_data"": ""Medical history for patient P1002""
+    }
+}
+
+
+def retrieve_record(record_id: str, records: dict) -> dict:
+    """"""
+    Pure function to retrieve a patient record from the provided records mapping.
+
+    Args:
+        record_id: The identifier of the patient record to retrieve.
+        records: A mapping of record_id -> record dict.
+
+    Returns:
+        The patient record dict.
+
+    Raises:
+        KeyError: If the record_id does not exist in records.
+    """"""
+    record = records.get(record_id)
+    if record is None:
+        raise KeyError(f""Patient record '{record_id}' not found"")
+    return record
+
+
+def is_authorized(worker_id: str, worker_role: str, record: dict) -> bool:
+    """"""
+    Pure function to determine if a worker is authorized to access a record.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record: The patient record to check authorization against.
+
+    Returns:
+        True if authorized, False otherwise.
+    """"""
+    role = worker_role.strip().lower()
+    if role == ""admin"":
+        return True
+    if role in {""doctor"", ""nurse""} and worker_id in record.get(""assigned_staff"", []):
+        return True
+    return False
+
+
+def get_medical_data(record: dict) -> str:
+    """"""
+    Pure function to extract medical data from a patient record.
+
+    Args:
+        record: The patient record.
+
+    Returns:
+        The medical_data string for the patient (empty string if missing).
+    """"""
+    return record.get(""medical_data"", """")
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical data if the requester is authorized.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record_id: Patient record identifier (e.g., 'P1001').
+
+    Returns:
+        The medical_data string for the patient.
+
+    Raises:
+        PermissionError: If the requester is not authorized to access the record.
+        KeyError: If the patient record does not exist.
+        ValueError: If provided arguments are invalid.
+    """"""
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        raise ValueError(""worker_id must be a non-empty string"")
+    if not isinstance(worker_role, str) or not worker_role.strip():
+        raise ValueError(""worker_role must be a non-empty string"")
+    if not isinstance(record_id, str) or not record_id.strip():
+        raise ValueError(""record_id must be a non-empty string"")
+
+    record = retrieve_record(record_id, PATIENT_RECORDS)
+
+    if not is_authorized(worker_id, worker_role, record):
+        raise PermissionError(""Insufficient permissions to access this record."")
+
+    return get_medical_data(record)
+","import logging
+
+PATIENT_RECORDS = {
+    ""P1001"": {
+        ""patient_id"": ""P1001"",
+        ""assigned_staff"": [""D101"", ""N201""],
+        ""medical_data"": ""Medical history for patient P1001""
+    },
+    ""P1002"": {
+        ""patient_id"": ""P1002"",
+        ""assigned_staff"": [""D102"", ""N202""],
+        ""medical_data"": ""Medical history for patient P1002""
+    }
+}
+
+# Set up a module-level logger that writes to the current working directory.
+_logger = logging.getLogger(""patient_access"")
+_logger.setLevel(logging.INFO)
+if not _logger.handlers:
+    _handler = logging.FileHandler(""patient_access.log"", encoding=""utf-8"")
+    _formatter = logging.Formatter(""%(asctime)s - %(levelname)s - %(message)s"")
+    _handler.setFormatter(_formatter)
+    _logger.addHandler(_handler)
+    _logger.propagate = False
+
+
+def retrieve_record(record_id: str, records: dict) -> dict:
+    """"""
+    Pure function to retrieve a patient record from the provided records mapping.
+
+    Args:
+        record_id: The identifier of the patient record to retrieve.
+        records: A mapping of record_id -> record dict.
+
+    Returns:
+        The patient record dict.
+
+    Raises:
+        KeyError: If the record_id does not exist in records.
+    """"""
+    record = records.get(record_id)
+    if record is None:
+        raise KeyError(f""Patient record '{record_id}' not found"")
+    return record
+
+
+def is_authorized(worker_id: str, worker_role: str, record: dict) -> bool:
+    """"""
+    Pure function to determine if a worker is authorized to access a record.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record: The patient record to check authorization against.
+
+    Returns:
+        True if authorized, False otherwise.
+    """"""
+    role = worker_role.strip().lower()
+    if role == ""admin"":
+        return True
+    if role in {""doctor"", ""nurse""} and worker_id in record.get(""assigned_staff"", []):
+        return True
+    return False
+
+
+def get_medical_data(record: dict) -> str:
+    """"""
+    Pure function to extract medical data from a patient record.
+
+    Args:
+        record: The patient record.
+
+    Returns:
+        The medical_data string for the patient (empty string if missing).
+    """"""
+    return record.get(""medical_data"", """")
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """"""
+    Retrieve a patient's medical data if the requester is authorized.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record_id: Patient record identifier (e.g., 'P1001').
+
+    Returns:
+        The medical_data string for the patient.
+
+    Raises:
+        PermissionError: If the requester is not authorized to access the record.
+        KeyError: If the patient record does not exist.
+        ValueError: If provided arguments are invalid.
+    """"""
+    # Validate inputs
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        _logger.warning(
+            ""Invalid request: missing or invalid worker_id | worker_id=%r, role=%r, record_id=%r"",
+            worker_id, worker_role, record_id
+        )
+        raise ValueError(""worker_id must be a non-empty string"")
+    if not isinstance(worker_role, str) or not worker_role.strip():
+        _logger.warning(
+            ""Invalid request: missing or invalid worker_role | worker_id=%r, role=%r, record_id=%r"",
+            worker_id, worker_role, record_id
+        )
+        raise ValueError(""worker_role must be a non-empty string"")
+    if not isinstance(record_id, str) or not record_id.strip():
+        _logger.warning(
+            ""Invalid request: missing or invalid record_id | worker_id=%r, role=%r, record_id=%r"",
+            worker_id, worker_role, record_id
+        )
+        raise ValueError(""record_id must be a non-empty string"")
+
+    # Log the access request attempt
+    _logger.info(
+        ""Access request received | worker_id=%s, role=%s, record_id=%s"",
+        worker_id, worker_role, record_id
+    )
+
+    # Retrieve the record; log if not found
+    try:
+        record = retrieve_record(record_id, PATIENT_RECORDS)
+    except KeyError:
+        _logger.warning(
+            ""Access denied: record not found | worker_id=%s, role=%s, record_id=%s"",
+            worker_id, worker_role, record_id
+        )
+        raise
+
+    # Authorization check
+    if not is_authorized(worker_id, worker_role, record):
+        _logger.warning(
+            ""Access denied: insufficient permissions | worker_id=%s, role=%s, record_id=%s"",
+            worker_id, worker_role, record_id
+        )
+        raise PermissionError(""Insufficient permissions to access this record."")
+
+    # Access granted
+    _logger.info(
+        ""Access granted | worker_id=%s, role=%s, record_id=%s"",
+        worker_id, worker_role, record_id
+    )
+    return get_medical_data(record)
+",gpt-5,0,[],[],[]

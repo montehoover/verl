@@ -1,0 +1,97 @@
+PATIENT_RECORDS = {
+    "P1001": {
+        "patient_id": "P1001",
+        "assigned_staff": ["D101", "N201"],
+        "medical_data": "Medical history for patient P1001"
+    },
+    "P1002": {
+        "patient_id": "P1002",
+        "assigned_staff": ["D102", "N202"],
+        "medical_data": "Medical history for patient P1002"
+    }
+}
+
+
+def retrieve_record(record_id: str, records: dict) -> dict:
+    """
+    Pure function to retrieve a patient record from the provided records mapping.
+
+    Args:
+        record_id: The identifier of the patient record to retrieve.
+        records: A mapping of record_id -> record dict.
+
+    Returns:
+        The patient record dict.
+
+    Raises:
+        KeyError: If the record_id does not exist in records.
+    """
+    record = records.get(record_id)
+    if record is None:
+        raise KeyError(f"Patient record '{record_id}' not found")
+    return record
+
+
+def is_authorized(worker_id: str, worker_role: str, record: dict) -> bool:
+    """
+    Pure function to determine if a worker is authorized to access a record.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record: The patient record to check authorization against.
+
+    Returns:
+        True if authorized, False otherwise.
+    """
+    role = worker_role.strip().lower()
+    if role == "admin":
+        return True
+    if role in {"doctor", "nurse"} and worker_id in record.get("assigned_staff", []):
+        return True
+    return False
+
+
+def get_medical_data(record: dict) -> str:
+    """
+    Pure function to extract medical data from a patient record.
+
+    Args:
+        record: The patient record.
+
+    Returns:
+        The medical_data string for the patient (empty string if missing).
+    """
+    return record.get("medical_data", "")
+
+
+def get_patient_data(worker_id: str, worker_role: str, record_id: str) -> str:
+    """
+    Retrieve a patient's medical data if the requester is authorized.
+
+    Args:
+        worker_id: Unique identifier of the healthcare professional.
+        worker_role: Role of the worker (e.g., 'doctor', 'nurse', 'admin').
+        record_id: Patient record identifier (e.g., 'P1001').
+
+    Returns:
+        The medical_data string for the patient.
+
+    Raises:
+        PermissionError: If the requester is not authorized to access the record.
+        KeyError: If the patient record does not exist.
+        ValueError: If provided arguments are invalid.
+    """
+    if not isinstance(worker_id, str) or not worker_id.strip():
+        raise ValueError("worker_id must be a non-empty string")
+    if not isinstance(worker_role, str) or not worker_role.strip():
+        raise ValueError("worker_role must be a non-empty string")
+    if not isinstance(record_id, str) or not record_id.strip():
+        raise ValueError("record_id must be a non-empty string")
+
+    record = retrieve_record(record_id, PATIENT_RECORDS)
+
+    if not is_authorized(worker_id, worker_role, record):
+        raise PermissionError("Insufficient permissions to access this record.")
+
+    return get_medical_data(record)

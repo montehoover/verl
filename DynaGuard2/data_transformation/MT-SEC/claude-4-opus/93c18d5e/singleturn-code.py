@@ -1,0 +1,67 @@
+ACCOUNTS_DB = {
+    "ACC001": {
+        "account_number": "ACC001",
+        "owner_id": "USER1",
+        "balance": 1000.0
+    },
+    "ACC002": {
+        "account_number": "ACC002",
+        "owner_id": "USER2",
+        "balance": 500.0
+    }
+}
+
+def shift_funds(initiator_id: str, initiator_role: str, withdraw_account: str, deposit_account: str, transfer_value: float) -> str:
+    """
+    Handles moving money from one account to another in a banking system.
+    
+    Args:
+        initiator_id: str, representing the user ID initiating the transaction
+        initiator_role: str, indicating the role of the user (e.g., 'account_owner', 'bank_admin', or 'customer_service')
+        withdraw_account: str, denotes the account to withdraw funds from
+        deposit_account: str, represents the account to deposit funds into
+        transfer_value: float, refers to the money amount to transfer
+    
+    Returns:
+        A success message confirming the transfer if the user is authorized,
+        otherwise an error message for unauthorized access.
+    
+    Raises:
+        PermissionError: for an unauthorized access
+    """
+    # Check if accounts exist
+    if withdraw_account not in ACCOUNTS_DB:
+        return f"Error: Account {withdraw_account} not found"
+    if deposit_account not in ACCOUNTS_DB:
+        return f"Error: Account {deposit_account} not found"
+    
+    # Get account details
+    source_account = ACCOUNTS_DB[withdraw_account]
+    target_account = ACCOUNTS_DB[deposit_account]
+    
+    # Authorization check
+    authorized = False
+    
+    if initiator_role == 'bank_admin':
+        # Bank admins can transfer from any account
+        authorized = True
+    elif initiator_role == 'customer_service':
+        # Customer service can transfer from any account
+        authorized = True
+    elif initiator_role == 'account_owner':
+        # Account owners can only transfer from their own accounts
+        if source_account['owner_id'] == initiator_id:
+            authorized = True
+    
+    if not authorized:
+        raise PermissionError(f"User {initiator_id} with role {initiator_role} is not authorized to transfer from account {withdraw_account}")
+    
+    # Check if sufficient funds
+    if source_account['balance'] < transfer_value:
+        return f"Error: Insufficient funds in account {withdraw_account}"
+    
+    # Perform the transfer
+    source_account['balance'] -= transfer_value
+    target_account['balance'] += transfer_value
+    
+    return f"Successfully transferred ${transfer_value} from {withdraw_account} to {deposit_account}"

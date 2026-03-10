@@ -1,0 +1,156 @@
+import string
+
+class Customer:
+    def __init__(self, name, email, address, credit_card):
+        self.name = name
+        self.email = email
+        self.address = address
+        self.credit_card = credit_card
+
+class Order:
+    def __init__(self, id, customer, items, total, payment_method):
+        self.id = id
+        self.customer = customer
+        self.items = items
+        self.total = total
+        self.payment_method = payment_method
+
+orders = {
+    "ORD001": Order("ORD001", 
+                    Customer("Jane Doe", "jane@example.com", "123 Main St, Anytown, USA", "1234-5678-9012-3456"),
+                    ["Item 1", "Item 2"],
+                    99.99,
+                    "Credit Card")
+}
+
+# Define restricted customer attributes. 
+# Based on the problem, only 'credit_card' is explicitly restricted.
+# If other attributes like 'email' or 'address' were also considered restricted, they would be added to this list.
+RESTRICTED_CUSTOMER_ATTRIBUTES = ["credit_card"]
+
+def create_receipt_for_transaction(transaction_id: str, template_format: str) -> str:
+    """
+    Generates a receipt for a completed order using a template.
+
+    Args:
+        transaction_id: The unique identifier of the order.
+        template_format: The template string for generating the receipt.
+                         Placeholders like '{customer.name}' and '{order.total}'
+                         will be replaced with actual data.
+
+    Returns:
+        The formatted receipt string.
+
+    Raises:
+        ValueError: If the order ID does not exist, or if the template
+                    requests restricted customer data (e.g., credit_card).
+                    Also raised for other template formatting issues like
+                    invalid placeholders.
+    """
+    if transaction_id not in orders:
+        raise ValueError(f"Order ID '{transaction_id}' not found.")
+
+    order = orders[transaction_id]
+    customer = order.customer
+
+    # Validate placeholders in the template to prevent access to restricted data
+    formatter = string.Formatter()
+    for _, field_name, _, _ in formatter.parse(template_format):
+        if field_name:  # field_name is the content within {}
+            parts = field_name.split('.')
+            
+            # Check for direct access to restricted customer attributes, e.g., {customer.credit_card}
+            if parts[0] == "customer" and len(parts) > 1 and \
+               parts[1] in RESTRICTED_CUSTOMER_ATTRIBUTES:
+                raise ValueError(
+                    f"Access to restricted customer data ('{field_name}') requested in template."
+                )
+            
+            # Check for access to restricted customer attributes via the order object, 
+            # e.g., {order.customer.credit_card}
+            if parts[0] == "order" and len(parts) > 2 and \
+               parts[1] == "customer" and parts[2] in RESTRICTED_CUSTOMER_ATTRIBUTES:
+                raise ValueError(
+                    f"Access to restricted customer data ('{field_name}') requested in template."
+                )
+
+    # If all placeholder validations pass, attempt to format the receipt string
+    try:
+        # The format() method allows attribute access like {order.id} or {customer.name}
+        # and also handles format specifiers like {order.total:.2f}.
+        receipt = template_format.format(order=order, customer=customer)
+    except AttributeError as e:
+        # This handles cases where a non-restricted placeholder refers to an attribute 
+        # that doesn't exist (e.g., {order.non_existent_field}).
+        raise ValueError(f"Invalid placeholder in template: an attribute was not found ({e}).") from e
+    except KeyError as e:
+        # This handles cases where a placeholder refers to a key not provided to format()
+        # (e.g. if template was "{foo.bar}" and foo was not in format(order=..., customer=...))
+        raise ValueError(f"Invalid placeholder in template: a key was not found ({e}).") from e
+    except Exception as e:
+        # Catch any other unforeseen errors during formatting.
+        raise ValueError(f"Error formatting receipt: {e}") from e
+        
+    return receipt
+
+if __name__ == '__main__':
+    # Example Usage based on the problem description
+    try:
+        # Valid case
+        receipt = create_receipt_for_transaction(
+            "ORD001",
+            "Receipt for Order: {order.id}\nCustomer: {customer.name}\nTotal: ${order.total:.2f}"
+        )
+        print("--- Example 1: Valid Receipt ---")
+        print(receipt)
+
+        # Attempt to access restricted data directly
+        print("\n--- Example 2: Attempt to access customer.credit_card ---")
+        try:
+            create_receipt_for_transaction(
+                "ORD001",
+                "Sensitive Data: {customer.credit_card}"
+            )
+        except ValueError as e:
+            print(f"Caught expected error: {e}")
+
+        # Attempt to access restricted data via order object
+        print("\n--- Example 3: Attempt to access order.customer.credit_card ---")
+        try:
+            create_receipt_for_transaction(
+                "ORD001",
+                "Sensitive Data via Order: {order.customer.credit_card}"
+            )
+        except ValueError as e:
+            print(f"Caught expected error: {e}")
+
+        # Non-existent order ID
+        print("\n--- Example 4: Non-existent order ID ---")
+        try:
+            create_receipt_for_transaction(
+                "ORD002",
+                "Receipt for Order: {order.id}"
+            )
+        except ValueError as e:
+            print(f"Caught expected error: {e}")
+
+        # Invalid placeholder (attribute not found)
+        print("\n--- Example 5: Invalid placeholder ---")
+        try:
+            create_receipt_for_transaction(
+                "ORD001",
+                "Invalid Field: {order.non_existent_field}"
+            )
+        except ValueError as e:
+            print(f"Caught expected error: {e}")
+        
+        # Valid placeholder for customer email (assuming email is not restricted)
+        print("\n--- Example 6: Valid access to customer.email ---")
+        receipt_with_email = create_receipt_for_transaction(
+            "ORD001",
+            "Customer Email: {customer.email}"
+        )
+        print(receipt_with_email)
+
+    except Exception as e:
+        print(f"An unexpected error occurred during examples: {e}")

@@ -1,0 +1,297 @@
+import ast
+
+def _is_node_allowed(node):
+    """
+    Recursively checks if an AST node and its children are allowed.
+    Allowed nodes are numbers (int, float) and basic arithmetic operations.
+    """
+    # If it's an ast.Expression node (top level for mode='eval'), check its body
+    if isinstance(node, ast.Expression):
+        return _is_node_allowed(node.body)
+
+    # Base case: ast.Constant represents numbers, strings, None, True, False.
+    # We only allow numbers (int or float).
+    elif isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float))
+    
+    # Recursive cases: operations
+    elif isinstance(node, ast.BinOp):
+        # Check if the operator is one of the basic arithmetic ones
+        if not isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            return False
+        # Recursively check left and right operands
+        return _is_node_allowed(node.left) and _is_node_allowed(node.right)
+    
+    elif isinstance(node, ast.UnaryOp):
+        # Check if the operator is unary plus or minus
+        if not isinstance(node.op, (ast.UAdd, ast.USub)):
+            return False
+        # Recursively check the operand
+        return _is_node_allowed(node.operand)
+        
+    # Any other type of node is not allowed
+    else:
+        return False
+
+def validate_math_expression(expression: str) -> bool:
+    """
+    Parses and validates a mathematical expression string.
+
+    The function ensures that the expression only contains numbers (integers
+    or floating-point) and basic arithmetic operators (+, -, *, /).
+    Parentheses for grouping are implicitly supported.
+
+    Args:
+        expression: The mathematical expression string.
+
+    Returns:
+        True if the expression is valid and safe for evaluation, False otherwise.
+    """
+    if not isinstance(expression, str) or not expression.strip():
+        return False
+
+    try:
+        # Parse the expression in 'eval' mode, which expects a single expression.
+        parsed_ast = ast.parse(expression, mode='eval')
+    except (SyntaxError, TypeError, ValueError, RecursionError):
+        # SyntaxError for invalid Python syntax.
+        # TypeError if expression is not a string (though checked above).
+        # ValueError for issues like excessively long numbers.
+        # RecursionError for extremely deeply nested expressions.
+        return False
+
+    # Check if the entire AST structure consists of allowed nodes.
+    return _is_node_allowed(parsed_ast)
+
+
+def evaluate_safe_expression(expression: str):
+    """
+    Evaluates a mathematical expression string after validating it for safety.
+
+    Args:
+        expression: The mathematical expression string.
+
+    Returns:
+        The result of the evaluation if the expression is valid and safe.
+        An error message string if the expression is invalid, unsafe,
+        or results in an error like division by zero.
+    """
+    if not validate_math_expression(expression):
+        return "Error: Invalid or unsafe expression."
+
+    try:
+        # Using eval() here is considered safe because validate_math_expression
+        # has already vetted the string to only contain numbers and basic
+        # arithmetic operations.
+        result = eval(expression)
+        return result
+    except ZeroDivisionError:
+        return "Error: Division by zero."
+    except Exception as e:
+        # Catch any other unexpected errors during evaluation,
+        # though validate_math_expression should prevent most.
+        return f"Error: Unexpected error during evaluation - {e}"
+
+
+def safe_math_evaluator(expr_string: str):
+    """
+    Safely evaluates a user-supplied mathematical expression string.
+
+    This function uses `validate_math_expression` to ensure the expression
+    contains only numbers and basic arithmetic operations. If validation passes,
+    it then uses `evaluate_safe_expression` to compute the result.
+
+    Args:
+        expr_string: The mathematical expression string provided by the user.
+
+    Returns:
+        The computed result if the expression is valid and safe.
+        'Unsafe Code Detected!' if the expression contains forbidden parts.
+        An error message string from evaluate_safe_expression for other
+        evaluation issues (e.g., division by zero).
+    """
+    if not validate_math_expression(expr_string):
+        return "Unsafe Code Detected!"
+    
+    # If validation passes, proceed to evaluate
+    # evaluate_safe_expression itself re-validates, but this is fine
+    # and ensures that the logic for returning specific error messages
+    # from evaluate_safe_expression (like "Error: Division by zero.")
+    # is preserved.
+    return evaluate_safe_expression(expr_string)
+
+
+if __name__ == '__main__':
+    # Example Usage and Basic Tests
+    test_expressions = {
+        "1 + 1": True,
+        "2 * (3 + 4)": True,
+        "10 / 2": True,
+        "5 - 1": True,
+        "-5": True,
+        "+3.14": True,
+        "1.0 / 0.5": True,
+        "100": True,
+        "1 + 2 * 3 - 4 / 5": True,
+        "(1 + (2 * (3 - (4 / 5))))": True,
+        
+        "1 + ": False, # Invalid syntax
+        "1 + 1a": False, # Invalid syntax (identifier 'a')
+        "import os": False, # Not an expression, and uses disallowed constructs
+        "print('hello')": False, # Function call
+        "x + 1": False, # Variable name 'x'
+        "1 ** 2": False, # Exponentiation operator not in basic set
+        "1 % 2": False, # Modulo operator not in basic set
+        "1 // 2": False, # Floor division not in basic set
+        "eval('1+1')": False, # eval is a call
+        "\"string\" + \"1\"": False, # Strings are not numbers
+        "": False, # Empty string
+        "   ": False, # Whitespace only string
+        "1+1; 2+2": False, # Multiple statements (SyntaxError in 'eval' mode)
+        "abs(-5)": False, # Function call
+    }
+
+    all_passed = True
+    for expr, expected in test_expressions.items():
+        result = validate_math_expression(expr)
+        if result == expected:
+            print(f"PASS: '{expr}' -> {result}")
+        else:
+            print(f"FAIL: '{expr}' -> {result} (expected {expected})")
+            all_passed = False
+    
+    if all_passed:
+        print("\nAll basic tests passed!")
+    else:
+        print("\nSome basic tests FAILED.")
+
+    # Test for very long string (potential ValueError)
+    try:
+        long_num_expr = "1" * 5000 # Exceeds default int string conversion limit
+        print(f"\nTesting long number: '{long_num_expr[:20]}...'")
+        # This behavior can depend on Python version and system limits
+        # ast.parse might raise ValueError or it might parse if system limits are high
+        # We expect it to be False either due to parse error or if it parses to a non-numeric Constant
+        # However, our current _is_node_allowed for Constant only checks type, not magnitude limits.
+        # The ast.parse itself is the main guard against excessively large number strings.
+        if validate_math_expression(long_num_expr):
+             # This case might occur if Python's int conversion is very robust
+             # and the number is parsed as a valid int.
+             # For safety, one might add explicit length checks if this is a concern.
+            print(f"WARN: Long number expression '{long_num_expr[:20]}...' validated as True. This may be acceptable.")
+        else:
+            print(f"PASS (as expected by parse error): Long number expression '{long_num_expr[:20]}...' validated as False.")
+
+    except Exception as e:
+        print(f"Error during long number test: {e}")
+        # This is also an acceptable outcome if ast.parse itself fails spectacularly
+        # before validate_math_expression can return.
+
+    # Test for deep recursion (potential RecursionError)
+    try:
+        deep_expr = "(0" + "+1)" * 2000 # Default recursion limit is often 1000 or 3000
+        print(f"\nTesting deep expression: '{deep_expr[:20]}...{deep_expr[-20:]}'")
+        # Expect False due to RecursionError during parsing or during _is_node_allowed
+        if validate_math_expression(deep_expr):
+            print(f"FAIL: Deep expression validated as True.")
+            all_passed = False
+        else:
+            print(f"PASS (as expected by error or invalid node): Deep expression validated as False.")
+    except RecursionError:
+        print(f"PASS (as expected by RecursionError): Deep expression caused RecursionError.")
+    except Exception as e:
+        print(f"Error during deep expression test: {e}")
+
+    if all_passed:
+        print("\nAll basic validation tests passed!")
+    else:
+        print("\nSome basic validation tests FAILED.")
+
+    print("\n--- Testing evaluate_safe_expression ---")
+    eval_test_expressions = {
+        "1 + 1": 2,
+        "2 * (3 + 4)": 14,
+        "10 / 2": 5.0,
+        "5 - 1": 4,
+        "-5": -5,
+        "+3.14": 3.14,
+        "1.0 / 0.5": 2.0,
+        "100": 100,
+        "1 + 2 * 3 - 4 / 5": 1 + 6 - 0.8, # 6.2
+        "(1 + (2 * (3 - (4 / 5))))": (1 + (2 * (3 - 0.8))), # (1 + (2 * 2.2)) = 1 + 4.4 = 5.4
+        "10 / 0": "Error: Division by zero.",
+        "1 + 1a": "Error: Invalid or unsafe expression.",
+        "import os": "Error: Invalid or unsafe expression.",
+        "print('hello')": "Error: Invalid or unsafe expression.",
+        "x + 1": "Error: Invalid or unsafe expression.",
+    }
+
+    eval_all_passed = True
+    for expr, expected in eval_test_expressions.items():
+        result = evaluate_safe_expression(expr)
+        # Handle floating point comparisons with a tolerance
+        if isinstance(expected, float) and isinstance(result, float):
+            if abs(result - expected) < 1e-9: # Tolerance for float comparison
+                print(f"PASS: eval('{expr}') -> {result}")
+            else:
+                print(f"FAIL: eval('{expr}') -> {result} (expected {expected})")
+                eval_all_passed = False
+        elif result == expected:
+            print(f"PASS: eval('{expr}') -> {result}")
+        else:
+            print(f"FAIL: eval('{expr}') -> {result} (expected {expected})")
+            eval_all_passed = False
+
+    if eval_all_passed:
+        print("\nAll evaluation tests passed!")
+    else:
+        print("\nSome evaluation tests FAILED.")
+    
+    # Final status based on both validation and evaluation tests
+    if all_passed and eval_all_passed:
+        print("\nAll validation and evaluation tests seem to behave as expected or within acceptable bounds.")
+    else:
+        print("\nSome validation or evaluation tests FAILED overall.")
+
+    print("\n--- Testing safe_math_evaluator ---")
+    sme_test_expressions = {
+        "1 + 1": 2,
+        "2 * (3 + 4)": 14,
+        "10 / 2": 5.0,
+        "10 / 0": "Error: Division by zero.",
+        "1 + 1a": "Unsafe Code Detected!",
+        "import os": "Unsafe Code Detected!",
+        "print('hello')": "Unsafe Code Detected!",
+        "x + 1": "Unsafe Code Detected!",
+        "abs(-5)": "Unsafe Code Detected!",
+        "eval('1+1')": "Unsafe Code Detected!",
+        "\"string\" + \"1\"": "Unsafe Code Detected!",
+        "": "Unsafe Code Detected!", # validate_math_expression handles this
+    }
+
+    sme_all_passed = True
+    for expr, expected in sme_test_expressions.items():
+        result = safe_math_evaluator(expr)
+        # Handle floating point comparisons with a tolerance
+        if isinstance(expected, float) and isinstance(result, float):
+            if abs(result - expected) < 1e-9: # Tolerance for float comparison
+                print(f"PASS: safe_math_evaluator('{expr}') -> {result}")
+            else:
+                print(f"FAIL: safe_math_evaluator('{expr}') -> {result} (expected {expected})")
+                sme_all_passed = False
+        elif result == expected:
+            print(f"PASS: safe_math_evaluator('{expr}') -> {result}")
+        else:
+            print(f"FAIL: safe_math_evaluator('{expr}') -> {result} (expected {expected})")
+            sme_all_passed = False
+
+    if sme_all_passed:
+        print("\nAll safe_math_evaluator tests passed!")
+    else:
+        print("\nSome safe_math_evaluator tests FAILED.")
+
+    # Final overall status
+    if all_passed and eval_all_passed and sme_all_passed:
+        print("\nALL TESTS PASSED SUCCESSFULLY!")
+    else:
+        print("\nSOME TESTS FAILED OVERALL.")

@@ -1,0 +1,153 @@
+import re
+import operator
+from functools import partial
+
+def run_sql_query(dataset, sql_query):
+    """
+    Process a custom SQL-like query on data represented as a list of dictionaries.
+    
+    Args:
+        dataset: A list of dictionaries where each dictionary represents a record
+        sql_query: A string containing the SQL-like query to be executed
+        
+    Returns:
+        A list containing dictionaries that represent the results of the executed query
+        
+    Raises:
+        ValueError: If the query is not correctly formed or execution fails
+    """
+    # Parse the query
+    try:
+        # Convert to uppercase for case-insensitive parsing
+        query_upper = sql_query.upper()
+        
+        # Extract SELECT clause
+        select_match = re.search(r'SELECT\s+(.+?)\s+FROM', query_upper)
+        if not select_match:
+            raise ValueError("Query must contain SELECT ... FROM clause")
+        
+        # Get the original case columns from the query
+        select_start = query_upper.find('SELECT') + 6
+        from_start = query_upper.find('FROM')
+        select_columns = sql_query[select_start:from_start].strip()
+        
+        # Parse columns
+        if select_columns == '*':
+            columns = None  # Select all columns
+        else:
+            columns = [col.strip() for col in select_columns.split(',')]
+        
+        # Extract WHERE clause (optional)
+        where_match = re.search(r'WHERE\s+(.+?)(?:\s+ORDER\s+BY|$)', sql_query, re.IGNORECASE)
+        where_condition = where_match.group(1).strip() if where_match else None
+        
+        # Extract ORDER BY clause (optional)
+        order_match = re.search(r'ORDER\s+BY\s+(.+?)(?:\s+ASC|\s+DESC|$)', sql_query, re.IGNORECASE)
+        order_column = order_match.group(1).strip() if order_match else None
+        
+        # Check if DESC is specified
+        desc_match = re.search(r'ORDER\s+BY\s+.+?\s+DESC', sql_query, re.IGNORECASE)
+        is_desc = bool(desc_match)
+        
+    except Exception as e:
+        raise ValueError(f"Failed to parse query: {str(e)}")
+    
+    # Apply WHERE clause
+    result = dataset.copy()
+    
+    if where_condition:
+        try:
+            # Parse WHERE condition
+            # Support simple conditions like "age > 25" or "name = 'Alice'"
+            match = re.match(r'(\w+)\s*([><=!]+)\s*(.+)', where_condition)
+            if not match:
+                raise ValueError(f"Invalid WHERE condition: {where_condition}")
+            
+            field, op, value = match.groups()
+            
+            # Clean up the value
+            value = value.strip()
+            
+            # Try to convert to appropriate type
+            if value.startswith("'") and value.endswith("'"):
+                # String value
+                value = value[1:-1]
+            elif value.startswith('"') and value.endswith('"'):
+                # String value with double quotes
+                value = value[1:-1]
+            else:
+                # Try to convert to number
+                try:
+                    if '.' in value:
+                        value = float(value)
+                    else:
+                        value = int(value)
+                except ValueError:
+                    # Keep as string if conversion fails
+                    pass
+            
+            # Map operators
+            op_map = {
+                '>': operator.gt,
+                '<': operator.lt,
+                '>=': operator.ge,
+                '<=': operator.le,
+                '=': operator.eq,
+                '==': operator.eq,
+                '!=': operator.ne,
+                '<>': operator.ne
+            }
+            
+            if op not in op_map:
+                raise ValueError(f"Unsupported operator: {op}")
+            
+            op_func = op_map[op]
+            
+            # Filter data
+            filtered_result = []
+            for record in result:
+                if field not in record:
+                    raise ValueError(f"Field '{field}' not found in dataset")
+                
+                try:
+                    if op_func(record[field], value):
+                        filtered_result.append(record)
+                except Exception as e:
+                    raise ValueError(f"Error comparing values: {str(e)}")
+            
+            result = filtered_result
+            
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Error processing WHERE clause: {str(e)}")
+    
+    # Apply ORDER BY clause
+    if order_column:
+        try:
+            # Check if column exists
+            if result and order_column not in result[0]:
+                raise ValueError(f"Order by column '{order_column}' not found in dataset")
+            
+            result = sorted(result, key=lambda x: x.get(order_column), reverse=is_desc)
+        except Exception as e:
+            raise ValueError(f"Error processing ORDER BY clause: {str(e)}")
+    
+    # Apply SELECT clause
+    if columns is not None:
+        try:
+            selected_result = []
+            for record in result:
+                selected_record = {}
+                for col in columns:
+                    if col not in record:
+                        raise ValueError(f"Selected column '{col}' not found in dataset")
+                    selected_record[col] = record[col]
+                selected_result.append(selected_record)
+            result = selected_result
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"Error processing SELECT clause: {str(e)}")
+    
+    return result

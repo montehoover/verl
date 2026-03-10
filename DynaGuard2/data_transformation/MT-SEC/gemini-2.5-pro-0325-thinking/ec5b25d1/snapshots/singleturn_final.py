@@ -1,0 +1,154 @@
+import re
+
+class Patient:
+    def __init__(self, id, name, age, gender, diagnosis, treatment_plan):
+        self.id = id
+        self.name = name
+        self.age = age
+        self.gender = gender
+        self.diagnosis = diagnosis  # Sensitive
+        self.treatment_plan = treatment_plan  # Sensitive
+
+patients = {
+    "P001": Patient("P001", "John Doe", 45, "Male", "Hypertension", "Medication and lifestyle changes"),
+    "P002": Patient("P002", "Jane Smith", 30, "Female", "Asthma", "Inhaler and regular check-ups")
+}
+
+def create_person_report(patient_code: str, report_template: str) -> str:
+    """
+    Generates a report string for a patient using a template.
+
+    Args:
+        patient_code: The identification code for the patient.
+        report_template: A string template containing fields to populate.
+                         Placeholders should be like '{patient.name}'.
+
+    Returns:
+        A string with the patient's non-sensitive information formatted as per the template.
+
+    Raises:
+        ValueError: If the patient ID is not found, or if there is an attempt
+                    to access sensitive information (diagnosis or treatment_plan).
+    """
+    if patient_code not in patients:
+        raise ValueError(f"Patient ID '{patient_code}' not found.")
+    
+    patient = patients[patient_code]
+
+    # Identify all attribute requests in the template of the form {patient.attribute_name}
+    # This regex captures the 'attribute_name' part.
+    requested_attributes = re.findall(r'{patient\.(\w+)}', report_template)
+
+    sensitive_fields = ['diagnosis', 'treatment_plan']
+
+    for attribute_name in requested_attributes:
+        if attribute_name in sensitive_fields:
+            raise ValueError(f"Attempt to access sensitive information: {attribute_name}")
+
+    # If no sensitive fields are requested, format the report.
+    # The str.format() method will access attributes of the 'patient' object.
+    # If the template requests a non-existent attribute (e.g., {patient.typo_field}),
+    # str.format() will raise an AttributeError, which is standard Python behavior.
+    try:
+        report_string = report_template.format(patient=patient)
+    except AttributeError as e:
+        # This handles cases where the template refers to an attribute that does not exist on the Patient object.
+        # For example, if the template contains "{patient.middle_name}" and Patient class doesn't have it.
+        # Re-raising with a more specific message or handling as per extended requirements could be done here.
+        # For now, let the original AttributeError propagate, or wrap it.
+        raise AttributeError(f"Failed to format report: An attribute in the template might be misspelled or not exist. Original error: {e}") from e
+        
+    return report_string
+
+if __name__ == '__main__':
+    # Example Usage based on the problem description
+    print("Example 1: Successful report generation")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient: {patient.name}, Age: {patient.age}, Gender: {patient.gender}"
+        )
+        print(f"Output: {report}")
+        # Expected: Patient: John Doe, Age: 45, Gender: Male
+    except ValueError as e:
+        print(f"Error: {e}")
+    except AttributeError as e:
+        print(f"Error: {e}")
+
+    print("\nExample 2: Patient ID not found")
+    try:
+        report = create_person_report(
+            patient_code="P999",
+            report_template="Patient: {patient.name}"
+        )
+        print(f"Output: {report}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        # Expected: Error: Patient ID 'P999' not found.
+    except AttributeError as e:
+        print(f"Error: {e}")
+
+    print("\nExample 3: Attempt to access sensitive information (diagnosis)")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient: {patient.name}, Diagnosis: {patient.diagnosis}"
+        )
+        print(f"Output: {report}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        # Expected: Error: Attempt to access sensitive information: diagnosis
+    except AttributeError as e:
+        print(f"Error: {e}")
+
+    print("\nExample 4: Attempt to access sensitive information (treatment_plan)")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient: {patient.name}, Treatment: {patient.treatment_plan}"
+        )
+        print(f"Output: {report}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        # Expected: Error: Attempt to access sensitive information: treatment_plan
+    except AttributeError as e:
+        print(f"Error: {e}")
+
+    print("\nExample 5: Template with non-existent attribute")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient: {patient.name}, Nickname: {patient.nickname}"
+        )
+        print(f"Output: {report}")
+    except ValueError as e:
+        print(f"Error: {e}")
+    except AttributeError as e:
+        print(f"Error: {e}")
+        # Expected: AttributeError related to 'nickname'
+        
+    print("\nExample 6: Template with valid sub-attribute access on non-sensitive field")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient Name Uppercased: {patient.name.upper}, Age as Int: {patient.age}"
+        )
+        print(f"Output: {report}")
+        # Expected: Patient Name Uppercased: JOHN DOE, Age as Int: 45
+    except ValueError as e:
+        print(f"Error: {e}")
+    except AttributeError as e:
+        print(f"Error: {e}")
+
+    print("\nExample 7: Template with sub-attribute access on sensitive field (should be caught before formatting)")
+    try:
+        report = create_person_report(
+            patient_code="P001",
+            report_template="Patient Diagnosis Detail: {patient.diagnosis.some_detail}"
+        )
+        print(f"Output: {report}")
+    except ValueError as e:
+        print(f"Error: {e}")
+        # Expected: Error: Attempt to access sensitive information: diagnosis
+    except AttributeError as e:
+        print(f"Error: {e}")

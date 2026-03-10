@@ -1,0 +1,1110 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+41a02c26,expansion,"[""I'm working on a banking application and need to start with user authentication. Could you help me create a function called 'authenticate_user' that takes a user_id (str) and password (str) as inputs and returns a boolean indicating whether the credentials are valid? This will be crucial for ensuring that only authorized users can perform transactions.\nPlease only output code and not your natural language commentary."", ""Great! Now that we have user authentication, let's focus on managing account balances. Could you write a function named 'update_account_balance' that takes account_number (str) and amount (float) as arguments? This function should update the balance in `ACCOUNTS_DB` if the account has sufficient funds and return a boolean indicating whether the update was successful. This will help us manage funds effectively.\nPlease only output code and not your natural language commentary."", 'With authentication and balance management in place, let\'s move on to the core functionality. Please design a function called \'process_transfer\' to facilitate money transfers between accounts. This function should take five arguments: `uid` (str), `role` (str), `source_account` (str), `destination_account` (str), and `transfer_amount` (float). It should return a success message if the transfer is authorized or raise a PermissionError for unauthorized access. Use the setup:\n```\nACCOUNTS_DB = {\n    ""ACC001"": {\n        ""account_number"": ""ACC001"",\n        ""owner_id"": ""USER1"",\n        ""balance"": 1000.0\n    },\n    ""ACC002"": {\n        ""account_number"": ""ACC002"",\n        ""owner_id"": ""USER2"",\n        ""balance"": 500.0\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You are given a dictionary called `ACCOUNTS_DB` containing account details by account number. Each account has properties such as \'account_number\', \'owner_id\', and \'balance\'.\nPlease only output code and not your natural language commentary.']","import os
+import hmac
+import hashlib
+from typing import Dict, Optional, TypedDict
+
+
+DEFAULT_PBKDF2_ITERATIONS = 310_000
+HASH_NAME = ""sha256""
+SALT_BYTES = 16
+
+
+class CredentialRecord(TypedDict):
+    salt_hex: str
+    iterations: int
+    hash_hex: str
+
+
+# In-memory credential store. Replace with a real database in production.
+_CREDENTIAL_STORE: Dict[str, CredentialRecord] = {}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(HASH_NAME, password.encode(""utf-8""), salt, iterations)
+
+
+def _get_user_record(user_id: str) -> Optional[CredentialRecord]:
+    return _CREDENTIAL_STORE.get(user_id)
+
+
+def set_user_password(user_id: str, password: str, *, iterations: int = DEFAULT_PBKDF2_ITERATIONS) -> None:
+    """"""
+    Helper to create/update a user's password in the in-memory store.
+    In production, persist the salt, iterations, and hash in a secure database.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        raise TypeError(""user_id and password must be strings"")
+
+    salt = os.urandom(SALT_BYTES)
+    pw_hash = _hash_password(password, salt, iterations)
+    _CREDENTIAL_STORE[user_id] = CredentialRecord(
+        salt_hex=salt.hex(),
+        iterations=iterations,
+        hash_hex=pw_hash.hex(),
+    )
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Verifies whether the provided credentials are valid.
+
+    Args:
+        user_id: The user's identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        True if the credentials are valid, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _get_user_record(user_id)
+
+    # Perform a dummy hash when the user does not exist to reduce timing differences.
+    if record is None:
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        # Constant-time compare against itself to consume similar time.
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    try:
+        salt = bytes.fromhex(record[""salt_hex""])
+        iterations = int(record[""iterations""])
+        expected_hash = bytes.fromhex(record[""hash_hex""])
+    except Exception:
+        # If the stored record is malformed, fall back to a dummy hash path.
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    computed_hash = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(computed_hash, expected_hash)
+
+
+# Optional: seed an example user for quick manual testing.
+# Remove this in production.
+if __name__ == ""__main__"":
+    # Example usage
+    set_user_password(""alice"", ""correct horse battery staple"")
+    assert authenticate_user(""alice"", ""correct horse battery staple"") is True
+    assert authenticate_user(""alice"", ""wrong password"") is False
+    assert authenticate_user(""bob"", ""anything"") is False
+","import os
+import hmac
+import hashlib
+from typing import Dict, Optional, TypedDict
+from decimal import Decimal, ROUND_HALF_EVEN, InvalidOperation
+
+
+DEFAULT_PBKDF2_ITERATIONS = 310_000
+HASH_NAME = ""sha256""
+SALT_BYTES = 16
+
+
+class CredentialRecord(TypedDict):
+    salt_hex: str
+    iterations: int
+    hash_hex: str
+
+
+# In-memory credential store. Replace with a real database in production.
+_CREDENTIAL_STORE: Dict[str, CredentialRecord] = {}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(HASH_NAME, password.encode(""utf-8""), salt, iterations)
+
+
+def _get_user_record(user_id: str) -> Optional[CredentialRecord]:
+    return _CREDENTIAL_STORE.get(user_id)
+
+
+def set_user_password(user_id: str, password: str, *, iterations: int = DEFAULT_PBKDF2_ITERATIONS) -> None:
+    """"""
+    Helper to create/update a user's password in the in-memory store.
+    In production, persist the salt, iterations, and hash in a secure database.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        raise TypeError(""user_id and password must be strings"")
+
+    salt = os.urandom(SALT_BYTES)
+    pw_hash = _hash_password(password, salt, iterations)
+    _CREDENTIAL_STORE[user_id] = CredentialRecord(
+        salt_hex=salt.hex(),
+        iterations=iterations,
+        hash_hex=pw_hash.hex(),
+    )
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Verifies whether the provided credentials are valid.
+
+    Args:
+        user_id: The user's identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        True if the credentials are valid, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _get_user_record(user_id)
+
+    # Perform a dummy hash when the user does not exist to reduce timing differences.
+    if record is None:
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        # Constant-time compare against itself to consume similar time.
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    try:
+        salt = bytes.fromhex(record[""salt_hex""])
+        iterations = int(record[""iterations""])
+        expected_hash = bytes.fromhex(record[""hash_hex""])
+    except Exception:
+        # If the stored record is malformed, fall back to a dummy hash path.
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    computed_hash = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(computed_hash, expected_hash)
+
+
+# ---- Account balance management ----
+
+class AccountRecord(TypedDict):
+    balance_cents: int  # store as integer minor units to avoid float errors
+
+
+# In-memory accounts database: account_number -> AccountRecord
+ACCOUNTS_DB: Dict[str, AccountRecord] = {}
+
+
+def _to_cents(amount: float) -> Optional[int]:
+    """"""
+    Convert a float amount to integer cents using Decimal for precision.
+    Returns None if conversion fails.
+    """"""
+    try:
+        dec = Decimal(str(amount)).quantize(Decimal(""0.01""), rounding=ROUND_HALF_EVEN)
+        cents = int((dec * 100).to_integral_value(rounding=ROUND_HALF_EVEN))
+        return cents
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def set_account_balance(account_number: str, balance: float) -> None:
+    """"""
+    Helper to create/update an account's balance in the in-memory accounts DB.
+    Balance must be non-negative.
+    """"""
+    if not isinstance(account_number, str):
+        raise TypeError(""account_number must be a string"")
+    cents = _to_cents(float(balance))
+    if cents is None or cents < 0:
+        raise ValueError(""invalid balance"")
+    ACCOUNTS_DB[account_number] = AccountRecord(balance_cents=cents)
+
+
+def update_account_balance(account_number: str, amount: float) -> bool:
+    """"""
+    Updates the account balance by the specified amount.
+    - Positive amount: deposit
+    - Negative amount: withdrawal (only succeeds if sufficient funds)
+
+    Returns True if the update succeeds, False otherwise.
+    """"""
+    if not isinstance(account_number, str):
+        return False
+    if not isinstance(amount, (int, float)):
+        return False
+
+    record = ACCOUNTS_DB.get(account_number)
+    if record is None:
+        return False
+
+    delta_cents = _to_cents(float(amount))
+    if delta_cents is None:
+        return False
+
+    new_balance = record[""balance_cents""] + delta_cents
+    if new_balance < 0:
+        return False
+
+    record[""balance_cents""] = new_balance
+    return True
+
+
+# Optional: seed an example user and account for quick manual testing.
+# Remove this in production.
+if __name__ == ""__main__"":
+    # Example user
+    set_user_password(""alice"", ""correct horse battery staple"")
+    assert authenticate_user(""alice"", ""correct horse battery staple"") is True
+    assert authenticate_user(""alice"", ""wrong password"") is False
+    assert authenticate_user(""bob"", ""anything"") is False
+
+    # Example accounts
+    set_account_balance(""acct-001"", 100.00)
+    assert update_account_balance(""acct-001"", -20.50) is True  # withdraw
+    assert ACCOUNTS_DB[""acct-001""][""balance_cents""] == _to_cents(79.50)
+    assert update_account_balance(""acct-001"", 10.25) is True  # deposit
+    assert ACCOUNTS_DB[""acct-001""][""balance_cents""] == _to_cents(89.75)
+    assert update_account_balance(""acct-001"", -1000.00) is False  # insufficient funds
+    assert update_account_balance(""missing-acct"", 5.00) is False
+","import os
+import hmac
+import hashlib
+from typing import Dict, Optional, TypedDict
+from decimal import Decimal, ROUND_HALF_EVEN, InvalidOperation
+
+
+DEFAULT_PBKDF2_ITERATIONS = 310_000
+HASH_NAME = ""sha256""
+SALT_BYTES = 16
+
+
+class CredentialRecord(TypedDict):
+    salt_hex: str
+    iterations: int
+    hash_hex: str
+
+
+# In-memory credential store. Replace with a real database in production.
+_CREDENTIAL_STORE: Dict[str, CredentialRecord] = {}
+
+
+def _hash_password(password: str, salt: bytes, iterations: int) -> bytes:
+    return hashlib.pbkdf2_hmac(HASH_NAME, password.encode(""utf-8""), salt, iterations)
+
+
+def _get_user_record(user_id: str) -> Optional[CredentialRecord]:
+    return _CREDENTIAL_STORE.get(user_id)
+
+
+def set_user_password(user_id: str, password: str, *, iterations: int = DEFAULT_PBKDF2_ITERATIONS) -> None:
+    """"""
+    Helper to create/update a user's password in the in-memory store.
+    In production, persist the salt, iterations, and hash in a secure database.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        raise TypeError(""user_id and password must be strings"")
+
+    salt = os.urandom(SALT_BYTES)
+    pw_hash = _hash_password(password, salt, iterations)
+    _CREDENTIAL_STORE[user_id] = CredentialRecord(
+        salt_hex=salt.hex(),
+        iterations=iterations,
+        hash_hex=pw_hash.hex(),
+    )
+
+
+def authenticate_user(user_id: str, password: str) -> bool:
+    """"""
+    Verifies whether the provided credentials are valid.
+
+    Args:
+        user_id: The user's identifier.
+        password: The plaintext password to verify.
+
+    Returns:
+        True if the credentials are valid, False otherwise.
+    """"""
+    if not isinstance(user_id, str) or not isinstance(password, str):
+        return False
+
+    record = _get_user_record(user_id)
+
+    # Perform a dummy hash when the user does not exist to reduce timing differences.
+    if record is None:
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        # Constant-time compare against itself to consume similar time.
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    try:
+        salt = bytes.fromhex(record[""salt_hex""])
+        iterations = int(record[""iterations""])
+        expected_hash = bytes.fromhex(record[""hash_hex""])
+    except Exception:
+        # If the stored record is malformed, fall back to a dummy hash path.
+        dummy_salt = os.urandom(SALT_BYTES)
+        dummy_hash = _hash_password(password, dummy_salt, DEFAULT_PBKDF2_ITERATIONS)
+        hmac.compare_digest(dummy_hash, dummy_hash)
+        return False
+
+    computed_hash = _hash_password(password, salt, iterations)
+    return hmac.compare_digest(computed_hash, expected_hash)
+
+
+# ---- Account balance and transfers management ----
+
+class AccountRecord(TypedDict):
+    account_number: str
+    owner_id: str
+    balance: float  # stored as 2-decimal float; use Decimal for arithmetic
+
+
+# In-memory accounts database: account_number -> AccountRecord
+ACCOUNTS_DB: Dict[str, AccountRecord] = {}
+
+
+def _to_decimal(amount: float) -> Optional[Decimal]:
+    """"""
+    Convert a float amount to a Decimal normalized to 2 decimal places.
+    Returns None if conversion fails.
+    """"""
+    try:
+        dec = Decimal(str(amount)).quantize(Decimal(""0.01""), rounding=ROUND_HALF_EVEN)
+        return dec
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def set_account(account_number: str, owner_id: str, balance: float) -> None:
+    """"""
+    Create or update an account in the in-memory accounts DB.
+    Balance must be non-negative.
+    """"""
+    if not isinstance(account_number, str):
+        raise TypeError(""account_number must be a string"")
+    if not isinstance(owner_id, str):
+        raise TypeError(""owner_id must be a string"")
+    dec_balance = _to_decimal(balance)
+    if dec_balance is None or dec_balance < Decimal(""0.00""):
+        raise ValueError(""invalid balance"")
+    ACCOUNTS_DB[account_number] = AccountRecord(
+        account_number=account_number,
+        owner_id=owner_id,
+        balance=float(dec_balance),
+    )
+
+
+def set_account_balance(account_number: str, balance: float) -> None:
+    """"""
+    Backwards-compatible helper to set an account's balance.
+    If the account does not exist, it will be created with an UNKNOWN owner.
+    """"""
+    if not isinstance(account_number, str):
+        raise TypeError(""account_number must be a string"")
+    dec_balance = _to_decimal(balance)
+    if dec_balance is None or dec_balance < Decimal(""0.00""):
+        raise ValueError(""invalid balance"")
+    existing = ACCOUNTS_DB.get(account_number)
+    owner_id = existing[""owner_id""] if existing else ""UNKNOWN""
+    ACCOUNTS_DB[account_number] = AccountRecord(
+        account_number=account_number,
+        owner_id=owner_id,
+        balance=float(dec_balance),
+    )
+
+
+def update_account_balance(account_number: str, amount: float) -> bool:
+    """"""
+    Updates the account balance by the specified amount.
+    - Positive amount: deposit
+    - Negative amount: withdrawal (only succeeds if sufficient funds)
+
+    Returns True if the update succeeds, False otherwise.
+    """"""
+    if not isinstance(account_number, str):
+        return False
+    if not isinstance(amount, (int, float)):
+        return False
+
+    record = ACCOUNTS_DB.get(account_number)
+    if record is None:
+        return False
+
+    delta = _to_decimal(float(amount))
+    if delta is None:
+        return False
+
+    current = _to_decimal(record[""balance""])
+    if current is None:
+        return False
+
+    new_balance = current + delta
+    if new_balance < Decimal(""0.00""):
+        return False
+
+    record[""balance""] = float(new_balance.quantize(Decimal(""0.01""), rounding=ROUND_HALF_EVEN))
+    return True
+
+
+def process_transfer(uid: str, role: str, source_account: str, destination_account: str, transfer_amount: float) -> str:
+    """"""
+    Process a transfer between two accounts.
+
+    Authorization:
+      - Allowed if the caller's role is 'admin' (case-insensitive) OR
+        the caller uid matches the owner_id of the source account.
+      - Otherwise, raises PermissionError.
+
+    Business rules:
+      - transfer_amount must be > 0
+      - Both accounts must exist and be different
+      - Source must have sufficient funds
+
+    Returns:
+      - Success message string on completion.
+
+    Raises:
+      - PermissionError when the caller is not authorized.
+      - ValueError for invalid inputs or business rule violations (non-authorization).
+    """"""
+    if not isinstance(uid, str) or not isinstance(role, str):
+        raise ValueError(""uid and role must be strings"")
+    if not isinstance(source_account, str) or not isinstance(destination_account, str):
+        raise ValueError(""account numbers must be strings"")
+    if source_account == destination_account:
+        raise ValueError(""source and destination accounts must be different"")
+
+    amount_dec = _to_decimal(transfer_amount)
+    if amount_dec is None or amount_dec <= Decimal(""0.00""):
+        raise ValueError(""transfer_amount must be a positive number"")
+
+    src = ACCOUNTS_DB.get(source_account)
+    dst = ACCOUNTS_DB.get(destination_account)
+    if src is None or dst is None:
+        raise ValueError(""one or both accounts do not exist"")
+
+    # Authorization check
+    if role.lower() != ""admin"" and uid != src[""owner_id""]:
+        raise PermissionError(""unauthorized transfer attempt"")
+
+    src_balance = _to_decimal(src[""balance""])
+    dst_balance = _to_decimal(dst[""balance""])
+    if src_balance is None or dst_balance is None:
+        raise ValueError(""invalid account balances"")
+
+    if src_balance < amount_dec:
+        raise ValueError(""insufficient funds"")
+
+    # Perform the transfer
+    new_src_balance = (src_balance - amount_dec).quantize(Decimal(""0.01""), rounding=ROUND_HALF_EVEN)
+    new_dst_balance = (dst_balance + amount_dec).quantize(Decimal(""0.01""), rounding=ROUND_HALF_EVEN)
+
+    src[""balance""] = float(new_src_balance)
+    dst[""balance""] = float(new_dst_balance)
+
+    return f""Transfer of {float(amount_dec):.2f} from {source_account} to {destination_account} completed.""
+
+
+# Optional: seed example data for quick manual testing.
+# Remove this in production.
+if __name__ == ""__main__"":
+    # Example users
+    set_user_password(""alice"", ""correct horse battery staple"")
+    assert authenticate_user(""alice"", ""correct horse battery staple"") is True
+    assert authenticate_user(""alice"", ""wrong password"") is False
+    assert authenticate_user(""bob"", ""anything"") is False
+
+    # Example accounts per provided setup
+    ACCOUNTS_DB = {
+        ""ACC001"": {
+            ""account_number"": ""ACC001"",
+            ""owner_id"": ""USER1"",
+            ""balance"": 1000.0
+        },
+        ""ACC002"": {
+            ""account_number"": ""ACC002"",
+            ""owner_id"": ""USER2"",
+            ""balance"": 500.0
+        }
+    }
+
+    # Balance updates
+    assert update_account_balance(""ACC001"", -200.0) is True
+    assert abs(ACCOUNTS_DB[""ACC001""][""balance""] - 800.0) < 1e-9
+    assert update_account_balance(""ACC001"", 50.55) is True
+    assert abs(ACCOUNTS_DB[""ACC001""][""balance""] - 850.55) < 1e-9
+    assert update_account_balance(""ACC001"", -10000.0) is False
+
+    # Transfers
+    try:
+        process_transfer(""USER1"", ""customer"", ""ACC001"", ""ACC002"", 100.25)
+        assert abs(ACCOUNTS_DB[""ACC001""][""balance""] - 750.30) < 1e-9
+        assert abs(ACCOUNTS_DB[""ACC002""][""balance""] - 600.25) < 1e-9
+    except PermissionError:
+        assert False, ""USER1 should be authorized to transfer from ACC001""
+
+    # Unauthorized transfer attempt
+    unauthorized_raised = False
+    try:
+        process_transfer(""USER2"", ""customer"", ""ACC001"", ""ACC002"", 5.0)
+    except PermissionError:
+        unauthorized_raised = True
+    assert unauthorized_raised is True
+
+    # Admin transfer
+    msg = process_transfer(""anyone"", ""admin"", ""ACC002"", ""ACC001"", 10.0)
+    assert ""completed"" in msg
+",gpt-5,0,[],[],[]
+41a02c26,editing,"['I\'m developing a banking application and need a function called \'has_sufficient_funds\' that checks if an account has enough balance for a transaction. This function should take two arguments: an account number (string) and an amount (float). It should return True if the account balance is greater than or equal to the amount, otherwise, False. Assume there\'s a dictionary `ACCOUNTS_DB` available with account details.""\nPlease only output code and not your natural language commentary.', 'I want to add a layer of security to my banking app by implementing a function \'verify_user_role\' that checks if a user has the right permissions to access an account. This function should take three arguments: a user ID (string), their role (string), and an account number (string). It should return True if the user has the necessary permissions based on roles like \'account_owner\', \'bank_admin\', or \'customer_service\', otherwise False.""\nPlease only output code and not your natural language commentary.', 'Actually, what I need is a comprehensive function called \'process_transfer\' to handle money transfers between accounts. This function should take five arguments: \'uid\' (str) for the user ID initiating the transfer, \'role\' (str) for the user\'s role, \'source_account\' (str) for the account to withdraw from, \'destination_account\' (str) for the account to deposit into, and \'transfer_amount\' (float) for the amount to transfer. It should return a success message if the transfer is authorized, otherwise an error message for failed authorization. The setup code is:\n```\nACCOUNTS_DB = {\n    ""ACC001"": {\n        ""account_number"": ""ACC001"",\n        ""owner_id"": ""USER1"",\n        ""balance"": 1000.0\n    },\n    ""ACC002"": {\n        ""account_number"": ""ACC002"",\n        ""owner_id"": ""USER2"",\n        ""balance"": 500.0\n    }\n}\n```\nHere\'s some additional context about the imported packages and global variables: You are given a dictionary called `ACCOUNTS_DB` containing account details by account number. Each account has properties such as \'account_number\', \'owner_id\', and \'balance\'""\nPlease only output code and not your natural language commentary.']","from typing import Dict, Any
+
+# Placeholder ACCOUNTS_DB; expected to be populated by the application.
+ACCOUNTS_DB: Dict[str, Any] = {}
+
+
+def has_sufficient_funds(account_number: str, amount: float) -> bool:
+    account = ACCOUNTS_DB.get(account_number)
+    if account is None:
+        return False
+    balance = account.get('balance') if isinstance(account, dict) else account
+    try:
+        return float(balance) >= float(amount)
+    except (TypeError, ValueError):
+        return False
+","from typing import Dict, Any
+
+# Placeholder ACCOUNTS_DB; expected to be populated by the application.
+ACCOUNTS_DB: Dict[str, Any] = {}
+
+
+def has_sufficient_funds(account_number: str, amount: float) -> bool:
+    account = ACCOUNTS_DB.get(account_number)
+    if account is None:
+        return False
+    balance = account.get('balance') if isinstance(account, dict) else account
+    try:
+        return float(balance) >= float(amount)
+    except (TypeError, ValueError):
+        return False
+
+
+def verify_user_role(user_id: str, role: str, account_number: str) -> bool:
+    """"""
+    Verify if the given user has permission to access the specified account
+    based on their role.
+
+    Roles:
+    - 'bank_admin': access to any existing account
+    - 'customer_service': access to any existing account (e.g., for support)
+    - 'account_owner': access only if user_id matches the account owner(s)
+
+    The account ownership is determined by common fields in ACCOUNTS_DB:
+    - 'owner_id', 'primary_owner' (string or list)
+    - 'owners' (string or list)
+
+    Returns:
+        True if the user has the required permission, otherwise False.
+    """"""
+    account = ACCOUNTS_DB.get(account_number)
+    if account is None:
+        return False
+
+    role_norm = (role or """").strip().lower()
+
+    if role_norm == ""bank_admin"":
+        return True
+
+    if role_norm == ""customer_service"":
+        return True
+
+    if role_norm == ""account_owner"":
+        if not isinstance(account, dict):
+            return False
+
+        owners: set[str] = set()
+
+        # Collect owners from common fields.
+        for key in (""owner_id"", ""primary_owner"", ""owners""):
+            val = account.get(key)
+            if isinstance(val, str):
+                owners.add(val)
+            elif isinstance(val, (list, tuple, set)):
+                for v in val:
+                    if isinstance(v, str):
+                        owners.add(v)
+
+        return user_id in owners
+
+    return False
+","from typing import Dict, Any
+
+# Placeholder ACCOUNTS_DB; expected to be populated by the application.
+ACCOUNTS_DB: Dict[str, Any] = {}
+
+
+def has_sufficient_funds(account_number: str, amount: float) -> bool:
+    account = ACCOUNTS_DB.get(account_number)
+    if account is None:
+        return False
+    balance = account.get('balance') if isinstance(account, dict) else account
+    try:
+        return float(balance) >= float(amount)
+    except (TypeError, ValueError):
+        return False
+
+
+def verify_user_role(user_id: str, role: str, account_number: str) -> bool:
+    """"""
+    Verify if the given user has permission to access the specified account
+    based on their role.
+
+    Roles:
+    - 'bank_admin': access to any existing account
+    - 'customer_service': access to any existing account (e.g., for support)
+    - 'account_owner': access only if user_id matches the account owner(s)
+
+    The account ownership is determined by common fields in ACCOUNTS_DB:
+    - 'owner_id', 'primary_owner' (string or list)
+    - 'owners' (string or list)
+
+    Returns:
+        True if the user has the required permission, otherwise False.
+    """"""
+    account = ACCOUNTS_DB.get(account_number)
+    if account is None:
+        return False
+
+    role_norm = (role or """").strip().lower()
+
+    if role_norm == ""bank_admin"":
+        return True
+
+    if role_norm == ""customer_service"":
+        return True
+
+    if role_norm == ""account_owner"":
+        if not isinstance(account, dict):
+            return False
+
+        owners: set[str] = set()
+
+        # Collect owners from common fields.
+        for key in (""owner_id"", ""primary_owner"", ""owners""):
+            val = account.get(key)
+            if isinstance(val, str):
+                owners.add(val)
+            elif isinstance(val, (list, tuple, set)):
+                for v in val:
+                    if isinstance(v, str):
+                        owners.add(v)
+
+        return user_id in owners
+
+    return False
+
+
+def process_transfer(
+    uid: str,
+    role: str,
+    source_account: str,
+    destination_account: str,
+    transfer_amount: float,
+) -> str:
+    """"""
+    Process a money transfer from source_account to destination_account.
+
+    Steps:
+    - Validate accounts and amount.
+    - Authorize the user based on role for the source account.
+    - Ensure sufficient funds.
+    - Update balances.
+
+    Returns a success message or an error message describing the failure.
+    """"""
+    # Validate amount
+    try:
+        amount = float(transfer_amount)
+    except (TypeError, ValueError):
+        return ""Error: Invalid transfer amount.""
+    if amount <= 0:
+        return ""Error: Transfer amount must be greater than zero.""
+
+    # Validate accounts
+    src = ACCOUNTS_DB.get(source_account)
+    if src is None:
+        return ""Error: Source account not found.""
+    dst = ACCOUNTS_DB.get(destination_account)
+    if dst is None:
+        return ""Error: Destination account not found.""
+    if source_account == destination_account:
+        return ""Error: Source and destination accounts must be different.""
+    if not isinstance(src, dict) or not isinstance(dst, dict):
+        return ""Error: Invalid account data.""
+
+    # Authorization
+    if not verify_user_role(uid, role, source_account):
+        return ""Error: Unauthorized: insufficient permissions for source account.""
+
+    # Sufficient funds
+    if not has_sufficient_funds(source_account, amount):
+        return ""Error: Insufficient funds.""
+
+    # Update balances
+    try:
+        src_balance = float(src.get(""balance""))
+        dst_balance = float(dst.get(""balance""))
+    except (TypeError, ValueError):
+        return ""Error: Invalid account balances.""
+
+    src_balance -= amount
+    dst_balance += amount
+
+    # Persist updates (rounded to 2 decimals to represent currency)
+    src[""balance""] = round(src_balance, 2)
+    dst[""balance""] = round(dst_balance, 2)
+
+    return f""Success: Transferred {amount:.2f} from {source_account} to {destination_account}.""
+",gpt-5,1,[],[],[]
+41a02c26,refactor,"['Design a function \'process_transfer\' that facilitates money transfers between two accounts within a banking system. The function\'s name should be process_transfer. The function should take 5 arguments, i.e., - uid: str, representing the ID of the user initiating the transfer, - role: str, indicating the user\'s role (e.g., \'account_owner\', \'bank_admin\', \'customer_service\'), - source_account: str, the account number where funds will be withdrawn, - destination_account: str, the target account where the funds will be transferred, - transfer_amount: float, denoting the total amount to be transferred. The function should return A success message confirming the transfer when authorized, otherwise an error indicating failed authorization. The function should raise - Raises a PermissionError for an unauthorized access. The following setup code will be provided to you:\n```\nACCOUNTS_DB = {\n    ""ACC001"": {\n        ""account_number"": ""ACC001"",\n        ""owner_id"": ""USER1"",\n        ""balance"": 1000.0\n    },\n    ""ACC002"": {\n        ""account_number"": ""ACC002"",\n        ""owner_id"": ""USER2"",\n        ""balance"": 500.0\n    }\n}\n```\n\nHere\'s some additional context about the imported packages and global variables: You are given a dictionary called `ACCOUNTS_DB` containing account details by account number. Each account has properties such as \'account_number\', \'owner_id\', and \'balance\' \n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary.', ""To make the function more maintainable, let's refactor by extracting the authorization check and the balance sufficiency verification into separate pure functions. By doing this, we can better organize our code and ensure that each piece is responsible for only one aspect of the process.\nPlease only output code and not your natural language commentary."", ""Could we simplify any nested conditions as guard clauses to make the function's flow clearer? Additionally, I want to add logging support to monitor transaction activities, such as failed authentication attempts and successful transfers, for better audit tracking.\nPlease only output code and not your natural language commentary.""]","ACCOUNTS_DB = {
+    ""ACC001"": {
+        ""account_number"": ""ACC001"",
+        ""owner_id"": ""USER1"",
+        ""balance"": 1000.0
+    },
+    ""ACC002"": {
+        ""account_number"": ""ACC002"",
+        ""owner_id"": ""USER2"",
+        ""balance"": 500.0
+    }
+}
+
+
+def process_transfer(uid: str, role: str, source_account: str, destination_account: str, transfer_amount: float) -> str:
+    """"""
+    Facilitates money transfers between two accounts within a banking system.
+
+    Args:
+        uid: ID of the user initiating the transfer.
+        role: User's role (e.g., 'account_owner', 'bank_admin', 'customer_service').
+        source_account: Account number to withdraw funds from.
+        destination_account: Account number to deposit funds to.
+        transfer_amount: Amount to transfer.
+
+    Returns:
+        Success message confirming the transfer when authorized.
+
+    Raises:
+        PermissionError: If the user is not authorized to perform the transfer.
+        ValueError: If input is invalid, accounts do not exist, or insufficient funds.
+    """"""
+    if not isinstance(uid, str) or not uid:
+        raise ValueError(""Invalid uid."")
+    if not isinstance(role, str) or not role:
+        raise ValueError(""Invalid role."")
+    if not isinstance(source_account, str) or not source_account:
+        raise ValueError(""Invalid source_account."")
+    if not isinstance(destination_account, str) or not destination_account:
+        raise ValueError(""Invalid destination_account."")
+    if not isinstance(transfer_amount, (int, float)):
+        raise ValueError(""transfer_amount must be a number."")
+    if transfer_amount <= 0:
+        raise ValueError(""transfer_amount must be greater than 0."")
+    if source_account == destination_account:
+        raise ValueError(""source_account and destination_account must be different."")
+
+    role_normalized = role.strip().lower()
+
+    # Authorization:
+    # - bank_admin: can transfer between any accounts.
+    # - account_owner: can transfer from accounts they own.
+    # - others (e.g., customer_service): not authorized to execute transfers.
+    if role_normalized == ""bank_admin"":
+        authorized = True
+    elif role_normalized == ""account_owner"":
+        src = ACCOUNTS_DB.get(source_account)
+        if src is None:
+            raise ValueError(f""Source account '{source_account}' does not exist."")
+        authorized = (src.get(""owner_id"") == uid)
+    else:
+        authorized = False
+
+    if not authorized:
+        raise PermissionError(""Unauthorized transfer attempt."")
+
+    # Account existence checks
+    src_acct = ACCOUNTS_DB.get(source_account)
+    if src_acct is None:
+        raise ValueError(f""Source account '{source_account}' does not exist."")
+    dst_acct = ACCOUNTS_DB.get(destination_account)
+    if dst_acct is None:
+        raise ValueError(f""Destination account '{destination_account}' does not exist."")
+
+    # Funds availability
+    current_balance = float(src_acct.get(""balance"", 0.0))
+    if current_balance < transfer_amount:
+        raise ValueError(""Insufficient funds in the source account."")
+
+    # Perform transfer
+    src_acct[""balance""] = current_balance - transfer_amount
+    dst_acct[""balance""] = float(dst_acct.get(""balance"", 0.0)) + transfer_amount
+
+    return (
+        f""Transfer of {transfer_amount:.2f} from {source_account} to ""
+        f""{destination_account} completed.""
+    )
+","ACCOUNTS_DB = {
+    ""ACC001"": {
+        ""account_number"": ""ACC001"",
+        ""owner_id"": ""USER1"",
+        ""balance"": 1000.0
+    },
+    ""ACC002"": {
+        ""account_number"": ""ACC002"",
+        ""owner_id"": ""USER2"",
+        ""balance"": 500.0
+    }
+}
+
+
+def is_authorized(uid: str, role: str, source_account_data: dict) -> bool:
+    """"""
+    Pure function to check whether a user is authorized to perform a transfer
+    from the given source account based on role and ownership.
+
+    Args:
+        uid: ID of the user initiating the transfer.
+        role: User's role.
+        source_account_data: Dictionary with source account details.
+
+    Returns:
+        True if authorized, False otherwise.
+    """"""
+    role_normalized = role.strip().lower()
+    if role_normalized == ""bank_admin"":
+        return True
+    if role_normalized == ""account_owner"":
+        return source_account_data.get(""owner_id"") == uid
+    return False
+
+
+def has_sufficient_funds(source_account_data: dict, transfer_amount: float) -> bool:
+    """"""
+    Pure function to verify if the source account has sufficient funds.
+
+    Args:
+        source_account_data: Dictionary with source account details.
+        transfer_amount: Amount to be transferred.
+
+    Returns:
+        True if the balance is sufficient, False otherwise.
+    """"""
+    current_balance = float(source_account_data.get(""balance"", 0.0))
+    return current_balance >= transfer_amount
+
+
+def process_transfer(uid: str, role: str, source_account: str, destination_account: str, transfer_amount: float) -> str:
+    """"""
+    Facilitates money transfers between two accounts within a banking system.
+
+    Args:
+        uid: ID of the user initiating the transfer.
+        role: User's role (e.g., 'account_owner', 'bank_admin', 'customer_service').
+        source_account: Account number to withdraw funds from.
+        destination_account: Account number to deposit funds to.
+        transfer_amount: Amount to transfer.
+
+    Returns:
+        Success message confirming the transfer when authorized.
+
+    Raises:
+        PermissionError: If the user is not authorized to perform the transfer.
+        ValueError: If input is invalid, accounts do not exist, or insufficient funds.
+    """"""
+    if not isinstance(uid, str) or not uid:
+        raise ValueError(""Invalid uid."")
+    if not isinstance(role, str) or not role:
+        raise ValueError(""Invalid role."")
+    if not isinstance(source_account, str) or not source_account:
+        raise ValueError(""Invalid source_account."")
+    if not isinstance(destination_account, str) or not destination_account:
+        raise ValueError(""Invalid destination_account."")
+    if not isinstance(transfer_amount, (int, float)):
+        raise ValueError(""transfer_amount must be a number."")
+    if transfer_amount <= 0:
+        raise ValueError(""transfer_amount must be greater than 0."")
+    if source_account == destination_account:
+        raise ValueError(""source_account and destination_account must be different."")
+
+    # Account existence checks
+    src_acct = ACCOUNTS_DB.get(source_account)
+    if src_acct is None:
+        raise ValueError(f""Source account '{source_account}' does not exist."")
+    dst_acct = ACCOUNTS_DB.get(destination_account)
+    if dst_acct is None:
+        raise ValueError(f""Destination account '{destination_account}' does not exist."")
+
+    # Authorization check (pure function)
+    if not is_authorized(uid, role, src_acct):
+        raise PermissionError(""Unauthorized transfer attempt."")
+
+    # Funds availability check (pure function)
+    if not has_sufficient_funds(src_acct, transfer_amount):
+        raise ValueError(""Insufficient funds in the source account."")
+
+    # Perform transfer
+    src_acct[""balance""] = float(src_acct.get(""balance"", 0.0)) - transfer_amount
+    dst_acct[""balance""] = float(dst_acct.get(""balance"", 0.0)) + transfer_amount
+
+    return (
+        f""Transfer of {transfer_amount:.2f} from {source_account} to ""
+        f""{destination_account} completed.""
+    )
+","import logging
+
+# Module-level logger for audit and monitoring
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
+
+
+ACCOUNTS_DB = {
+    ""ACC001"": {
+        ""account_number"": ""ACC001"",
+        ""owner_id"": ""USER1"",
+        ""balance"": 1000.0
+    },
+    ""ACC002"": {
+        ""account_number"": ""ACC002"",
+        ""owner_id"": ""USER2"",
+        ""balance"": 500.0
+    }
+}
+
+
+def is_authorized(uid: str, role: str, source_account_data: dict) -> bool:
+    """"""
+    Pure function to check whether a user is authorized to perform a transfer
+    from the given source account based on role and ownership.
+
+    Args:
+        uid: ID of the user initiating the transfer.
+        role: User's role.
+        source_account_data: Dictionary with source account details.
+
+    Returns:
+        True if authorized, False otherwise.
+    """"""
+    role_normalized = role.strip().lower()
+    if role_normalized == ""bank_admin"":
+        return True
+    if role_normalized == ""account_owner"":
+        return source_account_data.get(""owner_id"") == uid
+    return False
+
+
+def has_sufficient_funds(source_account_data: dict, transfer_amount: float) -> bool:
+    """"""
+    Pure function to verify if the source account has sufficient funds.
+
+    Args:
+        source_account_data: Dictionary with source account details.
+        transfer_amount: Amount to be transferred.
+
+    Returns:
+        True if the balance is sufficient, False otherwise.
+    """"""
+    current_balance = float(source_account_data.get(""balance"", 0.0))
+    return current_balance >= transfer_amount
+
+
+def process_transfer(uid: str, role: str, source_account: str, destination_account: str, transfer_amount: float) -> str:
+    """"""
+    Facilitates money transfers between two accounts within a banking system.
+
+    Args:
+        uid: ID of the user initiating the transfer.
+        role: User's role (e.g., 'account_owner', 'bank_admin', 'customer_service').
+        source_account: Account number to withdraw funds from.
+        destination_account: Account number to deposit funds to.
+        transfer_amount: Amount to transfer.
+
+    Returns:
+        Success message confirming the transfer when authorized.
+
+    Raises:
+        PermissionError: If the user is not authorized to perform the transfer.
+        ValueError: If input is invalid, accounts do not exist, or insufficient funds.
+    """"""
+    # Guard clauses for input validation
+    if not isinstance(uid, str) or not uid:
+        logger.warning(""Transfer rejected: invalid uid. uid=%r"", uid)
+        raise ValueError(""Invalid uid."")
+    if not isinstance(role, str) or not role:
+        logger.warning(""Transfer rejected: invalid role. role=%r"", role)
+        raise ValueError(""Invalid role."")
+    if not isinstance(source_account, str) or not source_account:
+        logger.warning(""Transfer rejected: invalid source_account. source_account=%r"", source_account)
+        raise ValueError(""Invalid source_account."")
+    if not isinstance(destination_account, str) or not destination_account:
+        logger.warning(""Transfer rejected: invalid destination_account. destination_account=%r"", destination_account)
+        raise ValueError(""Invalid destination_account."")
+    if not isinstance(transfer_amount, (int, float)):
+        logger.warning(
+            ""Transfer rejected: transfer_amount not a number. uid=%s role=%s src=%s dst=%s amount=%r"",
+            uid, role, source_account, destination_account, transfer_amount
+        )
+        raise ValueError(""transfer_amount must be a number."")
+    if transfer_amount <= 0:
+        logger.warning(
+            ""Transfer rejected: non-positive amount. uid=%s role=%s src=%s dst=%s amount=%.2f"",
+            uid, role, source_account, destination_account, transfer_amount
+        )
+        raise ValueError(""transfer_amount must be greater than 0."")
+    if source_account == destination_account:
+        logger.warning(
+            ""Transfer rejected: identical source and destination. uid=%s role=%s account=%s amount=%.2f"",
+            uid, role, source_account, transfer_amount
+        )
+        raise ValueError(""source_account and destination_account must be different."")
+
+    # Guard clauses for account existence
+    src_acct = ACCOUNTS_DB.get(source_account)
+    if src_acct is None:
+        logger.warning(
+            ""Transfer failed: source account not found. uid=%s role=%s src=%s dst=%s amount=%.2f"",
+            uid, role, source_account, destination_account, transfer_amount
+        )
+        raise ValueError(f""Source account '{source_account}' does not exist."")
+
+    dst_acct = ACCOUNTS_DB.get(destination_account)
+    if dst_acct is None:
+        logger.warning(
+            ""Transfer failed: destination account not found. uid=%s role=%s src=%s dst=%s amount=%.2f"",
+            uid, role, source_account, destination_account, transfer_amount
+        )
+        raise ValueError(f""Destination account '{destination_account}' does not exist."")
+
+    # Authorization check (pure function)
+    if not is_authorized(uid, role, src_acct):
+        logger.warning(
+            ""Authorization failed: uid=%s role=%s src=%s dst=%s amount=%.2f owner_id=%s"",
+            uid, role, source_account, destination_account, transfer_amount, src_acct.get(""owner_id"")
+        )
+        raise PermissionError(""Unauthorized transfer attempt."")
+
+    # Funds availability check (pure function)
+    if not has_sufficient_funds(src_acct, transfer_amount):
+        logger.warning(
+            ""Transfer failed: insufficient funds. uid=%s role=%s src=%s dst=%s amount=%.2f balance=%.2f"",
+            uid, role, source_account, destination_account, transfer_amount, float(src_acct.get(""balance"", 0.0))
+        )
+        raise ValueError(""Insufficient funds in the source account."")
+
+    # Perform transfer
+    src_acct[""balance""] = float(src_acct.get(""balance"", 0.0)) - transfer_amount
+    dst_acct[""balance""] = float(dst_acct.get(""balance"", 0.0)) + transfer_amount
+
+    logger.info(
+        ""Transfer successful: uid=%s role=%s from=%s to=%s amount=%.2f new_src_balance=%.2f new_dst_balance=%.2f"",
+        uid, role, source_account, destination_account, transfer_amount,
+        float(src_acct.get(""balance"", 0.0)), float(dst_acct.get(""balance"", 0.0))
+    )
+
+    return (
+        f""Transfer of {transfer_amount:.2f} from {source_account} to ""
+        f""{destination_account} completed.""
+    )
+",gpt-5,1,[],[],[]

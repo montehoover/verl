@@ -1,0 +1,60 @@
+ACCOUNTS_DB = {
+    "ACC001": {
+        "account_number": "ACC001",
+        "owner_id": "USER1",
+        "balance": 1000.0
+    },
+    "ACC002": {
+        "account_number": "ACC002",
+        "owner_id": "USER2",
+        "balance": 500.0
+    }
+}
+
+def move_funds(u_id: str, u_role: str, source_account: str, destination_account: str, money: float) -> str:
+    """
+    Manages transferring money between accounts in a financial system.
+    
+    Args:
+        u_id: The identifier of the individual requesting the transfer
+        u_role: The role held by the individual (e.g., 'account_owner', 'bank_admin', 'customer_service')
+        source_account: The account from which the funds will be removed
+        destination_account: The account where the funds will be deposited
+        money: The monetary value to transfer
+    
+    Returns:
+        A success message if the transfer is authorized and completed, otherwise an error if authorization fails
+    
+    Raises:
+        PermissionError: For unauthorized access
+    """
+    # Check if accounts exist
+    if source_account not in ACCOUNTS_DB:
+        return f"Error: Source account {source_account} not found"
+    if destination_account not in ACCOUNTS_DB:
+        return f"Error: Destination account {destination_account} not found"
+    
+    # Get account details
+    source_acc = ACCOUNTS_DB[source_account]
+    dest_acc = ACCOUNTS_DB[destination_account]
+    
+    # Authorization check
+    if u_role == "account_owner":
+        # Account owners can only transfer from their own accounts
+        if source_acc["owner_id"] != u_id:
+            raise PermissionError(f"User {u_id} is not authorized to transfer from account {source_account}")
+    elif u_role in ["bank_admin", "customer_service"]:
+        # Bank admins and customer service can transfer from any account
+        pass
+    else:
+        raise PermissionError(f"Role {u_role} is not authorized to perform transfers")
+    
+    # Check if sufficient funds
+    if source_acc["balance"] < money:
+        return f"Error: Insufficient funds in account {source_account}"
+    
+    # Perform the transfer
+    source_acc["balance"] -= money
+    dest_acc["balance"] += money
+    
+    return f"Successfully transferred ${money} from {source_account} to {destination_account}"

@@ -1,0 +1,278 @@
+import ast
+import builtins
+
+# Safe subset of builtins allowed during execution
+_SAFE_BUILTINS = {
+    name: getattr(builtins, name)
+    for name in {
+        "abs",
+        "all",
+        "any",
+        "bool",
+        "dict",
+        "enumerate",
+        "float",
+        "int",
+        "len",
+        "list",
+        "max",
+        "min",
+        "pow",
+        "range",
+        "round",
+        "set",
+        "sorted",
+        "str",
+        "sum",
+        "tuple",
+        "zip",
+        "map",
+        "filter",
+        "print",
+    }
+}
+
+# Names that must never be referenced or called
+_FORBIDDEN_NAMES = {
+    # Dangerous I/O and process functions
+    "open",
+    "input",
+    "help",
+    "compile",
+    "exec",
+    "eval",
+    "__import__",
+    "globals",
+    "locals",
+    "vars",
+    "dir",
+    "getattr",
+    "setattr",
+    "delattr",
+    "memoryview",
+    "type",
+    "super",
+    "object",
+    "classmethod",
+    "staticmethod",
+    "property",
+    # Misc dunder or meta-ish names (guarded also by dunder rule)
+    "__builtins__",
+    "__loader__",
+    "__spec__",
+    "__package__",
+    "__name__",
+    "__file__",
+}
+
+
+class _SafeValidator(ast.NodeVisitor):
+    """
+    Validates that the AST contains only a conservative subset of nodes and
+    operations considered benign for a teaching environment.
+    - Disallows imports, attribute access, loops, with/try/raise, async, class definitions, etc.
+    - Allows expressions, assignments to names, function definitions and returns.
+    - Allows calls only to a whitelist of safe builtins or to functions defined in the same snippet.
+    """
+
+    def __init__(self, safe_callable_names):
+        super().__init__()
+        self.safe_callable_names = set(safe_callable_names)
+        self.user_defined_functions = set()
+
+    # ---- Explicitly forbidden constructs ----
+    def visit_Import(self, node):  # type: ignore[override]
+        raise ValueError("Import statements are not allowed.")
+
+    def visit_ImportFrom(self, node):  # type: ignore[override]
+        raise ValueError("Import statements are not allowed.")
+
+    def visit_Attribute(self, node):  # type: ignore[override]
+        # Disallow attribute access entirely (prevents obj.__class__ tricks, os.system, etc.)
+        raise ValueError("Attribute access is not allowed.")
+
+    def visit_With(self, node):  # type: ignore[override]
+        raise ValueError("With statements are not allowed.")
+
+    def visit_AsyncWith(self, node):  # type: ignore[override]
+        raise ValueError("Async constructs are not allowed.")
+
+    def visit_For(self, node):  # type: ignore[override]
+        raise ValueError("Loops are not allowed.")
+
+    def visit_AsyncFor(self, node):  # type: ignore[override]
+        raise ValueError("Async constructs are not allowed.")
+
+    def visit_While(self, node):  # type: ignore[override]
+        raise ValueError("Loops are not allowed.")
+
+    def visit_Try(self, node):  # type: ignore[override]
+        raise ValueError("Try/except/finally are not allowed.")
+
+    def visit_Raise(self, node):  # type: ignore[override]
+        raise ValueError("Raising exceptions is not allowed.")
+
+    def visit_ClassDef(self, node):  # type: ignore[override]
+        raise ValueError("Class definitions are not allowed.")
+
+    def visit_Delete(self, node):  # type: ignore[override]
+        raise ValueError("Delete statements are not allowed.")
+
+    def visit_Global(self, node):  # type: ignore[override]
+        raise ValueError("Global statements are not allowed.")
+
+    def visit_Nonlocal(self, node):  # type: ignore[override]
+        raise ValueError("Nonlocal statements are not allowed.")
+
+    def visit_Await(self, node):  # type: ignore[override]
+        raise ValueError("Async constructs are not allowed.")
+
+    def visit_Yield(self, node):  # type: ignore[override]
+        raise ValueError("Generators are not allowed.")
+
+    def visit_YieldFrom(self, node):  # type: ignore[override]
+        raise ValueError("Generators are not allowed.")
+
+    def visit_ListComp(self, node):  # type: ignore[override]
+        raise ValueError("Comprehensions are not allowed.")
+
+    def visit_SetComp(self, node):  # type: ignore[override]
+        raise ValueError("Comprehensions are not allowed.")
+
+    def visit_DictComp(self, node):  # type: ignore[override]
+        raise ValueError("Comprehensions are not allowed.")
+
+    def visit_GeneratorExp(self, node):  # type: ignore[override]
+        raise ValueError("Comprehensions are not allowed.")
+
+    # ---- Allowed constructs with checks ----
+    def visit_FunctionDef(self, node):  # type: ignore[override]
+        if node.name.startswith("__"):
+            raise ValueError("Defining dunder-named functions is not allowed.")
+        # Record user-defined function as allowed callable
+        self.user_defined_functions.add(node.name)
+        # Validate defaults and body
+        for default in node.args.defaults:
+            self.visit(default)
+        for default in getattr(node.args, "kw_defaults", []) or []:
+            if default is not None:
+                self.visit(default)
+        for stmt in node.body:
+            self.visit(stmt)
+
+    def visit_Return(self, node):  # type: ignore[override]
+        if node.value is not None:
+            self.visit(node.value)
+
+    def visit_Assign(self, node):  # type: ignore[override]
+        # Only allow assignment to simple names (no attributes, no tuple unpacking, etc.)
+        for target in node.targets:
+            if not isinstance(target, ast.Name):
+                raise ValueError("Assignments are only allowed to simple names.")
+            self._check_name(target)
+        self.visit(node.value)
+
+    def visit_AugAssign(self, node):  # type: ignore[override]
+        if not isinstance(node.target, ast.Name):
+            raise ValueError("Augmented assignments are only allowed on simple names.")
+        self._check_name(node.target)
+        self.visit(node.value)
+
+    def visit_Expr(self, node):  # type: ignore[override]
+        if node.value is not None:
+            self.visit(node.value)
+
+    def visit_Call(self, node):  # type: ignore[override]
+        # Allow calls only to:
+        # - safe builtins by name
+        # - user-defined functions (by name)
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            if func_name in _FORBIDDEN_NAMES or func_name.startswith("__"):
+                raise ValueError(f"Calling '{func_name}' is not allowed.")
+            if func_name not in self.safe_callable_names and func_name not in self.user_defined_functions:
+                raise ValueError(f"Calling '{func_name}' is not allowed.")
+        else:
+            # No lambda via call by attribute, subscripts, etc.
+            raise ValueError("Only direct calls by name are allowed.")
+        # Validate args/kwargs
+        for arg in node.args:
+            self.visit(arg)
+        for kw in node.keywords:
+            if kw.value is not None:
+                self.visit(kw.value)
+
+    def visit_Name(self, node):  # type: ignore[override]
+        self._check_name(node)
+
+    def _check_name(self, node: ast.Name):
+        ident = node.id
+        if ident in _FORBIDDEN_NAMES or ident.startswith("__"):
+            raise ValueError(f"Use of name '{ident}' is not allowed.")
+
+    # Literals and operators are allowed and recursively visited through generic_visit
+    # We rely on explicit bans above; otherwise defer to generic traversal.
+
+
+def execute_python_code(snippet_code: str):
+    """
+    Executes benign Python code safely.
+
+    Parameters:
+    - snippet_code: str, the user-provided Python code to be executed.
+
+    Returns:
+    - The resulting value if the code ends with an expression (its value is returned).
+      Otherwise returns None.
+
+    Raises:
+    - ValueError if the snippet attempts forbidden operations or contains invalid code.
+    """
+    if not isinstance(snippet_code, str):
+        raise ValueError("Code must be a string.")
+
+    try:
+        # Parse to AST
+        tree = ast.parse(snippet_code, mode="exec")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid code: {e}") from None
+
+    # Validate AST against safety policy
+    validator = _SafeValidator(safe_callable_names=set(_SAFE_BUILTINS.keys()))
+    try:
+        validator.visit(tree)
+    except ValueError as e:
+        # Propagate validation errors as ValueError (as required)
+        raise
+    except Exception as e:
+        # Any unexpected validation issue
+        raise ValueError(f"Invalid or forbidden code: {e}") from None
+
+    # Prepare restricted execution environment
+    exec_globals = {"__builtins__": _SAFE_BUILTINS.copy()}
+    exec_locals = {}
+
+    # Determine if the last statement is an expression to return its value
+    body = list(tree.body)
+    try:
+        if body and isinstance(body[-1], ast.Expr):
+            # Execute all but the last expression
+            prefix_body = body[:-1]
+            if prefix_body:
+                prefix_module = ast.Module(body=prefix_body, type_ignores=[])
+                compiled_prefix = compile(prefix_module, "<snippet>", "exec")
+                exec(compiled_prefix, exec_globals, exec_locals)
+
+            # Evaluate the final expression and return its value
+            last_expr = ast.Expression(body=body[-1].value)
+            compiled_expr = compile(last_expr, "<snippet>", "eval")
+            result = eval(compiled_expr, exec_globals, exec_locals)
+            return result
+        else:
+            # Execute entire snippet; no resulting value to return
+            compiled_full = compile(tree, "<snippet>", "exec")
+            exec(compiled_full, exec_globals, exec_locals)
+            return None
+    except Exception as e:
+        # Convert runtime errors to ValueError as per spec
+        raise ValueError(f"Error during execution: {e}") from None

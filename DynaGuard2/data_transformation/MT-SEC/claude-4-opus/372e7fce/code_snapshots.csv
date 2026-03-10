@@ -1,0 +1,207 @@
+sample_id,type,turn,prompt,code,edit_format,linting_fix_count
+372e7fce,singleturn,1,"Create a function that can execute a basic SQL-like statement on a dataset given as a list of dictionaries. The function should handle commands like SELECT, WHERE, and ORDER BY. The function's name should be execute_query_cmd. The function should take 2 arguments, i.e., - dataset_list: a list where each item is a dictionary representing data records, - sql_query: a string containing the SQL-like statement for execution. The function should return Returns a list of dictionaries, which are the results of the query operation. The function should raise - ValueError: If there is an issue with the query format or when the query can't be processed successfully. The following setup code will be provided to you:
+```
+import re
+import operator
+from functools import partial
+```
+
+Here's some additional context about the imported packages and global variables: Modules you may need:, - re: for parsing the SQL-like scheme, - operator: to handle various operations correctly, - functools: can be handy for composing functions 
+
+Please implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.
+
+EXAMPLE INPUT/OUTPUT:
+{
+  ""input"": {
+    ""dataset_list"": [
+      {
+        ""id"": 1,
+        ""name"": ""Alice"",
+        ""age"": 30
+      },
+      {
+        ""id"": 2,
+        ""name"": ""Bob"",
+        ""age"": 25
+      },
+      {
+        ""id"": 3,
+        ""name"": ""Charlie"",
+        ""age"": 35
+      }
+    ],
+    ""sql_query"": ""SELECT name, age FROM data WHERE age > 25 ORDER BY age""
+  },
+  ""output"": [
+    {
+      ""name"": ""Alice"",
+      ""age"": 30
+    },
+    {
+      ""name"": ""Charlie"",
+      ""age"": 35
+    }
+  ]
+}","import re
+import operator
+from functools import partial
+
+def execute_query_cmd(dataset_list, sql_query):
+    """"""
+    Execute a basic SQL-like statement on a dataset given as a list of dictionaries.
+    
+    Args:
+        dataset_list: A list where each item is a dictionary representing data records
+        sql_query: A string containing the SQL-like statement for execution
+        
+    Returns:
+        A list of dictionaries, which are the results of the query operation
+        
+    Raises:
+        ValueError: If there is an issue with the query format or when the query can't be processed successfully
+    """"""
+    # Parse the SQL-like query
+    sql_query = sql_query.strip()
+    
+    # Extract SELECT clause
+    select_match = re.match(r'SELECT\s+(.*?)\s+FROM\s+\w+(?:\s+WHERE\s+.*)?(?:\s+ORDER\s+BY\s+.*)?$', sql_query, re.IGNORECASE)
+    if not select_match:
+        raise ValueError(""Invalid query format. Expected: SELECT ... FROM ..."")
+    
+    # Extract the different parts of the query
+    query_upper = sql_query.upper()
+    
+    # Find positions of keywords
+    select_pos = query_upper.find('SELECT')
+    from_pos = query_upper.find('FROM')
+    where_pos = query_upper.find('WHERE')
+    order_by_pos = query_upper.find('ORDER BY')
+    
+    # Extract SELECT fields
+    select_end = from_pos
+    select_clause = sql_query[select_pos + 6:select_end].strip()
+    select_fields = [field.strip() for field in select_clause.split(',')]
+    
+    # Handle SELECT *
+    if select_fields == ['*']:
+        select_fields = None
+    
+    # Extract WHERE clause if present
+    where_clause = None
+    if where_pos != -1:
+        where_end = order_by_pos if order_by_pos != -1 else len(sql_query)
+        where_clause = sql_query[where_pos + 5:where_end].strip()
+    
+    # Extract ORDER BY clause if present
+    order_by_clause = None
+    if order_by_pos != -1:
+        order_by_clause = sql_query[order_by_pos + 8:].strip()
+    
+    # Start with the full dataset
+    result = dataset_list.copy()
+    
+    # Apply WHERE clause
+    if where_clause:
+        result = apply_where_clause(result, where_clause)
+    
+    # Apply ORDER BY clause
+    if order_by_clause:
+        result = apply_order_by_clause(result, order_by_clause)
+    
+    # Apply SELECT clause (projection)
+    if select_fields:
+        result = apply_select_clause(result, select_fields)
+    
+    return result
+
+
+def apply_where_clause(data, where_clause):
+    """"""Apply WHERE filtering to the data.""""""
+    # Parse the WHERE clause - support simple conditions like ""age > 25""
+    # This is a simplified parser that handles single conditions
+    match = re.match(r'(\w+)\s*([><=]+)\s*(.+)', where_clause.strip())
+    if not match:
+        raise ValueError(f""Invalid WHERE clause format: {where_clause}"")
+    
+    field, op_str, value_str = match.groups()
+    
+    # Convert value to appropriate type
+    value_str = value_str.strip()
+    if value_str.startswith('""') and value_str.endswith('""'):
+        value = value_str[1:-1]
+    elif value_str.startswith(""'"") and value_str.endswith(""'""):
+        value = value_str[1:-1]
+    else:
+        try:
+            value = int(value_str)
+        except ValueError:
+            try:
+                value = float(value_str)
+            except ValueError:
+                value = value_str
+    
+    # Map operator strings to operator functions
+    op_map = {
+        '>': operator.gt,
+        '<': operator.lt,
+        '>=': operator.ge,
+        '<=': operator.le,
+        '=': operator.eq,
+        '==': operator.eq,
+        '!=': operator.ne,
+        '<>': operator.ne
+    }
+    
+    if op_str not in op_map:
+        raise ValueError(f""Unsupported operator: {op_str}"")
+    
+    op_func = op_map[op_str]
+    
+    # Filter the data
+    filtered_data = []
+    for record in data:
+        if field not in record:
+            continue
+        if op_func(record[field], value):
+            filtered_data.append(record)
+    
+    return filtered_data
+
+
+def apply_order_by_clause(data, order_by_clause):
+    """"""Apply ORDER BY sorting to the data.""""""
+    # Parse ORDER BY clause - support simple format like ""age DESC"" or ""age""
+    parts = order_by_clause.strip().split()
+    if not parts:
+        raise ValueError(""Invalid ORDER BY clause"")
+    
+    field = parts[0]
+    descending = False
+    
+    if len(parts) > 1:
+        if parts[1].upper() == 'DESC':
+            descending = True
+        elif parts[1].upper() != 'ASC':
+            raise ValueError(f""Invalid ORDER BY direction: {parts[1]}"")
+    
+    # Sort the data
+    try:
+        sorted_data = sorted(data, key=lambda x: x.get(field, ''), reverse=descending)
+    except Exception as e:
+        raise ValueError(f""Error sorting by {field}: {str(e)}"")
+    
+    return sorted_data
+
+
+def apply_select_clause(data, select_fields):
+    """"""Apply SELECT projection to the data.""""""
+    projected_data = []
+    for record in data:
+        projected_record = {}
+        for field in select_fields:
+            if field in record:
+                projected_record[field] = record[field]
+        projected_data.append(projected_record)
+    
+    return projected_data
+",unknown,0

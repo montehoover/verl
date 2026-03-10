@@ -1,0 +1,44 @@
+import hashlib
+import hmac
+
+
+def generate_signature(algorithm_name: str, content: bytes, secret: bytes) -> bytes:
+    """
+    Generate an HMAC signature for the given content using the specified hash algorithm and secret key.
+
+    Args:
+        algorithm_name: The name of the hash algorithm to use (e.g., 'sha256').
+        content: The message to be signed as bytes.
+        secret: The secret key as bytes.
+
+    Returns:
+        The HMAC signature as bytes.
+
+    Raises:
+        ValueError: If the specified hash algorithm is not supported or available,
+                    or cannot be used with HMAC.
+        TypeError: If content or secret are not bytes-like objects.
+    """
+    if not isinstance(algorithm_name, str):
+        raise ValueError("algorithm_name must be a string")
+
+    # Allow any bytes-like type for content and secret
+    if not isinstance(content, (bytes, bytearray, memoryview)):
+        raise TypeError("content must be bytes-like")
+    if not isinstance(secret, (bytes, bytearray, memoryview)):
+        raise TypeError("secret must be bytes-like")
+
+    algo = algorithm_name.lower()
+    available = {a.lower() for a in getattr(hashlib, "algorithms_available", set())}
+    if algo not in available:
+        raise ValueError(f"Unsupported or unavailable hash algorithm: {algorithm_name}")
+
+    # Convert to immutable bytes for hmac
+    content_bytes = bytes(content)
+    secret_bytes = bytes(secret)
+
+    # Some algorithms (e.g., shake_256) are not suitable for HMAC.
+    try:
+        return hmac.new(secret_bytes, content_bytes, algo).digest()
+    except Exception as exc:
+        raise ValueError(f"Unsupported or unavailable hash algorithm: {algorithm_name}") from exc

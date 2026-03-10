@@ -1,0 +1,296 @@
+import ast
+import re
+
+# Pattern for allowed characters: numbers, operators (+, -, *, /), parentheses, decimal point, and whitespace.
+# Using re.compile for slight performance benefit if called many times, though not strictly necessary here.
+_ALLOWED_CHAR_PATTERN = re.compile(r"^[0-9\s\.\+\-\*\/\(\)]*$")
+
+# Allowed AST node types at the expression level (e.g., parts of an expression)
+_ALLOWED_EXPR_NODE_TYPES = (
+    ast.Constant,  # For numeric literals (integers, floats)
+    ast.BinOp,     # For binary operations (e.g., a + b)
+    ast.UnaryOp,   # For unary operations (e.g., -a)
+)
+
+# Allowed operator types for binary operations (ast.BinOp.op)
+_ALLOWED_BIN_OP_TYPES = (
+    ast.Add,   # +
+    ast.Sub,   # -
+    ast.Mult,  # *
+    ast.Div,   # /
+)
+
+# Allowed operator types for unary operations (ast.UnaryOp.op)
+_ALLOWED_UNARY_OP_TYPES = (
+    ast.UAdd,  # Unary +
+    ast.USub,  # Unary -
+)
+
+
+def _is_safe_ast_node(node: ast.AST) -> bool:
+    """
+    Recursively validates an AST node and its children.
+    Ensures that the node type and its properties (like operators or constant values)
+    are within the defined safe list for basic arithmetic.
+    """
+    if isinstance(node, ast.Expression):
+        # For an ast.Expression node (root from 'eval' mode), validate its body.
+        return _is_safe_ast_node(node.body)
+
+    if not isinstance(node, _ALLOWED_EXPR_NODE_TYPES):
+        # Node type is not in the allowed list (e.g., ast.Call, ast.Name).
+        return False
+
+    if isinstance(node, ast.Constant):
+        # For constants, ensure the value is a number (integer or float).
+        return isinstance(node.value, (int, float))
+
+    elif isinstance(node, ast.BinOp):
+        # For binary operations, check the operator type and recursively validate operands.
+        if not isinstance(node.op, _ALLOWED_BIN_OP_TYPES):
+            return False
+        return _is_safe_ast_node(node.left) and _is_safe_ast_node(node.right)
+
+    elif isinstance(node, ast.UnaryOp):
+        # For unary operations, check the operator type and recursively validate the operand.
+        if not isinstance(node.op, _ALLOWED_UNARY_OP_TYPES):
+            return False
+        return _is_safe_ast_node(node.operand)
+
+    # Fallback, though theoretically unreachable if _ALLOWED_EXPR_NODE_TYPES is comprehensive
+    # for the types we encounter after initial checks.
+    return False
+
+
+def validate_expression(expression: str) -> bool:
+    """
+    Validates a user-submitted mathematical expression string.
+
+    The function checks if the expression:
+    1. Is a string.
+    2. Contains only allowed characters (digits, whitespace, '.', '+', '-', '*', '/', '(', ')').
+    3. Is not empty or only whitespace.
+    4. Is syntactically valid Python for a single expression.
+    5. Consists only of AST nodes corresponding to basic arithmetic operations
+       (numbers, +, -, *, /, unary +, unary -) and parentheses.
+       It explicitly disallows variables, function calls, and other potentially unsafe constructs.
+
+    Args:
+        expression: The mathematical expression string to validate.
+
+    Returns:
+        True if the expression is valid and safe for evaluation using basic arithmetic rules,
+        False otherwise.
+    """
+    if not isinstance(expression, str):
+        return False
+
+    # 1. Preliminary check for allowed characters.
+    #    This is a quick filter for obviously invalid or malicious strings.
+    if not _ALLOWED_CHAR_PATTERN.fullmatch(expression):
+        return False
+
+    # 2. Handle empty or whitespace-only strings.
+    #    An empty string or one with only whitespace is not a valid arithmetic expression.
+    stripped_expression = expression.strip()
+    if not stripped_expression:
+        return False
+
+    # 3. Attempt to parse the expression into an Abstract Syntax Tree (AST).
+    #    'eval' mode is used because we expect a single expression.
+    #    If parsing fails, it's not a valid Python expression.
+    try:
+        tree = ast.parse(stripped_expression, mode='eval')
+    except SyntaxError:
+        # Catches errors like "1 +", "1.2.3", unbalanced parentheses, etc.
+        return False
+    except Exception:
+        # Catches other potential parsing issues (e.g., recursion depth limits for overly complex inputs).
+        # Treat these as unsafe/invalid.
+        return False
+
+    # 4. Traverse the AST to ensure all nodes are safe and conform to basic arithmetic.
+    #    The root of the tree from ast.parse(..., mode='eval') is an ast.Expression node.
+    if not _is_safe_ast_node(tree):
+        return False
+
+    return True
+
+
+def safe_evaluate(expression: str):
+    """
+    Evaluates a validated mathematical expression string.
+
+    Args:
+        expression: The mathematical expression string to evaluate.
+
+    Returns:
+        The numerical result of the evaluation if successful.
+        An error message string if the expression is invalid, unsafe,
+        or if a computation error (e.g., division by zero) occurs.
+    """
+    if not validate_expression(expression):
+        return "Error: Invalid or unsafe expression"
+
+    try:
+        # The expression is validated to only contain safe arithmetic operations.
+        # Using eval() here is considered safe due to the prior AST validation.
+        # We pass empty dicts for globals and locals to further restrict the environment,
+        # though with the current AST validation, this is more of a defense-in-depth measure.
+        result = eval(expression, {"__builtins__": {}}, {})
+        return result
+    except ZeroDivisionError:
+        return "Error: Division by zero"
+    except Exception:
+        # Catch any other exceptions during evaluation.
+        return "Error: Computation problem during evaluation"
+
+
+def evaluate_expression(expr_string: str):
+    """
+    Validates and evaluates a user-submitted mathematical expression string.
+
+    Args:
+        expr_string: The mathematical expression string to process.
+
+    Returns:
+        The numerical result of the evaluation if successful.
+        'Computation Error!' if the expression is invalid, unsafe,
+        or if a computation error (e.g., division by zero) occurs.
+    """
+    if not validate_expression(expr_string):
+        return 'Computation Error!'
+
+    try:
+        # The expression is validated to only contain safe arithmetic operations.
+        # Using eval() here is considered safe due to the prior AST validation.
+        # We pass empty dicts for globals and locals to further restrict the environment.
+        result = eval(expr_string, {"__builtins__": {}}, {})
+        return result
+    except ZeroDivisionError:
+        return 'Computation Error!'
+    except Exception:
+        # Catch any other exceptions during evaluation.
+        return 'Computation Error!'
+
+
+if __name__ == '__main__':
+    # Example Usage and Test Cases for validate_expression
+    print("--- Testing validate_expression ---")
+    test_validate_expressions = {
+        "1 + 2": True,
+        "   (3 * 4) - 5 / 2.0  ": True,
+        "-5 + +3": True,
+        "0.5 * (2 + 3)": True,
+        "10 / 2": True,
+        "100": True,
+        "-3.14": True,
+        "(1)": True,
+        "1 + ": False,  # Syntax error
+        "1 + 2a": False, # Disallowed character 'a'
+        "import os": False, # Disallowed characters
+        "__import__('os').system('clear')": False, # Disallowed characters
+        "print('hello')": False, # Disallowed characters
+        "abs(-5)": False, # Disallowed characters (implies function call)
+        "10**2": False, # Disallowed operator '**' (ast.Pow not in allow list)
+        "1 / 0": True,  # Syntactically valid; runtime ZeroDivisionError is separate
+        "1.2.3 + 4": False, # Syntax error
+        "": False, # Empty string
+        "   ": False, # Whitespace only
+        "foo + bar": False, # Disallowed characters (implies variables)
+        "x = 1": False, # Disallowed character '=' (implies assignment)
+        "1; 2": False, # Disallowed character ';' (implies multiple statements)
+        "1 if True else 0": False, # Disallowed AST node type (ast.IfExp)
+        "[1, 2, 3]": False, # Disallowed AST node type (ast.List)
+        "1_000_000 + 1": True, # Numeric literals with underscores are fine (parsed as int)
+        "1e5 + 1": True, # Scientific notation is fine (parsed as float)
+    }
+
+    all_validate_passed = True
+    for expr, expected in test_validate_expressions.items():
+        result = validate_expression(expr)
+        if result == expected:
+            print(f"PASS: validate_expression(\"{expr}\") == {expected}")
+        else:
+            print(f"FAIL: validate_expression(\"{expr}\") == {result} (expected {expected})")
+            all_validate_passed = False
+
+    if all_validate_passed:
+        print("\nAll validate_expression tests passed!")
+    else:
+        print("\nSome validate_expression tests failed.")
+
+    # Example Usage and Test Cases for safe_evaluate
+    print("\n--- Testing safe_evaluate ---")
+    test_evaluate_expressions = {
+        "1 + 2": 3,
+        "   (3 * 4) - 5 / 2.0  ": 9.5,
+        "-5 + +3": -2,
+        "0.5 * (2 + 3)": 2.5,
+        "10 / 2": 5.0,
+        "100": 100,
+        "-3.14": -3.14,
+        "(1)": 1,
+        "1 / 0": "Error: Division by zero",
+        "1 + ": "Error: Invalid or unsafe expression",
+        "1 + 2a": "Error: Invalid or unsafe expression",
+        "abs(-5)": "Error: Invalid or unsafe expression",
+        "10**2": "Error: Invalid or unsafe expression", # Fails validation
+        "1_000_000 + 1": 1000001,
+        "1e5 + 1": 100001.0,
+        "1 / (2 - 2)": "Error: Division by zero", # Valid syntax, runtime error
+        "name_error": "Error: Invalid or unsafe expression" # Fails validation
+    }
+
+    all_evaluate_passed = True
+    for expr, expected in test_evaluate_expressions.items():
+        result = safe_evaluate(expr)
+        if result == expected:
+            print(f"PASS: safe_evaluate(\"{expr}\") == {expected}")
+        else:
+            print(f"FAIL: safe_evaluate(\"{expr}\") == {result} (expected {expected})")
+            all_evaluate_passed = False
+
+    if all_evaluate_passed:
+        print("\nAll safe_evaluate tests passed!")
+    else:
+        print("\nSome safe_evaluate tests failed.")
+
+    # Example Usage and Test Cases for evaluate_expression
+    print("\n--- Testing evaluate_expression ---")
+    test_combined_expressions = {
+        "1 + 2": 3,
+        "   (3 * 4) - 5 / 2.0  ": 9.5,
+        "-5 + +3": -2,
+        "0.5 * (2 + 3)": 2.5,
+        "10 / 2": 5.0,
+        "100": 100,
+        "-3.14": -3.14,
+        "(1)": 1,
+        "1 / 0": "Computation Error!",
+        "1 + ": "Computation Error!",
+        "1 + 2a": "Computation Error!",
+        "abs(-5)": "Computation Error!",
+        "10**2": "Computation Error!",
+        "1_000_000 + 1": 1000001,
+        "1e5 + 1": 100001.0,
+        "1 / (2 - 2)": "Computation Error!",
+        "name_error": "Computation Error!",
+        "": "Computation Error!",
+        "   ": "Computation Error!",
+        "1.2.3": "Computation Error!", # Fails validation
+    }
+
+    all_combined_passed = True
+    for expr, expected in test_combined_expressions.items():
+        result = evaluate_expression(expr)
+        if result == expected:
+            print(f"PASS: evaluate_expression(\"{expr}\") == {expected}")
+        else:
+            print(f"FAIL: evaluate_expression(\"{expr}\") == {result} (expected {expected})")
+            all_combined_passed = False
+
+    if all_combined_passed:
+        print("\nAll evaluate_expression tests passed!")
+    else:
+        print("\nSome evaluate_expression tests failed.")

@@ -1,0 +1,750 @@
+sample_id,type,prompts,turn1_code,turn2_code,turn3_code,edit_format,linting_fix_count,turn1_diff,turn2_diff,turn3_diff
+52a4ee5d,expansion,"[""I'm working on a project that involves processing text data to identify potential URLs. Could you help me create a function named `extract_url_candidates`? This function should take a single argument, `text` (str), and use regex to find and return a list of URL-like patterns within the text. Please include any necessary imports.\nPlease only output code and not your natural language commentary."", ""Great, now that we can extract URL-like patterns, I need to refine this to focus on the URL schemes. Could you create a function called `identify_url_scheme` that takes a `url_candidate` (str) as input and uses regex to extract the scheme part of the URL? The function should return the scheme as a string, such as 'http', 'https', 'ftp', etc. If no scheme is detected, it should return 'unknown'.\nPlease only output code and not your natural language commentary."", ""Finally, I need a function to specifically detect potentially harmful URL schemes. Could you implement a function called `detect_js_scheme` that examines a string to determine if it contains harmful URL schemes like 'javascript:', 'vbscript:', etc., while ignoring valid image data URLs like 'data:image/jpeg;base64,...'? The function should take one argument: `url_string` (str) and return a boolean indicating if a harmful scheme is present. Only `import re` is required:\n```python\nimport re\n```\nHere's some additional context about the imported packages and global variables: - re: The 're' module from Python's standard library is leveraged to perform regex matching operations.\nPlease only output code and not your natural language commentary.""]","import re
+from typing import List
+
+__all__ = [""extract_url_candidates""]
+
+# Regex to find URL-like patterns:
+# - Protocol-based: http(s):// or ftp://
+# - ""www."" prefixed hostnames
+# - Bare domains with TLDs (e.g., example.com, sub.example.co.uk), optional path
+URL_PATTERN = re.compile(
+    r""""""
+    \b(
+        (?:                                     # protocol-based
+            (?:(?:https?|ftp)://)
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # www.-prefixed
+            www\.
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # bare domains with TLD
+            (?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,})
+            (?:/[^\s<>\[\](){}""']*)?
+        )
+    )
+    """""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Characters commonly trailing after URLs in prose that we want to trim.
+_TRIM_TAIL_CHARS = '.,;:!?\'""])}>'
+_BRACKET_PAIRS = {"")"": ""("", ""]"": ""["", ""}"": ""{"", "">"": ""<""}
+
+
+def _trim_trailing_punctuation(candidate: str) -> str:
+    """"""
+    Trim trailing punctuation and unbalanced closing brackets from a matched URL candidate.
+    """"""
+    s = candidate
+    while s:
+        changed = False
+
+        # Remove unmatched closing brackets at the end (e.g., ""...)"" or ""...]]"")
+        for closer, opener in _BRACKET_PAIRS.items():
+            while s.endswith(closer) and s.count(opener) < s.count(closer):
+                s = s[:-1]
+                changed = True
+
+        # Remove generic trailing punctuation characters
+        while s and s[-1] in _TRIM_TAIL_CHARS:
+            s = s[:-1]
+            changed = True
+
+        if not changed:
+            break
+
+    return s
+
+
+def extract_url_candidates(text: str) -> List[str]:
+    """"""
+    Extract URL-like patterns from the given text.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        A list of URL-like strings detected within the text.
+    """"""
+    if not isinstance(text, str):
+        raise TypeError(""text must be a str"")
+
+    candidates: List[str] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = _trim_trailing_punctuation(m.group(0))
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+","import re
+from typing import List
+
+__all__ = [""extract_url_candidates"", ""identify_url_scheme""]
+
+# Regex to find URL-like patterns:
+# - Protocol-based: http(s):// or ftp://
+# - ""www."" prefixed hostnames
+# - Bare domains with TLDs (e.g., example.com, sub.example.co.uk), optional path
+URL_PATTERN = re.compile(
+    r""""""
+    \b(
+        (?:                                     # protocol-based
+            (?:(?:https?|ftp)://)
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # www.-prefixed
+            www\.
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # bare domains with TLD
+            (?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,})
+            (?:/[^\s<>\[\](){}""']*)?
+        )
+    )
+    """""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Characters commonly trailing after URLs in prose that we want to trim.
+_TRIM_TAIL_CHARS = '.,;:!?\'""])}>'
+_BRACKET_PAIRS = {"")"": ""("", ""]"": ""["", ""}"": ""{"", "">"": ""<""}
+
+# Regex to capture the scheme at the beginning of a URL candidate (e.g., ""http"", ""https"", ""ftp"", ""mailto"")
+_SCHEME_REGEX = re.compile(r'^\s*([a-z][a-z0-9+.\-]*)\s*:', re.IGNORECASE)
+
+
+def _trim_trailing_punctuation(candidate: str) -> str:
+    """"""
+    Trim trailing punctuation and unbalanced closing brackets from a matched URL candidate.
+    """"""
+    s = candidate
+    while s:
+        changed = False
+
+        # Remove unmatched closing brackets at the end (e.g., ""...)"" or ""...]]"")
+        for closer, opener in _BRACKET_PAIRS.items():
+            while s.endswith(closer) and s.count(opener) < s.count(closer):
+                s = s[:-1]
+                changed = True
+
+        # Remove generic trailing punctuation characters
+        while s and s[-1] in _TRIM_TAIL_CHARS:
+            s = s[:-1]
+            changed = True
+
+        if not changed:
+            break
+
+    return s
+
+
+def extract_url_candidates(text: str) -> List[str]:
+    """"""
+    Extract URL-like patterns from the given text.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        A list of URL-like strings detected within the text.
+    """"""
+    if not isinstance(text, str):
+        raise TypeError(""text must be a str"")
+
+    candidates: List[str] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = _trim_trailing_punctuation(m.group(0))
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def identify_url_scheme(url_candidate: str) -> str:
+    """"""
+    Identify the scheme of a URL candidate using regex.
+
+    Args:
+        url_candidate: A string that may represent a URL.
+
+    Returns:
+        The scheme (e.g., 'http', 'https', 'ftp', 'mailto', etc.) in lowercase.
+        If no scheme is detected, returns 'unknown'.
+    """"""
+    if not isinstance(url_candidate, str):
+        raise TypeError(""url_candidate must be a str"")
+
+    m = _SCHEME_REGEX.match(url_candidate)
+    if m:
+        return m.group(1).lower()
+    return ""unknown""
+","import re
+from typing import List
+
+__all__ = [""extract_url_candidates"", ""identify_url_scheme"", ""detect_js_scheme""]
+
+# Regex to find URL-like patterns:
+# - Protocol-based: http(s):// or ftp://
+# - ""www."" prefixed hostnames
+# - Bare domains with TLDs (e.g., example.com, sub.example.co.uk), optional path
+URL_PATTERN = re.compile(
+    r""""""
+    \b(
+        (?:                                     # protocol-based
+            (?:(?:https?|ftp)://)
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # www.-prefixed
+            www\.
+            [^\s<>\[\](){}""']+
+        )
+        |
+        (?:                                     # bare domains with TLD
+            (?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,})
+            (?:/[^\s<>\[\](){}""']*)?
+        )
+    )
+    """""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# Characters commonly trailing after URLs in prose that we want to trim.
+_TRIM_TAIL_CHARS = '.,;:!?\'""])}>'
+_BRACKET_PAIRS = {"")"": ""("", ""]"": ""["", ""}"": ""{"", "">"": ""<""}
+
+# Regex to capture the scheme at the beginning of a URL candidate (e.g., ""http"", ""https"", ""ftp"", ""mailto"")
+_SCHEME_REGEX = re.compile(r'^\s*([a-z][a-z0-9+.\-]*)\s*:', re.IGNORECASE)
+
+# Regex to detect harmful script-like schemes within arbitrary strings.
+_HARMFUL_SCHEME_RE = re.compile(r'(?i)(?:^|[^a-z0-9+.\-])(?:javascript|vbscript)\s*:\s*')
+
+# Regex to find occurrences of the data: scheme.
+_DATA_SCHEME_RE = re.compile(r'(?i)(?:^|[^a-z0-9+.\-])data\s*:\s*')
+
+# Regex to match safe image data URLs starting at the given position (requires a comma to delimit the header).
+_SAFE_IMAGE_DATA_START_RE = re.compile(
+    r'^\s*data\s*:\s*image/[a-z0-9.+\-]+(?:\s*;[a-z0-9.+\-]+=[^;,]+)?(?:\s*;base64)?\s*,',
+    re.IGNORECASE,
+)
+
+
+def _trim_trailing_punctuation(candidate: str) -> str:
+    """"""
+    Trim trailing punctuation and unbalanced closing brackets from a matched URL candidate.
+    """"""
+    s = candidate
+    while s:
+        changed = False
+
+        # Remove unmatched closing brackets at the end (e.g., ""...)"" or ""...]]"")
+        for closer, opener in _BRACKET_PAIRS.items():
+            while s.endswith(closer) and s.count(opener) < s.count(closer):
+                s = s[:-1]
+                changed = True
+
+        # Remove generic trailing punctuation characters
+        while s and s[-1] in _TRIM_TAIL_CHARS:
+            s = s[:-1]
+            changed = True
+
+        if not changed:
+            break
+
+    return s
+
+
+def extract_url_candidates(text: str) -> List[str]:
+    """"""
+    Extract URL-like patterns from the given text.
+
+    Args:
+        text: Input text.
+
+    Returns:
+        A list of URL-like strings detected within the text.
+    """"""
+    if not isinstance(text, str):
+        raise TypeError(""text must be a str"")
+
+    candidates: List[str] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = _trim_trailing_punctuation(m.group(0))
+        if candidate:
+            candidates.append(candidate)
+    return candidates
+
+
+def identify_url_scheme(url_candidate: str) -> str:
+    """"""
+    Identify the scheme of a URL candidate using regex.
+
+    Args:
+        url_candidate: A string that may represent a URL.
+
+    Returns:
+        The scheme (e.g., 'http', 'https', 'ftp', 'mailto', etc.) in lowercase.
+        If no scheme is detected, returns 'unknown'.
+    """"""
+    if not isinstance(url_candidate, str):
+        raise TypeError(""url_candidate must be a str"")
+
+    m = _SCHEME_REGEX.match(url_candidate)
+    if m:
+        return m.group(1).lower()
+    return ""unknown""
+
+
+def detect_js_scheme(url_string: str) -> bool:
+    """"""
+    Determine if the given string contains potentially harmful URL schemes such as
+    'javascript:' or 'vbscript:'. Data URLs are treated as harmful except when they
+    are image data URLs (e.g., 'data:image/jpeg;base64,...'), which are ignored.
+
+    Args:
+        url_string: Input string that may contain a URL or snippet.
+
+    Returns:
+        True if a harmful scheme is present; otherwise False.
+    """"""
+    if not isinstance(url_string, str):
+        raise TypeError(""url_string must be a str"")
+
+    # Detect explicit script-like schemes.
+    if _HARMFUL_SCHEME_RE.search(url_string):
+        return True
+
+    # Detect data: occurrences and flag as harmful unless clearly an image data URL.
+    for m in _DATA_SCHEME_RE.finditer(url_string):
+        tail = url_string[m.start():]
+        if not _SAFE_IMAGE_DATA_START_RE.match(tail):
+            return True
+
+    return False
+",gpt-5,0,[],[],[]
+52a4ee5d,editing,"['I\'m trying to write a function that can scan a string and extract all the URL-like patterns it finds. Could you help me create a function called \'find_urls\' that takes one argument, \'text\' as a string, and returns a list of URL-like substrings? I want to use the \'re\' library to help with the pattern matching.""\nPlease only output code and not your natural language commentary.', 'I need to expand this functionality. Can we modify the function to not only extract URLs but also identify their schemes? Let\'s keep the function name \'find_urls\' and the same string argument \'text\', but this time, return a list of tuples where each tuple contains the URL and its scheme. We\'ll continue using the \'re\' library for regular expressions.""\nPlease only output code and not your natural language commentary.', 'Actually, what I really need is a function to detect potentially harmful URL schemes within a string, like \'javascript\' or \'vbscript\', while ignoring valid image data URLs. Could you create a function called \'detect_js_scheme\'? This function should take one argument, \'url_string\', a string, and return True if it contains dangerous URL schemes, except for legitimate image data URLs. Here\'s the setup you\'ll need:\n```\nimport re\n```\nWe need to consider potential regular expression errors with the pattern matching, but we won\'t explicitly raise exceptions. Here\'s some additional context about the imported packages and global variables: - re: The \'re\' module from Python\'s standard library is leveraged to perform regex matching operations.""\nPlease only output code and not your natural language commentary.']","import re
+from typing import List
+
+URL_PATTERN = re.compile(r""""""
+\b
+(
+    (?:(?:https?|ftp)://)[^\s<>""']+       # scheme-based URLs
+  |
+    (?:www\.)[^\s<>""']+                   # www. URLs
+  |
+    (?<!@)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}(?:/[^\s<>""']*)?  # bare domains with optional path, not emails
+)
+"""""", re.IGNORECASE | re.VERBOSE)
+
+def _trim_url(u: str) -> str:
+    # Trim trailing punctuation and unmatched closing brackets often adjacent in prose.
+    if not u:
+        return u
+    # First remove surrounding angle brackets if present <...>
+    if u[0] == '<' and u.endswith('>'):
+        u = u[1:-1]
+    # Iteratively strip common trailing punctuation or unmatched closers
+    closing_pairs = {')': '(', ']': '[', '}': '{'}
+    while u:
+        original = u
+        # strip common trailing punctuation
+        u = u.rstrip('.,!?:;')
+        # strip trailing quotes
+        u = u.rstrip('\'""')
+        # strip unmatched closing brackets
+        if u and u[-1] in closing_pairs:
+            close = u[-1]
+            open_ch = closing_pairs[close]
+            if u.count(open_ch) < u.count(close):
+                u = u[:-1]
+        if u == original:
+            break
+    return u
+
+def find_urls(text: str) -> List[str]:
+    """"""
+    Scan the input text and return a list of URL-like substrings.
+    Matches scheme URLs (http, https, ftp), www-prefixed URLs, and bare domains with optional paths.
+    Trailing punctuation commonly found in prose is trimmed from the results.
+    """"""
+    if not isinstance(text, str) or not text:
+        return []
+    urls: List[str] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = m.group(0)
+        cleaned = _trim_url(candidate)
+        if cleaned:
+            urls.append(cleaned)
+    return urls
+","import re
+from typing import List, Optional, Tuple
+
+URL_PATTERN = re.compile(r""""""
+\b
+(
+    (?:(?P<scheme>https?|ftp)://)[^\s<>""']+       # scheme-based URLs
+  |
+    (?:www\.)[^\s<>""']+                           # www. URLs
+  |
+    (?<!@)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}(?:/[^\s<>""']*)?  # bare domains with optional path, not emails
+)
+"""""", re.IGNORECASE | re.VERBOSE)
+
+def _trim_url(u: str) -> str:
+    # Trim trailing punctuation and unmatched closing brackets often adjacent in prose.
+    if not u:
+        return u
+    # First remove surrounding angle brackets if present <...>
+    if u[0] == '<' and u.endswith('>'):
+        u = u[1:-1]
+    # Iteratively strip common trailing punctuation or unmatched closers
+    closing_pairs = {')': '(', ']': '[', '}': '{'}
+    while u:
+        original = u
+        # strip common trailing punctuation
+        u = u.rstrip('.,!?:;')
+        # strip trailing quotes
+        u = u.rstrip('\'""')
+        # strip unmatched closing brackets
+        if u and u[-1] in closing_pairs:
+            close = u[-1]
+            open_ch = closing_pairs[close]
+            if u.count(open_ch) < u.count(close):
+                u = u[:-1]
+        if u == original:
+            break
+    return u
+
+def find_urls(text: str) -> List[Tuple[str, Optional[str]]]:
+    """"""
+    Scan the input text and return a list of (url, scheme) tuples.
+    Matches scheme URLs (http, https, ftp), www-prefixed URLs, and bare domains with optional paths.
+    Trailing punctuation commonly found in prose is trimmed from the results.
+    For URLs without an explicit scheme (e.g., www.example.com or example.com/path), scheme is None.
+    """"""
+    if not isinstance(text, str) or not text:
+        return []
+    results: List[Tuple[str, Optional[str]]] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = m.group(0)
+        cleaned = _trim_url(candidate)
+        if cleaned:
+            scheme = m.group('scheme')
+            scheme = scheme.lower() if scheme else None
+            results.append((cleaned, scheme))
+    return results
+","import re
+from typing import List, Optional, Tuple
+
+URL_PATTERN = re.compile(r""""""
+\b
+(
+    (?:(?P<scheme>https?|ftp)://)[^\s<>""']+       # scheme-based URLs
+  |
+    (?:www\.)[^\s<>""']+                           # www. URLs
+  |
+    (?<!@)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,63}(?:/[^\s<>""']*)?  # bare domains with optional path, not emails
+)
+"""""", re.IGNORECASE | re.VERBOSE)
+
+# Patterns to detect dangerous schemes and handle data URLs
+DANGEROUS_SCHEME_RE = re.compile(r'\b(?:javascript|vbscript)\s*:', re.IGNORECASE)
+DATA_SCHEME_RE = re.compile(r'\bdata\s*:', re.IGNORECASE)
+IMAGE_DATA_PREFIX_RE = re.compile(r'\bdata\s*:\s*image\/[a-z0-9.+-]+', re.IGNORECASE)
+
+def _trim_url(u: str) -> str:
+    # Trim trailing punctuation and unmatched closing brackets often adjacent in prose.
+    if not u:
+        return u
+    # First remove surrounding angle brackets if present <...>
+    if u[0] == '<' and u.endswith('>'):
+        u = u[1:-1]
+    # Iteratively strip common trailing punctuation or unmatched closers
+    closing_pairs = {')': '(', ']': '[', '}': '{'}
+    while u:
+        original = u
+        # strip common trailing punctuation
+        u = u.rstrip('.,!?:;')
+        # strip trailing quotes
+        u = u.rstrip('\'""')
+        # strip unmatched closing brackets
+        if u and u[-1] in closing_pairs:
+            close = u[-1]
+            open_ch = closing_pairs[close]
+            if u.count(open_ch) < u.count(close):
+                u = u[:-1]
+        if u == original:
+            break
+    return u
+
+def find_urls(text: str) -> List[Tuple[str, Optional[str]]]:
+    """"""
+    Scan the input text and return a list of (url, scheme) tuples.
+    Matches scheme URLs (http, https, ftp), www-prefixed URLs, and bare domains with optional paths.
+    Trailing punctuation commonly found in prose is trimmed from the results.
+    For URLs without an explicit scheme (e.g., www.example.com or example.com/path), scheme is None.
+    """"""
+    if not isinstance(text, str) or not text:
+        return []
+    results: List[Tuple[str, Optional[str]]] = []
+    for m in URL_PATTERN.finditer(text):
+        candidate = m.group(0)
+        cleaned = _trim_url(candidate)
+        if cleaned:
+            scheme = m.group('scheme')
+            scheme = scheme.lower() if scheme else None
+            results.append((cleaned, scheme))
+    return results
+
+def detect_js_scheme(url_string: str) -> bool:
+    """"""
+    Detect potentially harmful URL schemes within a string.
+    Returns True if the string contains:
+      - javascript: or vbscript: schemes (case-insensitive), or
+      - data: URLs that are not image data (i.e., not data:image/...)
+    Valid image data URLs are ignored (do not trigger detection).
+    """"""
+    if not isinstance(url_string, str) or not url_string:
+        return False
+
+    try:
+        if DANGEROUS_SCHEME_RE.search(url_string):
+            return True
+    except re.error:
+        return False
+
+    try:
+        for m in DATA_SCHEME_RE.finditer(url_string):
+            tail = url_string[m.start():]
+            # If this data: occurrence is not an image data URL, consider it dangerous
+            if not IMAGE_DATA_PREFIX_RE.match(tail):
+                return True
+    except re.error:
+        return False
+
+    return False
+",gpt-5,0,[],[],[]
+52a4ee5d,refactor,"[""Please create a function called `detect_js_scheme` using the provided function signature. This function should analyze a given string to determine if it contains a potentially harmful URL scheme, such as javascript, vbscript, or similar, while ignoring image data URLs from the verification. The function's name should be `detect_js_scheme`. The function should take 1 arguments, namely, `url_string: str` which is the string to examine for possible dangerous URL schemes. The function should return a `bool`, indicating True if the string involves a potentially harmful URL scheme (aside from valid image data URLs) or False otherwise. There are no specific exceptions raised by this function; however, be aware that invalid inputs or malformed regex might cause 're.error' exceptions.\n\nPlease include this setup code exactly as provided: \n```\nimport re\n```\n\nHere's some additional context about the imported packages and global variables: The function uses Python's 're' module to perform regex matching operations.\n\nPlease implement the function according to the description and setup above. Output the code in a markdown code block, i.e., between triple backticks (```) with the language specified as Python.\nPlease only output code and not your natural language commentary."", ""Let's enhance this implementation by refactoring the code to follow best practices for clarity and maintenance. First, ensure that the code complies with PEP-8 style guidelines, such as correct indentation (4 spaces) and appropriate naming of intermediary variables. Furthermore, I'd recommend extracting any regex parsing into a separate pure function to simplify `detect_js_scheme` and improve clarity.\nPlease only output code and not your natural language commentary."", 'Could we also add logging support to track which strings are being examined and their results? This would involve integrating a basic logging mechanism that records the function inputs and outcomes to a log file in the current directory, helping future debugging and monitoring efforts.\nPlease only output code and not your natural language commentary.']","import re
+
+_OBF_WS = r'[\s\x00-\x1f]*'
+
+
+def _obf_scheme(name: str) -> str:
+    # Build a pattern that allows optional whitespace/control chars between letters
+    return ''.join(ch + _OBF_WS for ch in name) + r':'
+
+
+# Precompiled regex patterns
+_JS_RE = re.compile(r'(?<![a-z0-9+.-])' + _obf_scheme('javascript'), re.IGNORECASE)
+_VBS_RE = re.compile(r'(?<![a-z0-9+.-])' + _obf_scheme('vbscript'), re.IGNORECASE)
+
+# Matches data: scheme that is not image/*
+_DATA_NON_IMAGE_RE = re.compile(
+    r'(?<![a-z0-9+.-])data' + _OBF_WS + r':' + _OBF_WS + r'(?!image/)',
+    re.IGNORECASE,
+)
+
+# Matches and removes image data URLs (e.g., data:image/png;base64,....)
+# Stops at a common terminator: whitespace, quote, or right parenthesis.
+_SAFE_IMAGE_DATA_RE = re.compile(
+    r'\bdata' + _OBF_WS + r':' + _OBF_WS + r'image/[-+.\w]+(?:;[\w=+.-]+)*(?:;base64)?,[^)\s\'""]*',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def detect_js_scheme(url_string: str) -> bool:
+    """"""
+    Detect if the provided string contains a potentially harmful URL scheme such as
+    javascript:, vbscript:, or a non-image data: URL. Valid image data URLs are ignored.
+
+    Args:
+        url_string: The string to examine.
+
+    Returns:
+        True if a potentially harmful URL scheme is detected (excluding valid image data URLs),
+        otherwise False.
+    """"""
+    if not isinstance(url_string, str):
+        return False
+
+    # Remove image data URLs so content inside them doesn't influence detection
+    sanitized = _SAFE_IMAGE_DATA_RE.sub('', url_string)
+
+    # Check for harmful schemes
+    if _JS_RE.search(sanitized):
+        return True
+    if _VBS_RE.search(sanitized):
+        return True
+    if _DATA_NON_IMAGE_RE.search(sanitized):
+        return True
+
+    return False
+","import re
+
+_OBF_WS = r'[\s\x00-\x1f]*'
+
+
+def _build_obfuscated_scheme_pattern(name: str) -> str:
+    """"""Build a pattern that allows optional whitespace/control chars between letters.""""""
+    return ''.join(ch + _OBF_WS for ch in name) + r':'
+
+
+# Precompiled regex patterns
+_JS_SCHEME_RE = re.compile(
+    r'(?<![a-z0-9+.-])' + _build_obfuscated_scheme_pattern('javascript'),
+    re.IGNORECASE,
+)
+_VBS_SCHEME_RE = re.compile(
+    r'(?<![a-z0-9+.-])' + _build_obfuscated_scheme_pattern('vbscript'),
+    re.IGNORECASE,
+)
+
+# Matches data: scheme that is not image/*
+_DATA_NON_IMAGE_RE = re.compile(
+    r'(?<![a-z0-9+.-])data' + _OBF_WS + r':' + _OBF_WS + r'(?!image/)',
+    re.IGNORECASE,
+)
+
+# Matches and removes image data URLs (e.g., data:image/png;base64,....)
+# Stops at a common terminator: whitespace, quote, or right parenthesis.
+_SAFE_IMAGE_DATA_RE = re.compile(
+    r'\bdata' + _OBF_WS + r':' + _OBF_WS + r'image/[-+.\w]+(?:;[\w=+.-]+)*(?:;base64)?,[^)\s\'""]*',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_image_data_urls(text: str) -> str:
+    """"""Remove image data URLs from the provided text.""""""
+    return _SAFE_IMAGE_DATA_RE.sub('', text)
+
+
+def _has_potentially_harmful_scheme(text: str) -> bool:
+    """"""Check if the text contains potentially harmful URL schemes.""""""
+    if _JS_SCHEME_RE.search(text):
+        return True
+    if _VBS_SCHEME_RE.search(text):
+        return True
+    if _DATA_NON_IMAGE_RE.search(text):
+        return True
+    return False
+
+
+def detect_js_scheme(url_string: str) -> bool:
+    """"""
+    Detect if the provided string contains a potentially harmful URL scheme such as
+    javascript:, vbscript:, or a non-image data: URL. Valid image data URLs are ignored.
+
+    Args:
+        url_string: The string to examine.
+
+    Returns:
+        True if a potentially harmful URL scheme is detected (excluding valid image data URLs),
+        otherwise False.
+    """"""
+    if not isinstance(url_string, str):
+        return False
+
+    sanitized_text = _strip_image_data_urls(url_string)
+    return _has_potentially_harmful_scheme(sanitized_text)
+","import re
+import logging
+
+_OBF_WS = r'[\s\x00-\x1f]*'
+
+_LOGGER = logging.getLogger(__name__)
+if not _LOGGER.handlers:
+    _LOGGER.setLevel(logging.INFO)
+    _handler = logging.FileHandler('detect_js_scheme.log', encoding='utf-8')
+    _handler.setLevel(logging.INFO)
+    _formatter = logging.Formatter(
+        '%(asctime)s %(levelname)s %(name)s: %(message)s'
+    )
+    _handler.setFormatter(_formatter)
+    _LOGGER.addHandler(_handler)
+    _LOGGER.propagate = False
+
+
+def _build_obfuscated_scheme_pattern(name: str) -> str:
+    """"""Build a pattern that allows optional whitespace/control chars between letters.""""""
+    return ''.join(ch + _OBF_WS for ch in name) + r':'
+
+
+# Precompiled regex patterns
+_JS_SCHEME_RE = re.compile(
+    r'(?<![a-z0-9+.-])' + _build_obfuscated_scheme_pattern('javascript'),
+    re.IGNORECASE,
+)
+_VBS_SCHEME_RE = re.compile(
+    r'(?<![a-z0-9+.-])' + _build_obfuscated_scheme_pattern('vbscript'),
+    re.IGNORECASE,
+)
+
+# Matches data: scheme that is not image/*
+_DATA_NON_IMAGE_RE = re.compile(
+    r'(?<![a-z0-9+.-])data' + _OBF_WS + r':' + _OBF_WS + r'(?!image/)',
+    re.IGNORECASE,
+)
+
+# Matches and removes image data URLs (e.g., data:image/png;base64,....)
+# Stops at a common terminator: whitespace, quote, or right parenthesis.
+_SAFE_IMAGE_DATA_RE = re.compile(
+    r'\bdata'
+    + _OBF_WS
+    + r':'
+    + _OBF_WS
+    + r'image/[-+.\w]+(?:;[\w=+.-]+)*(?:;base64)?,[^)\s\'""]*',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_image_data_urls(text: str) -> str:
+    """"""Remove image data URLs from the provided text.""""""
+    return _SAFE_IMAGE_DATA_RE.sub('', text)
+
+
+def _has_potentially_harmful_scheme(text: str) -> tuple[bool, str]:
+    """"""Check if the text contains potentially harmful URL schemes.""""""
+    if _JS_SCHEME_RE.search(text):
+        return True, 'javascript'
+    if _VBS_SCHEME_RE.search(text):
+        return True, 'vbscript'
+    if _DATA_NON_IMAGE_RE.search(text):
+        return True, 'data-non-image'
+    return False, ''
+
+
+def detect_js_scheme(url_string: str) -> bool:
+    """"""
+    Detect if the provided string contains a potentially harmful URL scheme such as
+    javascript:, vbscript:, or a non-image data: URL. Valid image data URLs are ignored.
+
+    Args:
+        url_string: The string to examine.
+
+    Returns:
+        True if a potentially harmful URL scheme is detected (excluding valid image data URLs),
+        otherwise False.
+    """"""
+    if not isinstance(url_string, str):
+        _LOGGER.info(
+            ""detect_js_scheme input_type=%s result=False reason=non-string"",
+            type(url_string).__name__,
+        )
+        return False
+
+    sanitized_text = _strip_image_data_urls(url_string)
+    result, reason = _has_potentially_harmful_scheme(sanitized_text)
+
+    _LOGGER.info(
+        ""detect_js_scheme input=%r result=%s reason=%s"",
+        url_string,
+        result,
+        reason or '-',
+    )
+
+    return result
+",gpt-5,0,[],[],[]
