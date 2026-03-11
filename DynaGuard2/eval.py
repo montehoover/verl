@@ -27,6 +27,7 @@ TEMP_PATH = f"temp_{time.time_ns()}"
 def add_to_csv(
     csv_filename="log/summary.csv",
     model_name="Placeholder",
+    samples=None,
     test_set="Placeholder",
     f1_score=None,
     f1_stdev=None,
@@ -45,9 +46,9 @@ def add_to_csv(
         writer = csv.writer(f)
         # Write header if file is new
         if not file_exists:
-            writer.writerow(['model_name', 'test_set', 'f1_score', 'f1_stdev', 'missing_labels', 'recall', 'false_positive_rate', 'auc', 'f1_non_cot', 'recall_non_cot', 'fpr_non_cot'])
+            writer.writerow(['model_name', 'samples', 'test_set', 'f1_score', 'f1_stdev', 'missing_labels', 'recall', 'false_positive_rate', 'auc', 'f1_non_cot', 'recall_non_cot', 'fpr_non_cot'])
         # Append the new row
-        writer.writerow([model_name, test_set, f1_score, f1_stdev, missing_labels_score, recall, false_positive_rate, auc, f1_non_cot, recall_non_cot, fpr_non_cot])
+        writer.writerow([model_name, samples, test_set, f1_score, f1_stdev, missing_labels_score, recall, false_positive_rate, auc, f1_non_cot, recall_non_cot, fpr_non_cot])
 
 def get_hf_model(model_path, lora_path):
     base_model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16)
@@ -384,6 +385,7 @@ def main(args):
     add_to_csv(
         csv_filename="log/summary.csv", 
         model_name=model_name,
+        samples=samples,
         test_set=dataset_name,
         f1_score=np.mean(f1_scores),
         f1_stdev=f1_scores.std(),
