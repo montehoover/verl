@@ -163,6 +163,7 @@ def main(args):
         f"actor_rollout_ref.actor.fsdp_config.offload_policy={args.offload_weights_and_states}",
         f"actor_rollout_ref.rollout.agent.num_workers={args.num_workers}",
         f"actor_rollout_ref.rollout.name=vllm",
+        # f"+actor_rollout_ref.rollout.colocate=false", ###### REMOVE WHEN NOT RUNNING MULTIPLE JOBS
         f"actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes={args.update_weights_bucket_mb}",
         f"actor_rollout_ref.actor.strategy=fsdp2", # Set to "fsdp" if using pytorch < 2.4
         f"actor_rollout_ref.ref.strategy=fsdp2",  # Set to "fsdp" if using pytorch < 2.4
@@ -203,7 +204,7 @@ def parse_args():
     parser.add_argument("--val_split", default=None, help="Validation dataset split")
     parser.add_argument("--data_download_dir", default="data/gsm8k", help="Local directory for data")
     parser.add_argument("--dataset_function", default="preprocess_dynabench", help="Name of the dataset preprocessing function in dataset_functions.py")
-    parser.add_argument("--reward_function", default="gsm8k_reward", help="Reward function to use")
+    parser.add_argument("--reward_function", default="dynabench_reward", help="Reward function to use")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
     
@@ -256,5 +257,8 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    ps = subprocess.run(["ps", "ax"], capture_output=True)
+    processNames = subprocess.run(['grep', 'python'], input=ps.stdout, capture_output=True)
+    print(processNames.stdout.decode('utf-8').strip())
     args = parse_args()
     main(args)

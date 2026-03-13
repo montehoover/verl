@@ -197,8 +197,8 @@ def dynabench_reward(data_source, solution_str, ground_truth, extra_info=None, *
     pos_label = "FAIL"
     neg_label = "PASS"
 
-    print(f"solution_str: {solution_str} THEEND")
-    print(f"ground_truth: {ground_truth} THEEND")
+    # print(f"solution_str: {solution_str} THEEND")
+    # print(f"ground_truth: {ground_truth} THEEND")
 
     correctness = dynabench_correctness_reward(solution_str, ground_truth, label_opening, label_closing, points=0.50)
     label_fmt = dynabench_label_format_reward(solution_str, label_opening, label_closing, pos_label, neg_label, points=0.10)
@@ -206,4 +206,10 @@ def dynabench_reward(data_source, solution_str, ground_truth, extra_info=None, *
     soft_fmt = dynabench_soft_format_reward(solution_str, label_opening, label_closing, points=0.10)
     xml_count = dynabench_xml_count_reward(solution_str, label_opening, label_closing, rules_opening, rules_closing, points=0.05)
 
+    print(f"correctness: {correctness}")
+    print(f"label_fmt: {label_fmt}")
+    print(f"strict_fmt: {strict_fmt}")
+    print(f"soft_fmt: {soft_fmt}")
+    print(f"xml_count: {xml_count}")
+    
     return correctness + label_fmt + strict_fmt + soft_fmt + xml_count

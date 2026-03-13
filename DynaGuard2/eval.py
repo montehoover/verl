@@ -46,7 +46,7 @@ def add_to_csv(
         writer = csv.writer(f)
         # Write header if file is new
         if not file_exists:
-            writer.writerow(['model_name', 'samples', 'test_set', 'f1_score', 'f1_stdev', 'missing_labels', 'recall', 'false_positive_rate', 'auc', 'f1_non_cot', 'recall_non_cot', 'fpr_non_cot'])
+            writer.writerow(['model_name', 'nun_samples', 'test_set', 'f1_score', 'f1_stdev', 'missing_labels', 'recall', 'false_positive_rate', 'auc', 'f1_non_cot', 'recall_non_cot', 'fpr_non_cot'])
         # Append the new row
         writer.writerow([model_name, num_samples, test_set, f1_score, f1_stdev, missing_labels_score, recall, false_positive_rate, auc, f1_non_cot, recall_non_cot, fpr_non_cot])
 

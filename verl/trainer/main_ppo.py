@@ -30,6 +30,7 @@ from verl.utils.config import validate_config
 from verl.utils.device import auto_set_device, is_cuda_available
 from verl.utils.import_utils import load_extern_object
 
+import subprocess
 
 @hydra.main(config_path="config", config_name="ppo_trainer", version_base=None)
 def main(config):
@@ -426,7 +427,6 @@ def create_rl_sampler(data_config, dataset):
         sampler = SequentialSampler(data_source=dataset)
 
     return sampler
-
 
 if __name__ == "__main__":
     main()

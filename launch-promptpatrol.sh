@@ -1,3 +1,4 @@
+#!/bin/bash
 # launch launch.sh --classical_logfile_names --gpu_type rtxa6000 --mem 100 --timelimit 48
 # launch launch.sh --classical_logfile_names --gpu_type rtxa5000 --mem 128 --timelimit 24 --gpus 2
 
@@ -5,6 +6,7 @@
 # --batch_size_per_gpu 1 
 # --batch_size 48
 # --no-offload_weights_and_states \
+# --model DynaGuard/DynaGuard-8B-6750
 
 python run_grpo.py \
     --model DynaGuard/DynaGuard-8B-6750 \
@@ -15,5 +17,5 @@ python run_grpo.py \
     --num_generations 3 --max_prompt_length 8192 --max_response_length 1024 \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
-    --wandb_project verl \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs
+    --wandb_project DynaGuard2 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs2
