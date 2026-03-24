@@ -20,7 +20,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -33,7 +34,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -46,7 +48,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -59,7 +62,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -72,7 +76,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -85,7 +90,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -98,7 +104,8 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
@@ -111,4 +118,5 @@ python run_grpo.py \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
     --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
-    --resume_training
+    --resume_training \
+    --overwrite
