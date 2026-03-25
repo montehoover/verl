@@ -1,4 +1,4 @@
-# launch launch.sh --classical_logfile_names --gpu_type rtxa6000 --mem 123 --timelimit 48 --gpus 2
+# launch launch-A6000.sh --classical_logfile_names --gpu_type rtxa6000 --mem 123 --timelimit 72 --gpus 4
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \

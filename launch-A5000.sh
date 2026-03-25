@@ -1,13 +1,4 @@
-# launch launch.sh --classical_logfile_names --gpu_type rtxa6000 --mem 100 --timelimit 48
-# launch launch.sh --classical_logfile_names --gpu_type rtxa5000 --mem 128 --timelimit 24 --gpus 2
-
-# --vllm_model_shards 2
-# --batch_size_per_gpu 1 
-# --batch_size 48
-# --no-offload_weights_and_states \
-
-### models
-# DynaGuard/DynaGuard-8B-6750
+# launch launch-A5000.sh --classical_logfile_names --gpu_type rtxa5000 --mem 128 --timelimit 72 --gpus 8
 
 python run_grpo.py \
     --model Qwen/Qwen3-8B \
