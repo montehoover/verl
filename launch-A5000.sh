@@ -10,7 +10,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -24,7 +24,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -38,7 +38,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -52,7 +52,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -66,7 +66,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -80,7 +80,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -94,7 +94,7 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
 
@@ -108,6 +108,6 @@ python run_grpo.py \
     --no-offload_weights_and_states \
     --wandb_entity azheng15-umd \
     --wandb_project DynaGuard2 \
-    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs3 \
+    --checkpoint_dir /fs/cml-projects/guardian_models/verl/Andrew_runs \
     --resume_training \
     --overwrite
