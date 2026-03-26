@@ -173,6 +173,8 @@ def main(args):
         f"actor_rollout_ref.rollout.agent.num_workers={args.num_workers}",
         f"actor_rollout_ref.rollout.name=vllm",
         f"actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes={args.update_weights_bucket_mb}",
+        f"actor_rollout_ref.actor.fsdp_config.model_dtype=bf16",  # convention from examples/grpo_trainer/run_gptoss_20b.sh
+        f"actor_rollout_ref.ref.fsdp_config.model_dtype=bf16",  # convention from examples/grpo_trainer/run_gptoss_20b.sh
         f"actor_rollout_ref.actor.strategy=fsdp2", # Set to "fsdp" if using pytorch < 2.4
         f"actor_rollout_ref.ref.strategy=fsdp2",  # Set to "fsdp" if using pytorch < 2.4
     ] + ppo_stuff
