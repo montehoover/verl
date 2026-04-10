@@ -28,7 +28,6 @@ def get_last_checkpoint_path(run_name, checkpoint_dir="checkpoints"):
 
 LORA_TARGET_MODULE_CHOICES = ["all-linear", "all-linear-and-embedding", "all-attention", "qv-only"]
 
-
 def get_lora_target_modules(name):
     """Convert a friendly LoRA target module name to the Hydra config value.
 
@@ -44,7 +43,6 @@ def get_lora_target_modules(name):
     if name not in mapping:
         raise ValueError(f"Unknown lora_target_modules: {name!r}. Choose from: {list(mapping.keys())}")
     return mapping[name]
-
 
 def get_short_model_name(model_path):
     """

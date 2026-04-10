@@ -9,7 +9,7 @@ def main(args):
     #########################################################
     model_name = get_short_model_name(args.model)
     dataset_name = args.dataset.split("/")[-1] if "/" in args.dataset else args.dataset
-    run_name = f"{model_name}_{dataset_name}_sft_lr{args.lr}_bs{args.batch_size}"
+    run_name = f"{model_name}_{dataset_name}_sft_samples{args.num_examples}_{args.lr_schedule}_lr{args.lr}_bs{args.batch_size}"
     num_gpus = torch.cuda.device_count()
     assert num_gpus > 0, "No GPUs found. Double check that this is being called where you expect it to be."
 
@@ -40,8 +40,8 @@ def main(args):
     # Dataset
     #########################################################
     train_files, val_files, num_train_examples = preprocess_dataset(
-        map_fn_name=args.dataset_function,
         hf_dataset_name=args.dataset,
+        map_fn_name=args.dataset_function,
         hf_dataset_subset=args.subset,
         local_save_dir=args.data_download_dir,
         num_examples=args.num_examples,
@@ -79,15 +79,18 @@ def main(args):
         f"trainer.default_local_dir={checkpoint_path}",
         f"trainer.resume_mode={resume_mode}",
         f"trainer.logger={logger_entries!r}",
+        f"trainer.max_ckpt_to_keep={args.num_checkpoints_to_keep}",
         f"trainer.save_freq={args.save_freq}",
         f"trainer.test_freq={args.val_freq}",
         # Dataset
         f"data.train_files={train_files}",
         f"data.val_files={val_files or train_files}",
-        f"data.prompt_key=extra_info",
-        f"data.response_key=extra_info",
-        "data.prompt_dict_keys=['question']",
-        "+data.response_dict_keys=['answer']",
+        f"data.prompt_key={args.prompt_key}",
+        f"data.response_key={args.response_key}",
+        # f"data.prompt_key=extra_info",                                                                                                                                                                                                                         
+        # f"data.response_key=extra_info",                                                                                                                                                                                                                       
+        # "data.prompt_dict_keys=['question']",                                                                                                                                                                                                                    
+        # "+data.response_dict_keys=['answer']",                                                                                                                                                                                                                 
         # Model
         f"model.partial_pretrain={args.model}",
         f"model.lora_rank={0 if args.lora_rank is None else args.lora_rank}",
@@ -126,16 +129,19 @@ def parse_args():
     parser.add_argument("--save_freq", default=-1, type=int, help="At how many steps to save a checkpoint. -1 to disable.")
     parser.add_argument("--val_freq", default=-1, type=int, help="At how many steps to run validation loop. -1 to disable.")
     parser.add_argument("--resume_training", default=False, action=argparse.BooleanOptionalAction, help="Resume from last checkpoint.")
+    parser.add_argument("--num_checkpoints_to_keep", default=1, type=int, help="Number of checkpoints to keep. If None, I think they all are saved.")
     parser.add_argument("--overwrite", default=False, action=argparse.BooleanOptionalAction, help="Remove old checkpoint directory if it exists. Required to start fresh when checkpoints already exist.")
 
     # Dataset
     parser.add_argument("--dataset", default="openai/gsm8k", help="Dataset name")
     parser.add_argument("--subset", default=None, help="Dataset subset/config name")
     parser.add_argument("--val_split", default=None, help="Validation dataset split")
-    parser.add_argument("--dataset_function", default="preprocess_gsm8k", help="Name of the dataset preprocessing function in dataset_functions.py")
+    parser.add_argument("--dataset_function", default=None, help="Name of the dataset preprocessing function in dataset_functions.py")
     parser.add_argument("--data_download_dir", default="data/gsm8k", help="Local directory for data")
     parser.add_argument("--num_examples", type=int, default=-1, help="Number of examples to train on. -1 for all.")
     parser.add_argument("--val_size", type=float, default=0.0, help="Fraction of examples for validation if val_split is not provided")
+    parser.add_argument("--prompt_key", default="formatted_input", help="Column name in parquet to use as prompt")                                                                                                                                                           
+    parser.add_argument("--response_key", default="formatted_output", help="Column name in parquet to use as response")
 
     # Model
     parser.add_argument("--model", default="Qwen/Qwen3-0.6B", help="Model name")

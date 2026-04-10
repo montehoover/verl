@@ -56,8 +56,8 @@ def get_dataset_map_function(map_fn_name):
 
 
 def preprocess_dataset(
-    map_fn_name,
     hf_dataset_name,
+    map_fn_name=None,
     hf_dataset_subset=None,
     local_dataset_path=None,
     local_save_dir="data",
@@ -88,9 +88,6 @@ def preprocess_dataset(
         A tuple of (train_path, val_path, num_train_examples). val_path is None
         if no validation set is created.
     """
-    map_fn_builder = get_dataset_map_function(map_fn_name)
-    make_map_fn = map_fn_builder()
-
     if local_dataset_path is not None:
         dataset = load_hf_dataset(local_dataset_path, hf_dataset_subset)
     else:
@@ -118,14 +115,19 @@ def preprocess_dataset(
         else:
             train_dataset = train_dataset.select(range(num_examples))
 
-    train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True)
+    if map_fn_name:
+        map_fn_builder = get_dataset_map_function(map_fn_name)
+        make_map_fn = map_fn_builder()
+        train_dataset = train_dataset.map(function=make_map_fn("train"), with_indices=True)
+        if val_split is not None:
+            val_dataset = val_dataset.map(function=make_map_fn("test"), with_indices=True)
+
     os.makedirs(local_save_dir, exist_ok=True)
     train_path = os.path.join(local_save_dir, "train.parquet")
     train_dataset.to_parquet(train_path)
 
     val_path = None
     if val_dataset is not None:
-        val_dataset = val_dataset.map(function=make_map_fn("test"), with_indices=True)
         val_path = os.path.join(local_save_dir, "test.parquet")
         val_dataset.to_parquet(val_path)
         print(f"Dataset saved to {train_path} ({len(train_dataset)} examples) and {val_path} ({len(val_dataset)} examples)")

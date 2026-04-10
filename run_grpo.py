@@ -74,8 +74,8 @@ def main(args):
     # Dataset
     #########################################################
     train_files, val_files, num_train_examples = preprocess_dataset(
-        map_fn_name=args.dataset_function,
         hf_dataset_name=args.dataset,
+        map_fn_name=args.dataset_function,
         hf_dataset_subset=args.subset,
         local_save_dir=args.data_download_dir,
         num_examples=args.num_examples,
