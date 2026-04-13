@@ -99,6 +99,7 @@ def main(args):
         # Training parameters
         f"optim.lr={args.lr}",
         f"optim.lr_scheduler={args.lr_schedule}",
+        f"optim.lr_wsd_decay_style={args.lr_wsd_decay_style}"
         f"trainer.total_epochs={args.epochs}",
         f"data.train_batch_size={args.batch_size}",
         # Memory management
@@ -150,9 +151,10 @@ def parse_args():
     parser.add_argument("--lora_target_modules", default="all-linear", choices=LORA_TARGET_MODULE_CHOICES, help="Target modules for LoRA matrices")
 
     # Training Parameters
-    parser.add_argument("--epochs", default=4, type=int, help="Number of epochs")
+    parser.add_argument("--epochs", default=1, type=int, help="Number of epochs")
     parser.add_argument("--lr", default="1e-5", help="Learning rate")
-    parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd"], help="Learning rate schedule")
+    parser.add_argument("--lr_schedule", default="cosine", choices=["cosine", "wsd", "constant"], help="Learning rate schedule")
+    parser.add_argument("--lr_wsd_decay_style", default=None, help="If wsd scheduler selected, specify decay pattern.")
     parser.add_argument("--batch_size", default=256, type=int, help="Global training batch size")
 
     # Memory management

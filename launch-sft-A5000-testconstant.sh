@@ -1,4 +1,4 @@
-# launch launch-sft-A5000.sh --classical_logfile_names --gpu_type rtxa5000 --mem 128 --timelimit 72 --gpus 8
+# launch launch-sft-A5000-testconstant.sh --classical_logfile_names --gpu_type rtxa5000 --mem 128 --timelimit 72 --gpus 8
 
 python run_sft.py \
     --model Qwen/Qwen3-8B \
